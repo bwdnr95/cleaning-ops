@@ -1,0 +1,206 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Cleaning Ops Control Center</title>
+<link rel="stylesheet" href="styles.css"/>
+<style>
+  html, body, #root { height: 100%; }
+  body { overflow: hidden; }
+
+  /* Phone frame for mobile artboards */
+  .phone {
+    width: 360px; height: 720px;
+    background: #fff;
+    border-radius: 36px;
+    border: 8px solid #1a1f2c;
+    box-shadow: 0 12px 32px rgba(15,23,42,0.12), 0 2px 6px rgba(15,23,42,0.06);
+    overflow: hidden;
+    position: relative;
+  }
+  .phone::before {
+    content: '';
+    position: absolute; top: 8px; left: 50%; transform: translateX(-50%);
+    width: 100px; height: 22px;
+    background: #1a1f2c; border-radius: 12px; z-index: 10;
+  }
+  .phone-status {
+    position: absolute; top: 0; left: 0; right: 0; height: 38px;
+    z-index: 9; display: flex; align-items: center; justify-content: space-between;
+    padding: 0 24px; font-size: 12px; font-weight: 600; color: #0f172a;
+    pointer-events: none;
+  }
+  .phone-inner { position: absolute; inset: 38px 0 0; }
+
+  /* Desktop frame */
+  .desktop {
+    background: #fff;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    box-shadow: 0 8px 24px rgba(15,23,42,0.08), 0 2px 6px rgba(15,23,42,0.04);
+    overflow: hidden;
+    position: relative;
+  }
+  .desktop-chrome {
+    height: 28px; background: #f4f6f8;
+    border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; padding: 0 12px; gap: 6;
+  }
+  .desktop-chrome span {
+    width: 10px; height: 10px; border-radius: 50%; display: inline-block;
+  }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+
+<script type="text/babel" src="design-canvas.jsx"></script>
+<script type="text/babel" src="tweaks-panel.jsx"></script>
+<script type="text/babel" src="components.jsx"></script>
+<script type="text/babel" src="data.jsx"></script>
+<script type="text/babel" src="admin-shell.jsx"></script>
+<script type="text/babel" src="page-dashboard.jsx"></script>
+<script type="text/babel" src="page-orders.jsx"></script>
+<script type="text/babel" src="page-calendar.jsx"></script>
+<script type="text/babel" src="page-order-detail.jsx"></script>
+<script type="text/babel" src="page-photo-review.jsx"></script>
+<script type="text/babel" src="page-partner.jsx"></script>
+<script type="text/babel" src="page-customer.jsx"></script>
+
+<script type="text/babel">
+  const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
+    "theme": "light"
+  }/*EDITMODE-END*/;
+
+  function PhoneFrame({ time = '14:08', children }) {
+    return (
+      <div className="phone">
+        <div className="phone-status">
+          <span>{time}</span>
+          <span>●●●  ●●  ▮▮</span>
+        </div>
+        <div className="phone-inner">{children}</div>
+      </div>
+    );
+  }
+
+  function DesktopFrame({ children, title = 'app.cleanops.kr' }) {
+    return (
+      <div className="desktop" style={{ height: '100%' }}>
+        <div className="desktop-chrome">
+          <span style={{ background: '#ff5f57' }}/>
+          <span style={{ background: '#febc2e' }}/>
+          <span style={{ background: '#28c840' }}/>
+          <span style={{ flex: 1, textAlign: 'center', fontSize: 11, color: 'var(--text-tertiary)', background: 'transparent', width: 'auto', height: 'auto', borderRadius: 0 }}>{title}</span>
+        </div>
+        <div style={{ height: 'calc(100% - 28px)', display: 'flex' }}>{children}</div>
+      </div>
+    );
+  }
+
+  // Wraps a single screen with shared admin shell + sets default page
+  function AdminScreen({ page, children }) {
+    return (
+      <DesktopFrame>
+        <AdminShell initialPage={page}>
+          {() => children}
+        </AdminShell>
+      </DesktopFrame>
+    );
+  }
+
+  function App() {
+    const [tweaks, setTweak] = useTweaks(TWEAK_DEFAULTS);
+
+    React.useEffect(() => {
+      document.documentElement.dataset.theme = tweaks.theme;
+    }, [tweaks.theme]);
+
+    return (
+      <>
+        <DesignCanvas defaultZoom={0.55}>
+          <DCSection id="admin" title="관리자 데스크톱" subtitle="운영팀이 매일 사용하는 컨트롤타워 — 1440 × 900 기준">
+            <DCArtboard id="dashboard" label="01 · 대시보드" width={1440} height={900}>
+              <AdminScreen page="dashboard">
+                <div style={{ display: 'flex', flexDirection: 'column', flex: 1 }}>
+                  <Topbar title="대시보드" subtitle="운영 현황" breadcrumb={['Workspace', '대시보드']} actions={null}/>
+                  <Dashboard onOpenOrder={() => {}}/>
+                </div>
+              </AdminScreen>
+            </DCArtboard>
+
+            <DCArtboard id="orders" label="02 · 주문관리 리스트" width={1440} height={900}>
+              <AdminScreen page="orders">
+                <div style={{ display: 'flex', flexDirection: 'column', flex: 1 }}>
+                  <Topbar title="주문관리" subtitle="158건" breadcrumb={['Workspace', '주문관리']} actions={null}/>
+                  <OrdersPage onOpenOrder={() => {}}/>
+                </div>
+              </AdminScreen>
+            </DCArtboard>
+
+            <DCArtboard id="calendar" label="03 · 일정 캘린더" width={1440} height={900}>
+              <AdminScreen page="calendar">
+                <div style={{ display: 'flex', flexDirection: 'column', flex: 1 }}>
+                  <Topbar title="일정 캘린더" subtitle="2026년 5월 · 56건" breadcrumb={['Workspace', '일정 캘린더']} actions={null}/>
+                  <CalendarPage/>
+                </div>
+              </AdminScreen>
+            </DCArtboard>
+
+            <DCArtboard id="detail" label="04 · 주문 상세" width={1440} height={900}>
+              <AdminScreen page="orders">
+                <div style={{ display: 'flex', flexDirection: 'column', flex: 1 }}>
+                  <Topbar title="주문 상세" breadcrumb={['Workspace', '주문관리', 'CO-2450']} actions={null}/>
+                  <OrderDetailPage orderId="CO-2450"/>
+                </div>
+              </AdminScreen>
+            </DCArtboard>
+
+            <DCArtboard id="review" label="05 · 사진검수" width={1440} height={900}>
+              <AdminScreen page="photos">
+                <div style={{ display: 'flex', flexDirection: 'column', flex: 1 }}>
+                  <Topbar title="사진검수" subtitle="6건 대기" breadcrumb={['Workspace', '사진검수']} actions={null}/>
+                  <PhotoReviewPage/>
+                </div>
+              </AdminScreen>
+            </DCArtboard>
+          </DCSection>
+
+          <DCSection id="mobile" title="모바일 화면" subtitle="협력사 현장 작업 + 고객 예약 페이지 — iPhone 기준">
+            <DCArtboard id="partner" label="06 · 협력사 작업 상세" width={420} height={780}>
+              <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%' }}>
+                <PhoneFrame><PartnerJobDetail/></PhoneFrame>
+              </div>
+            </DCArtboard>
+
+            <DCArtboard id="customer" label="07 · 고객 예약 확인" width={420} height={780}>
+              <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%' }}>
+                <PhoneFrame time="9:14"><CustomerReservation/></PhoneFrame>
+              </div>
+            </DCArtboard>
+          </DCSection>
+        </DesignCanvas>
+
+        <TweaksPanel title="Tweaks">
+          <TweakSection title="외관">
+            <TweakRadio label="테마" value={tweaks.theme}
+              onChange={(v) => setTweak('theme', v)}
+              options={[
+                { value: 'light', label: '라이트' },
+                { value: 'dark', label: '다크' },
+              ]}/>
+          </TweakSection>
+        </TweaksPanel>
+      </>
+    );
+  }
+
+  ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
+</script>
+</body>
+</html>
