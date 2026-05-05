@@ -1,5 +1,5 @@
 import React from 'react';
-import { Avatar, Badge, Icon, StatusBadge } from '../../components/common/ui';
+import { Avatar, Badge, Icon } from '../../components/common/ui';
 import { completePartnerJob, getPartnerJob, listPartnerJobs, startPartnerJob } from '../../api/partner';
 import { uploadPartnerJobPhoto } from '../../api/photos';
 import { useApiResource } from '../../api/useApiResource';
@@ -113,7 +113,7 @@ export function PartnerJobDetail() {
             <Icon name="chevronLeft" size={20}/>
           </button>
           <span className="mono" style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>{job.id}</span>
-          <StatusBadge status={job.status}/>
+          <PartnerStatusBadge status={job.status}/>
         </div>
         <h2 style={{ margin: 0, fontSize: 17, fontWeight: 700 }}>{job.service_name}</h2>
         <div style={{ fontSize: 12, color: 'var(--text-tertiary)', marginTop: 2 }}>{job.size_or_quantity || job.service_detail || '상세 수량 미입력'}</div>
@@ -137,8 +137,8 @@ export function PartnerJobDetail() {
           </InfoRow>
 
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
-            <ActionButton icon="mapPin" label="지도 열기" />
-            <ActionButton icon="phone" label="고객 전화" />
+            <ActionButton icon="mapPin" label="지도 열기" href={`https://map.naver.com/p/search/${encodeURIComponent(job.customer_address)}`} />
+            <ActionButton icon="phone" label="고객 전화" href={job.customer_phone ? `tel:${digitsOnly(job.customer_phone)}` : undefined} />
           </div>
         </Panel>
 
@@ -177,14 +177,6 @@ export function PartnerJobDetail() {
         />
         <input ref={afterInputRef} data-testid="partner-after-photo-input" type="file" accept="image/jpeg,image/png,image/webp" capture="environment" style={{ display: 'none' }} onChange={(event) => void handlePhotoSelected('after', event)} />
         {uploadError && <div style={{ margin: '-2px 2px 10px', color: 'var(--danger-fg)', fontSize: 11.5 }}>{uploadError}</div>}
-
-        <Panel>
-          <SectionLabel>작업 메모</SectionLabel>
-          <textarea
-            placeholder="현장 메모를 입력하세요."
-            style={{ width: '100%', minHeight: 64, padding: 10, border: '1px solid var(--border)', borderRadius: 8, fontSize: 13, fontFamily: 'inherit', resize: 'none', background: 'var(--bg-subtle)' }}
-          />
-        </Panel>
       </div>
 
       <div style={{ padding: '10px 14px 12px', background: '#fff', borderTop: '1px solid var(--border)', boxShadow: '0 -4px 12px rgba(15,23,42,0.04)' }}>
@@ -200,7 +192,7 @@ export function PartnerJobDetail() {
         </div>
         {statusError && <div style={{ textAlign: 'center', fontSize: 11, color: 'var(--danger-fg)', marginTop: 6 }}>{statusError}</div>}
         <div style={{ textAlign: 'center', fontSize: 10.5, color: 'var(--text-tertiary)', marginTop: 6 }}>
-          사진 업로드 또는 완료 처리 시 관리자 사진검수대기로 반영됩니다
+          사진 업로드와 완료 처리는 운영팀 확인 단계로 넘어갑니다
         </div>
       </div>
     </div>
@@ -215,14 +207,14 @@ function PartnerJobList({ jobs, onSelect }) {
   return (
     <div data-testid="partner-jobs-page" style={{ height: '100%', background: '#f4f6f8', overflow: 'auto', padding: 14 }}>
       <div style={{ marginBottom: 14 }}>
-        <div className="app-eyebrow">Partner jobs</div>
+        <div className="app-eyebrow">협력사 현장</div>
         <h2 style={{ margin: '2px 0 0', fontSize: 20 }}>내 작업</h2>
       </div>
       <div style={{ display: 'grid', gap: 10 }}>
         {jobs.map((job) => (
           <button key={job.id} data-testid={`partner-job-row-${job.id}`} onClick={() => onSelect(job.id)} style={{ textAlign: 'left', background: '#fff', border: '1px solid var(--border)', borderRadius: 10, padding: 14, cursor: 'pointer' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-              <StatusBadge status={job.status}/>
+              <PartnerStatusBadge status={job.status}/>
               <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--text-tertiary)' }}>{formatKoreanDate(job.scheduled_date)}</span>
             </div>
             <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 4 }}>{job.service_name}</div>
@@ -256,7 +248,7 @@ function PhotoPanel({ title, tone, prefix, photos, onAdd, disabled }) {
         ))}
         <button onClick={onAdd} disabled={disabled} style={{ aspectRatio: '1', border: '1.5px dashed var(--border-strong)', borderRadius: 6, background: 'var(--bg-subtle)', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: disabled ? 'default' : 'pointer', flexDirection: 'column', gap: 2, color: 'var(--text-tertiary)' }}>
           <Icon name="camera" size={16}/>
-          <span style={{ fontSize: 9.5 }}>{disabled ? '업로드' : '촬영'}</span>
+          <span style={{ fontSize: 9.5 }}>{disabled ? '업로드 중' : '촬영'}</span>
         </button>
       </div>
     </Panel>
@@ -276,16 +268,46 @@ function InfoRow({ icon, children }) {
   );
 }
 
-function ActionButton({ icon, label }) {
+function ActionButton({ icon, label, href }) {
+  const commonStyle = {
+    height: 36,
+    border: '1px solid var(--border)',
+    borderRadius: 8,
+    background: '#fff',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 5,
+    fontSize: 12.5,
+    fontWeight: 500,
+    color: href ? 'var(--text)' : 'var(--text-tertiary)',
+    textDecoration: 'none',
+    cursor: href ? 'pointer' : 'default',
+  };
+
+  if (!href) {
+    return (
+      <button disabled style={commonStyle}>
+        <Icon name={icon} size={14} color="var(--text-tertiary)"/> {label}
+      </button>
+    );
+  }
+
   return (
-    <button style={{ height: 36, border: '1px solid var(--border)', borderRadius: 8, background: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5, fontSize: 12.5, fontWeight: 500 }}>
+    <a href={href} target={href.startsWith('http') ? '_blank' : undefined} rel={href.startsWith('http') ? 'noreferrer' : undefined} style={commonStyle}>
       <Icon name={icon} size={14} color="var(--brand)"/> {label}
-    </button>
+    </a>
   );
 }
 
 function SectionLabel({ children }) {
   return <div style={{ fontSize: 11, color: 'var(--text-tertiary)', fontWeight: 600, letterSpacing: '0.04em', marginBottom: 6 }}>{children}</div>;
+}
+
+function PartnerStatusBadge({ status }) {
+  const label = partnerStatusLabel(status);
+  const tone = partnerStatusTone(status);
+  return <Badge tone={tone} dot>{label}</Badge>;
 }
 
 function PartnerState({ text, tone = 'muted' }) {
@@ -315,6 +337,45 @@ function maskPhone(phone) {
     return phone;
   }
   return `${digits.slice(0, 3)}-${digits.slice(3, 4)}***-${digits.slice(-4)}`;
+}
+
+function partnerStatusLabel(status) {
+  if (status === '취소') {
+    return '취소';
+  }
+  if (status === '작업진행') {
+    return '작업 중';
+  }
+  if (['사진검수대기', '고객전달필요'].includes(status)) {
+    return '완료 확인 중';
+  }
+  if (['고객전달완료', '서비스완료'].includes(status)) {
+    return '완료';
+  }
+  if (['신규접수', '상담중', '협력사확인중'].includes(status)) {
+    return '확인 중';
+  }
+  return '작업 예정';
+}
+
+function partnerStatusTone(status) {
+  if (status === '취소') {
+    return 'danger';
+  }
+  if (['고객전달완료', '서비스완료'].includes(status)) {
+    return 'success';
+  }
+  if (['사진검수대기', '고객전달필요'].includes(status)) {
+    return 'warn';
+  }
+  if (status === '작업진행') {
+    return 'info';
+  }
+  return 'neutral';
+}
+
+function digitsOnly(value) {
+  return String(value || '').replace(/\D/g, '');
 }
 
 function primaryCtaStyle(disabled) {

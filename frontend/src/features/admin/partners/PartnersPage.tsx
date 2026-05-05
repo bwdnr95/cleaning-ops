@@ -2,6 +2,7 @@ import React from 'react';
 
 import {
   createAdminPartner,
+  deleteAdminPartner,
   getAdminPartner,
   listAdminPartners,
   resetAdminPartnerPassword,
@@ -31,10 +32,10 @@ export function PartnersPage() {
     if (partners.length === 0) {
       return;
     }
-    if (!selectedId || !partners.some((partner) => partner.id === selectedId)) {
+    if (!selectedId || (!partners.some((partner) => partner.id === selectedId) && detail?.id !== selectedId)) {
       setSelectedId(partners[0].id);
     }
-  }, [partners, selectedId]);
+  }, [detail?.id, partners, selectedId]);
 
   React.useEffect(() => {
     if (!selectedId) {
@@ -89,7 +90,7 @@ export function PartnersPage() {
       setNotice('새 협력사를 등록했습니다.');
       partnersResource.reload();
     } catch (requestError) {
-      setError(requestError?.message || '협력사 등록에 실패했습니다.');
+      setError(partnerErrorMessage(requestError, '협력사 등록에 실패했습니다.'));
     } finally {
       setIsCreating(false);
     }
@@ -112,7 +113,7 @@ export function PartnersPage() {
       setNotice('협력사 정보를 저장했습니다.');
       partnersResource.reload();
     } catch (requestError) {
-      setError(requestError?.message || '협력사 저장에 실패했습니다.');
+      setError(partnerErrorMessage(requestError, '협력사 저장에 실패했습니다.'));
     } finally {
       setIsSaving(false);
     }
@@ -133,7 +134,33 @@ export function PartnersPage() {
       setNotice(updated.is_active ? '협력사 계정을 활성화했습니다.' : '협력사 계정을 비활성화했습니다.');
       partnersResource.reload();
     } catch (requestError) {
-      setError(requestError?.message || '협력사 상태 변경에 실패했습니다.');
+      setError(partnerErrorMessage(requestError, '협력사 상태 변경에 실패했습니다.'));
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!detail) {
+      return;
+    }
+    if (!window.confirm(`'${detail.name}' 협력사를 삭제할까요?`)) {
+      return;
+    }
+
+    setError('');
+    setNotice('');
+    setIsSaving(true);
+    try {
+      await deleteAdminPartner(detail.id);
+      setSelectedId(null);
+      setDetail(null);
+      setForm(defaultPartnerForm());
+      setResetLoginPhone('');
+      setNotice('협력사를 삭제했습니다.');
+      partnersResource.reload();
+    } catch (requestError) {
+      setError(partnerErrorMessage(requestError, '협력사 삭제에 실패했습니다.'));
     } finally {
       setIsSaving(false);
     }
@@ -160,7 +187,7 @@ export function PartnersPage() {
       setNotice(`임시 비밀번호: ${result.temporary_password}`);
       partnersResource.reload();
     } catch (requestError) {
-      setError(requestError?.message || '비밀번호 재설정에 실패했습니다.');
+      setError(partnerErrorMessage(requestError, '비밀번호 재설정에 실패했습니다.'));
     } finally {
       setIsResetting(false);
     }
@@ -201,6 +228,7 @@ export function PartnersPage() {
                       <Th>협력사</Th>
                       <Th>작업</Th>
                       <Th>계정</Th>
+                      <Th>관리</Th>
                     </tr>
                   </thead>
                   <tbody>
@@ -238,6 +266,19 @@ export function PartnersPage() {
                               <Badge tone="warn">없음</Badge>
                             )}
                           </Td>
+                          <Td>
+                            <button
+                              type="button"
+                              className="btn btn--secondary btn--sm"
+                              aria-label={`${partner.name} 수정`}
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                setSelectedId(partner.id);
+                              }}
+                            >
+                              수정
+                            </button>
+                          </Td>
                         </tr>
                       );
                     })}
@@ -251,14 +292,14 @@ export function PartnersPage() {
             <section className="card" style={{ padding: 0, overflow: 'hidden' }}>
               <SectionHeader icon="plus" title="새 협력사 등록" />
               <form onSubmit={handleCreate} style={{ padding: 14, display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 10 }}>
-                <FormField label="협력사명" value={createForm.name} onChange={(value) => setCreateForm({ ...createForm, name: value })} required />
+                <FormField testId="partner-create-name" label="협력사명" value={createForm.name} onChange={(value) => setCreateForm({ ...createForm, name: value })} required />
                 <FormField label="담당자" value={createForm.manager_name} onChange={(value) => setCreateForm({ ...createForm, manager_name: value })} />
-                <FormField label="대표 연락처" value={createForm.phone} onChange={(value) => setCreateForm({ ...createForm, phone: value })} required />
+                <FormField testId="partner-create-phone" label="대표 연락처" value={createForm.phone} onChange={(value) => setCreateForm({ ...createForm, phone: value })} required />
                 <FormField label="로그인 연락처" value={createForm.login_phone} onChange={(value) => setCreateForm({ ...createForm, login_phone: value })} />
                 <FormField label="초기 비밀번호" value={createForm.login_password} onChange={(value) => setCreateForm({ ...createForm, login_password: value })} type="password" />
                 <FormField label="권역" value={createForm.service_areas} onChange={(value) => setCreateForm({ ...createForm, service_areas: value })} />
                 <div style={{ gridColumn: '1 / -1', display: 'flex', justifyContent: 'flex-end' }}>
-                  <button className="btn btn--primary btn--sm" disabled={isCreating}>
+                  <button data-testid="partner-create-submit" className="btn btn--primary btn--sm" disabled={isCreating}>
                     <Icon name="plus" size={12} /> 등록
                   </button>
                 </div>
@@ -282,20 +323,30 @@ export function PartnersPage() {
                 <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 300px', gap: 0 }}>
                   <form onSubmit={handleSave} style={{ padding: 14, borderRight: '1px solid var(--divider)', display: 'flex', flexDirection: 'column', gap: 12 }}>
                     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 10 }}>
-                      <FormField label="협력사명" value={form.name} onChange={(value) => setForm({ ...form, name: value })} required />
+                      <FormField testId="partner-detail-name" label="협력사명" value={form.name} onChange={(value) => setForm({ ...form, name: value })} required />
                       <FormField label="담당자" value={form.manager_name} onChange={(value) => setForm({ ...form, manager_name: value })} />
-                      <FormField label="대표 연락처" value={form.phone} onChange={(value) => setForm({ ...form, phone: value })} required />
+                      <FormField testId="partner-detail-phone" label="대표 연락처" value={form.phone} onChange={(value) => setForm({ ...form, phone: value })} required />
                       <FormField label="권역" value={form.service_areas} onChange={(value) => setForm({ ...form, service_areas: value })} />
                     </div>
                     <TextAreaField label="가능 서비스" value={form.available_services} onChange={(value) => setForm({ ...form, available_services: value })} />
                     <TextAreaField label="운영 메모" value={form.memo} onChange={(value) => setForm({ ...form, memo: value })} />
 
                     <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-                      <button type="button" className="btn btn--secondary btn--sm" disabled={isSaving} onClick={handleToggleActive}>
+                      <button
+                        type="button"
+                        data-testid="partner-delete"
+                        className="btn btn--danger btn--sm"
+                        disabled={isSaving || Number(detail.scheduled_job_count || 0) > 0}
+                        onClick={handleDelete}
+                        title={Number(detail.scheduled_job_count || 0) > 0 ? '배정 작업이 없는 협력사만 삭제할 수 있습니다.' : '협력사 삭제'}
+                      >
+                        <Icon name="x" size={12} /> 삭제
+                      </button>
+                      <button type="button" data-testid="partner-toggle-active" className="btn btn--secondary btn--sm" disabled={isSaving} onClick={handleToggleActive}>
                         <Icon name={detail.is_active ? 'x' : 'check'} size={12} />
                         {detail.is_active ? '비활성화' : '활성화'}
                       </button>
-                      <button className="btn btn--primary btn--sm" disabled={isSaving}>
+                      <button data-testid="partner-save" className="btn btn--primary btn--sm" disabled={isSaving}>
                         <Icon name="check" size={12} /> 저장
                       </button>
                     </div>
@@ -415,12 +466,13 @@ function StatCard({ label, value, icon, tone = 'neutral' }) {
   );
 }
 
-function FormField({ label, value, onChange, type = 'text', required = false, placeholder = '' }) {
+function FormField({ label, value, onChange, type = 'text', required = false, placeholder = '', testId = undefined }) {
   return (
     <label style={{ display: 'flex', flexDirection: 'column', gap: 5, minWidth: 0 }}>
       <span style={labelStyle}>{label}</span>
       <input
         className="input"
+        data-testid={testId}
         type={type}
         value={value || ''}
         required={required}
@@ -618,6 +670,14 @@ function toResetPayload(loginPhone, password) {
 function optionalText(value) {
   const text = String(value || '').trim();
   return text.length > 0 ? text : null;
+}
+
+function partnerErrorMessage(error, fallback) {
+  const messages = {
+    partner_not_found: '협력사를 찾을 수 없습니다.',
+    partner_in_use: '이미 배정 이력이 있는 협력사는 삭제할 수 없습니다. 비활성화를 사용해주세요.',
+  };
+  return messages[error?.message] || fallback;
 }
 
 function maskPhone(phone) {

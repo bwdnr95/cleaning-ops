@@ -1,6 +1,7 @@
 import React from 'react';
 
 import { createAdminOrder, getAdminOrder, listPartners, listServiceCatalog, updateAdminOrder } from '../../../api/admin';
+import { DatePicker } from '../../../components/common/DatePicker';
 import { Icon } from '../../../components/common/ui';
 import { ORDER_STATUSES } from '../../../domain/orderStatus';
 import { PARTNER_PAYMENT_STATUSES, PAYMENT_STATUSES } from '../../../domain/paymentStatus';
@@ -13,12 +14,14 @@ export function OrderFormPage({ mode = 'create', orderId = null, onCancel, onSav
   const [isLoadingOrder, setIsLoadingOrder] = React.useState(mode === 'edit');
   const [isSaving, setIsSaving] = React.useState(false);
   const [error, setError] = React.useState(null);
+  const [isBalanceManual, setIsBalanceManual] = React.useState(false);
 
   React.useEffect(() => {
     let isCurrent = true;
 
     if (mode !== 'edit' || !orderId) {
       setForm(createEmptyForm());
+      setIsBalanceManual(false);
       setIsLoadingOrder(false);
       return () => {
         isCurrent = false;
@@ -30,6 +33,7 @@ export function OrderFormPage({ mode = 'create', orderId = null, onCancel, onSav
       .then((order) => {
         if (isCurrent) {
           setForm(toForm(order));
+          setIsBalanceManual(false);
         }
       })
       .catch(() => {
@@ -52,6 +56,29 @@ export function OrderFormPage({ mode = 'create', orderId = null, onCancel, onSav
     setForm((current) => ({ ...current, [key]: value }));
   };
 
+  const handleMoneyChange = (key, value) => {
+    const formattedValue = formatMoneyInput(value);
+
+    if (key === 'balance_amount') {
+      setIsBalanceManual(true);
+      setForm((current) => ({ ...current, balance_amount: formattedValue }));
+      return;
+    }
+
+    setForm((current) => {
+      const next = { ...current, [key]: formattedValue };
+
+      if ((key === 'total_amount' || key === 'deposit_amount') && !isBalanceManual) {
+        return {
+          ...next,
+          balance_amount: calculateBalanceAmount(next.total_amount, next.deposit_amount),
+        };
+      }
+
+      return next;
+    });
+  };
+
   const handlePartnerChange = (partnerId) => {
     const partner = (partners.data || []).find((item) => item.id === partnerId);
     setForm((current) => ({
@@ -63,13 +90,27 @@ export function OrderFormPage({ mode = 'create', orderId = null, onCancel, onSav
 
   const handleServiceItemChange = (serviceItemId) => {
     const option = flattenServiceItems(serviceCatalog.data || []).find((item) => item.id === serviceItemId);
-    setForm((current) => ({
-      ...current,
-      service_category_id: option?.category_id || '',
-      service_item_id: serviceItemId,
-      service_name: option?.name || current.service_name,
-      total_amount: option && current.total_amount === '' ? String(Math.round(Number(option.base_price || 0))) : current.total_amount,
-    }));
+    setForm((current) => {
+      const totalAmount = option && current.total_amount === ''
+        ? formatMoneyInput(Math.round(Number(option.base_price || 0)))
+        : current.total_amount;
+      const next = {
+        ...current,
+        service_category_id: option?.category_id || '',
+        service_item_id: serviceItemId,
+        service_name: option?.name || current.service_name,
+        total_amount: totalAmount,
+      };
+
+      if (!isBalanceManual) {
+        return {
+          ...next,
+          balance_amount: calculateBalanceAmount(next.total_amount, next.deposit_amount),
+        };
+      }
+
+      return next;
+    });
   };
 
   const handleSubmit = async (event) => {
@@ -148,8 +189,12 @@ export function OrderFormPage({ mode = 'create', orderId = null, onCancel, onSav
                 </Field>
                 <TextField testId="order-service-name" label="상품명" required value={form.service_name} onChange={(value) => setField('service_name', value)} />
                 <TextField label="수량/규격" value={form.size_or_quantity} onChange={(value) => setField('size_or_quantity', value)} />
-                <TextField label="접수일" type="date" value={form.received_date} onChange={(value) => setField('received_date', value)} />
-                <TextField testId="order-scheduled-date" label="방문 예정일" type="date" value={form.scheduled_date} onChange={(value) => setField('scheduled_date', value)} />
+                <Field label="접수일">
+                  <DatePicker testId="order-received-date" value={form.received_date} onChange={(value) => setField('received_date', value)} />
+                </Field>
+                <Field label="방문 예정일">
+                  <DatePicker testId="order-scheduled-date" value={form.scheduled_date} onChange={(value) => setField('scheduled_date', value)} placeholder="방문일 선택" />
+                </Field>
                 <TextField testId="order-requested-time" label="요청 시간" value={form.requested_time} onChange={(value) => setField('requested_time', value)} placeholder="14:00 또는 오후 2-5시" />
                 <TextField label="상품 상세" span={2} multiline value={form.service_detail} onChange={(value) => setField('service_detail', value)} />
                 <TextField label="요청사항" span={2} multiline value={form.special_request} onChange={(value) => setField('special_request', value)} />
@@ -158,10 +203,10 @@ export function OrderFormPage({ mode = 'create', orderId = null, onCancel, onSav
 
             <Section title="금액 / 결제">
               <FieldGrid>
-                <TextField testId="order-total-amount" label="총 금액" type="number" value={form.total_amount} onChange={(value) => setField('total_amount', value)} />
-                <TextField label="계약금" type="number" value={form.deposit_amount} onChange={(value) => setField('deposit_amount', value)} />
-                <TextField label="잔금" type="number" value={form.balance_amount} onChange={(value) => setField('balance_amount', value)} />
-                <TextField label="현장 추가" type="number" value={form.onsite_extra_amount} onChange={(value) => setField('onsite_extra_amount', value)} />
+                <TextField testId="order-total-amount" label="총 금액" inputMode="numeric" value={form.total_amount} onChange={(value) => handleMoneyChange('total_amount', value)} />
+                <TextField testId="order-deposit-amount" label="계약금" inputMode="numeric" value={form.deposit_amount} onChange={(value) => handleMoneyChange('deposit_amount', value)} />
+                <TextField testId="order-balance-amount" label="잔금" inputMode="numeric" value={form.balance_amount} onChange={(value) => handleMoneyChange('balance_amount', value)} />
+                <TextField testId="order-onsite-extra-amount" label="현장 추가" inputMode="numeric" value={form.onsite_extra_amount} onChange={(value) => handleMoneyChange('onsite_extra_amount', value)} />
                 <Field label="결제 상태">
                   <select className="input" data-testid="order-payment-status" value={form.payment_status} onChange={(event) => setField('payment_status', event.target.value)}>
                     <option value="">미입력</option>
@@ -187,7 +232,7 @@ export function OrderFormPage({ mode = 'create', orderId = null, onCancel, onSav
                   </select>
                 </Field>
                 <TextField label="팀명" value={form.team_name} onChange={(value) => setField('team_name', value)} />
-                <TextField label="협력사 지급액" type="number" value={form.partner_payment_amount} onChange={(value) => setField('partner_payment_amount', value)} />
+                <TextField testId="order-partner-payment-amount" label="협력사 지급액" inputMode="numeric" value={form.partner_payment_amount} onChange={(value) => handleMoneyChange('partner_payment_amount', value)} />
                 <Field label="협력사 정산 상태">
                   <select className="input" data-testid="order-partner-payment-status" value={form.partner_payment_status} onChange={(event) => setField('partner_payment_status', event.target.value)}>
                     <option value="">미입력</option>
@@ -227,7 +272,7 @@ export function OrderFormPage({ mode = 'create', orderId = null, onCancel, onSav
             <div className="card" style={{ padding: 14 }}>
               <div style={{ fontSize: 11, color: 'var(--text-tertiary)', fontWeight: 600, letterSpacing: '0.04em', marginBottom: 8 }}>저장 시 처리</div>
               <div style={{ fontSize: 12, lineHeight: 1.55, color: 'var(--text-secondary)' }}>
-                신규 주문은 고객 토큰이 생성되고 `created` 타임라인이 남습니다. 상태와 협력사 변경은 각각 타임라인에 기록됩니다.
+                신규 주문 저장 시 고객 확인 링크가 생성됩니다. 상태와 협력사 변경은 타임라인에 함께 기록됩니다.
               </div>
             </div>
           </aside>
@@ -276,7 +321,7 @@ function Field({ label, children, span = 1 }) {
   );
 }
 
-function TextField({ label, value, onChange, type = 'text', required = false, span = 1, multiline = false, placeholder = '', testId = undefined }) {
+function TextField({ label, value, onChange, type = 'text', inputMode = undefined, required = false, span = 1, multiline = false, placeholder = '', testId = undefined }) {
   return (
     <Field label={`${label}${required ? ' *' : ''}`} span={span}>
       {multiline ? (
@@ -293,6 +338,7 @@ function TextField({ label, value, onChange, type = 'text', required = false, sp
           className="input"
           data-testid={testId}
           type={type}
+          inputMode={inputMode}
           value={value}
           placeholder={placeholder}
           onChange={(event) => onChange(event.target.value)}
@@ -408,11 +454,44 @@ function emptyToNull(value) {
 }
 
 function numberOrNull(value) {
-  return value === '' ? null : Number(value);
+  return parseMoneyInput(value);
 }
 
 function toInputNumber(value) {
-  return value === null || value === undefined ? '' : String(value);
+  if (value === null || value === undefined) {
+    return '';
+  }
+
+  return formatMoneyInput(Math.round(Number(value)));
+}
+
+function formatMoneyInput(value) {
+  const digits = String(value ?? '').replace(/[^\d]/g, '');
+  if (digits === '') {
+    return '';
+  }
+
+  return Number(digits).toLocaleString();
+}
+
+function parseMoneyInput(value) {
+  const digits = String(value ?? '').replace(/[^\d]/g, '');
+  if (digits === '') {
+    return null;
+  }
+
+  return Number(digits);
+}
+
+function calculateBalanceAmount(totalAmount, depositAmount) {
+  const total = parseMoneyInput(totalAmount);
+  const deposit = parseMoneyInput(depositAmount);
+
+  if (total === null || deposit === null) {
+    return '';
+  }
+
+  return formatMoneyInput(Math.max(total - deposit, 0));
 }
 
 function flattenServiceItems(categories) {

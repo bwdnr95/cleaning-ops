@@ -9,7 +9,7 @@ export function Dashboard({ onOpenOrder, onNav, onCreateOrder }) {
   const summary = useApiResource(getDashboardSummary);
   const orders = useApiResource(listAdminOrders);
   const recentActivity = useApiResource(getDashboardRecentActivity);
-  const kpis = summary.data ? toKpis(summary.data) : KPI;
+  const kpis = summary.data ? toKpis(summary.data) : withKpiNavigation(KPI);
   const queues = summary.data ? toQueues(summary.data) : QUEUES;
   const todayJobs = orders.data ? toDashJobs(orders.data, 'today') : TODAY_JOBS;
   const tomorrowJobs = orders.data ? toDashJobs(orders.data, 'tomorrow') : TOMORROW_JOBS;
@@ -30,7 +30,11 @@ export function Dashboard({ onOpenOrder, onNav, onCreateOrder }) {
             </h2>
           </div>
           <div style={{ display: 'flex', gap: 6 }}>
-            <button className="btn btn--secondary btn--sm">
+            <button className="btn btn--secondary btn--sm" onClick={() => {
+              summary.reload();
+              orders.reload();
+              recentActivity.reload();
+            }}>
               <Icon name="refresh" size={12}/> 새로고침
             </button>
             <button data-testid="dashboard-create-order" className="btn btn--primary btn--sm" onClick={onCreateOrder}>
@@ -42,7 +46,31 @@ export function Dashboard({ onOpenOrder, onNav, onCreateOrder }) {
         {/* KPI grid — 7 cards in one row, last one wider */}
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 10, marginBottom: 16 }}>
           {kpis.map((k, i) => (
-            <div key={i} className="card" style={{ padding: 12, position: 'relative', overflow: 'hidden' }}>
+            <button
+              key={k.key || i}
+              data-testid={`dashboard-kpi-${k.key || i}`}
+              type="button"
+              className="card"
+              onClick={() => onNav && onNav(k.targetPage || 'orders', { ordersTab: k.ordersTab || 'all' })}
+              style={{
+                padding: 12,
+                position: 'relative',
+                overflow: 'hidden',
+                border: '1px solid var(--border)',
+                background: 'var(--surface)',
+                cursor: 'pointer',
+                textAlign: 'left',
+                transition: 'border-color 100ms, box-shadow 100ms',
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.borderColor = 'var(--brand)';
+                e.currentTarget.style.boxShadow = 'var(--shadow-sm)';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.borderColor = 'var(--border)';
+                e.currentTarget.style.boxShadow = 'none';
+              }}
+            >
               <div style={{ fontSize: 11.5, color: 'var(--text-tertiary)', fontWeight: 500, letterSpacing: '-0.005em' }}>{k.label}</div>
               <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, marginTop: 4 }}>
                 <span style={{ fontSize: 22, fontWeight: 600, letterSpacing: '-0.03em', color: 'var(--text)' }}>{k.value}</span>
@@ -55,7 +83,7 @@ export function Dashboard({ onOpenOrder, onNav, onCreateOrder }) {
                 }}>{k.delta}</span>
                 <Sparkline values={k.trend} color={`var(--${k.tone === 'brand' ? 'brand' : k.tone === 'success' ? 'success-fg' : k.tone === 'danger' ? 'danger-fg' : k.tone === 'warn' ? 'warn-fg' : k.tone === 'purple' ? 'purple-fg' : 'info-fg'})`} width={50} height={18}/>
               </div>
-            </div>
+            </button>
           ))}
         </div>
 
@@ -110,6 +138,7 @@ export function Dashboard({ onOpenOrder, onNav, onCreateOrder }) {
               subtitle={`오늘 · ${summary.isLoading ? '-' : todayJobs.length}건`}
               jobs={todayJobs}
               onOpen={onOpenOrder}
+              onCalendar={() => onNav && onNav('calendar')}
               accent="info"
               isLoading={orders.isLoading}
               error={orders.error}
@@ -120,6 +149,7 @@ export function Dashboard({ onOpenOrder, onNav, onCreateOrder }) {
               subtitle={`내일 · ${summary.isLoading ? '-' : tomorrowJobs.length}건`}
               jobs={tomorrowJobs}
               onOpen={onOpenOrder}
+              onCalendar={() => onNav && onNav('calendar')}
               accent="warn"
               muted
               isLoading={orders.isLoading}
@@ -178,7 +208,7 @@ export function Dashboard({ onOpenOrder, onNav, onCreateOrder }) {
                   <Icon name="send" size={13} color="var(--text-tertiary)"/>
                   <span style={{ fontSize: 12.5, fontWeight: 600 }}>최근 발송 이력</span>
                 </div>
-                <button className="btn btn--ghost btn--sm" style={{ height: 22, padding: '0 6px', fontSize: 11 }}>전체 보기</button>
+                <button className="btn btn--ghost btn--sm" style={{ height: 22, padding: '0 6px', fontSize: 11 }} onClick={() => onNav && onNav('sends')}>전체 보기</button>
               </div>
               <div>
                 {recentActivity.isLoading && <DashMessage text="최근 발송 이력을 불러오는 중입니다." />}
@@ -214,7 +244,7 @@ export function Dashboard({ onOpenOrder, onNav, onCreateOrder }) {
   );
 }
 
-function DashList({ title, subtitle, jobs, onOpen, accent, muted = false, isLoading = false, error = null }) {
+function DashList({ title, subtitle, jobs, onOpen, onCalendar, accent, muted = false, isLoading = false, error = null }) {
   return (
     <div>
       <div style={{ padding: '10px 14px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid var(--divider)' }}>
@@ -223,7 +253,7 @@ function DashList({ title, subtitle, jobs, onOpen, accent, muted = false, isLoad
           <span style={{ fontSize: 12.5, fontWeight: 600 }}>{title}</span>
           <span style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>{subtitle}</span>
         </div>
-        <button className="btn btn--ghost btn--sm" style={{ height: 22, padding: '0 6px', fontSize: 11 }}>일정표</button>
+        <button className="btn btn--ghost btn--sm" style={{ height: 22, padding: '0 6px', fontSize: 11 }} onClick={onCalendar}>일정표</button>
       </div>
       <div>
         {isLoading && <DashMessage text="작업을 불러오는 중입니다." />}
@@ -271,15 +301,32 @@ function DashMessage({ text, tone = 'muted' }) {
 }
 
 function toKpis(summary) {
-  return [
-    { label: '오늘 작업 예정', value: summary.today_jobs, delta: 'API', trend: [0, 0, 0, 0, summary.today_jobs || 0], tone: 'info' },
-    { label: '내일 안내 대상', value: summary.tomorrow_notice_targets, delta: 'API', trend: [0, 0, 0, 0, summary.tomorrow_notice_targets || 0], tone: 'warn' },
-    { label: '사진 검수 대기', value: summary.photo_review_pending, delta: 'API', trend: [0, 0, 0, 0, summary.photo_review_pending || 0], tone: 'purple' },
-    { label: '고객 전달 필요', value: summary.customer_delivery_needed, delta: 'API', trend: [0, 0, 0, 0, summary.customer_delivery_needed || 0], tone: 'warn' },
-    { label: '결제 확인 필요', value: summary.payment_check_needed, delta: 'API', trend: [0, 0, 0, 0, summary.payment_check_needed || 0], tone: 'danger' },
-    { label: '이번 달 완료', value: summary.monthly_completed, delta: 'API', trend: [0, 0, 0, 0, summary.monthly_completed || 0], tone: 'success', suffix: '건' },
-    { label: '이번 달 계약금액', value: formatWon(summary.monthly_revenue), delta: 'API', trend: [0, 0, 0, 0, summary.monthly_revenue || 0], tone: 'brand' },
-  ];
+  return withKpiNavigation([
+    { label: '오늘 작업 예정', value: summary.today_jobs, delta: '실시간', trend: [0, 0, 0, 0, summary.today_jobs || 0], tone: 'info' },
+    { label: '내일 안내 대상', value: summary.tomorrow_notice_targets, delta: '실시간', trend: [0, 0, 0, 0, summary.tomorrow_notice_targets || 0], tone: 'warn' },
+    { label: '사진 검수 대기', value: summary.photo_review_pending, delta: '실시간', trend: [0, 0, 0, 0, summary.photo_review_pending || 0], tone: 'purple' },
+    { label: '고객 전달 필요', value: summary.customer_delivery_needed, delta: '실시간', trend: [0, 0, 0, 0, summary.customer_delivery_needed || 0], tone: 'warn' },
+    { label: '결제 확인 필요', value: summary.payment_check_needed, delta: '실시간', trend: [0, 0, 0, 0, summary.payment_check_needed || 0], tone: 'danger' },
+    { label: '이번 달 완료', value: summary.monthly_completed, delta: '실시간', trend: [0, 0, 0, 0, summary.monthly_completed || 0], tone: 'success', suffix: '건' },
+    { label: '이번 달 계약금액', value: formatWon(summary.monthly_revenue), delta: '실시간', trend: [0, 0, 0, 0, summary.monthly_revenue || 0], tone: 'brand' },
+  ]);
+}
+
+const KPI_NAVIGATION = [
+  { key: 'today_jobs', targetPage: 'orders', ordersTab: 'today' },
+  { key: 'tomorrow_notice', targetPage: 'orders', ordersTab: 'tomorrow_notice' },
+  { key: 'photo_review', targetPage: 'photos', ordersTab: null },
+  { key: 'customer_delivery', targetPage: 'photos', ordersTab: null },
+  { key: 'payment_check', targetPage: 'orders', ordersTab: 'payment_check' },
+  { key: 'monthly_done', targetPage: 'orders', ordersTab: 'done' },
+  { key: 'monthly_revenue', targetPage: 'orders', ordersTab: 'all' },
+];
+
+function withKpiNavigation(items) {
+  return items.map((item, index) => ({
+    ...item,
+    ...(KPI_NAVIGATION[index] || { key: index, targetPage: 'orders', ordersTab: 'all' }),
+  }));
 }
 
 function toQueues(summary) {

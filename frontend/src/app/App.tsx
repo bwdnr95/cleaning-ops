@@ -22,37 +22,37 @@ const ADMIN_PAGE_META = {
   dashboard: {
     title: '대시보드',
     subtitle: '운영 현황',
-    breadcrumb: ['Workspace', '대시보드'],
+    breadcrumb: ['운영', '대시보드'],
   },
   orders: {
     title: '주문관리',
-    subtitle: '158건',
-    breadcrumb: ['Workspace', '주문관리'],
+    subtitle: '전체 운영 주문',
+    breadcrumb: ['운영', '주문관리'],
   },
   calendar: {
     title: '일정 캘린더',
-    subtitle: '2026년 5월 · 56건',
-    breadcrumb: ['Workspace', '일정 캘린더'],
+    subtitle: '방문 일정',
+    breadcrumb: ['운영', '일정 캘린더'],
   },
   photos: {
     title: '사진검수',
-    subtitle: '6건 대기',
-    breadcrumb: ['Workspace', '사진검수'],
+    subtitle: '검수 / 고객 전달',
+    breadcrumb: ['운영', '사진검수'],
   },
   products: {
     title: '상품관리',
     subtitle: '서비스 기준가',
-    breadcrumb: ['Workspace', '상품관리'],
+    breadcrumb: ['운영', '상품관리'],
   },
   sends: {
     title: '발송이력',
     subtitle: '고객/협력사 안내',
-    breadcrumb: ['Workspace', '발송이력'],
+    breadcrumb: ['운영', '발송이력'],
   },
   partners: {
     title: '협력사관리',
     subtitle: '계정 / 배정 현황',
-    breadcrumb: ['Workspace', '협력사관리'],
+    breadcrumb: ['운영', '협력사관리'],
   },
 };
 
@@ -90,7 +90,7 @@ export function App() {
       <div className="app-toolbar">
         <div>
           <div className="app-eyebrow">Cleaning Ops Control Center</div>
-          <h1>운영관리 앱 미리보기</h1>
+          <h1>운영 컨트롤 센터</h1>
         </div>
         <div className="app-toolbar-actions">
           {auth.isAuthenticated && (
@@ -143,7 +143,7 @@ export function App() {
                       <>
                         <Topbar
                           title={orderForm.mode === 'edit' ? '주문 수정' : '신규 주문 등록'}
-                          breadcrumb={['Workspace', '주문관리', orderForm.mode === 'edit' ? orderForm.orderId : 'new']}
+                          breadcrumb={['운영', '주문관리', orderForm.mode === 'edit' ? orderForm.orderId : '신규']}
                         />
                         <OrderFormPage
                           mode={orderForm.mode}
@@ -164,7 +164,7 @@ export function App() {
                       <>
                         <Topbar
                           title="주문 상세"
-                          breadcrumb={['Workspace', '주문관리', detailOrderId]}
+                          breadcrumb={['운영', '주문관리', detailOrderId]}
                         />
                         <OrderDetailPage
                           orderId={detailOrderId}
@@ -198,6 +198,7 @@ export function App() {
                         <OrdersPage
                           initialTab={ordersTab}
                           onOpenOrder={(orderId) => setDetailOrderId(orderId)}
+                          onEditOrder={(orderId) => setOrderForm({ mode: 'edit', orderId })}
                           onCreateOrder={() => setOrderForm({ mode: 'create', orderId: null })}
                         />
                       )}
@@ -244,9 +245,9 @@ function ComingSoon({ page }) {
   return (
     <div className="coming-soon">
       <div className="card">
-        <div className="app-eyebrow">Next module</div>
+        <div className="app-eyebrow">준비 중</div>
         <h2>{page}</h2>
-        <p>기획서 기준에 맞춰 같은 레이어 규칙으로 이어서 구현할 영역입니다.</p>
+        <p>운영 흐름에 맞춰 이어서 연결할 영역입니다.</p>
       </div>
     </div>
   );

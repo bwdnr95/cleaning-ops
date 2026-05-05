@@ -242,7 +242,7 @@ export function OrderDetailPage({ orderId, onBack, onEdit }) {
                     <div key={log.id} style={{ display: 'grid', gridTemplateColumns: '120px 1fr 70px', gap: 10, alignItems: 'center', fontSize: 12, padding: '8px 0', borderBottom: '1px solid var(--divider)' }}>
                       <span className="mono" style={{ color: 'var(--text-tertiary)', fontSize: 10.5 }}>{formatDateTime(log.sent_at || log.created_at)}</span>
                       <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{messageTypeLabel(log.message_type)} · {log.recipient_name}</span>
-                      <Badge tone={log.status === 'sent' ? 'success' : 'danger'}>{log.status}</Badge>
+                      <Badge tone={log.status === 'sent' ? 'success' : 'danger'}>{messageStatusLabel(log.status)}</Badge>
                     </div>
                   ))}
                 </div>
@@ -358,7 +358,7 @@ export function OrderDetailPage({ orderId, onBack, onEdit }) {
                       <div style={{ flex: 1, fontSize: 11.5 }}>
                         <div style={{ color: 'var(--text-tertiary)', fontSize: 10.5, marginBottom: 1 }}>{formatDateTime(event.created_at)}</div>
                         <div style={{ color: 'var(--text)', fontWeight: 500 }}>{event.title}</div>
-                        <div style={{ color: 'var(--text-tertiary)', marginTop: 1 }}>{event.event_type}</div>
+                        <div style={{ color: 'var(--text-tertiary)', marginTop: 1 }}>{timelineEventLabel(event.event_type)}</div>
                       </div>
                     </div>
                   ))}
@@ -466,9 +466,9 @@ function formatDateTime(value) {
 }
 
 function photoTypeLabel(type) {
-  if (type === 'before') return 'before';
-  if (type === 'after') return 'after';
-  return 'etc';
+  if (type === 'before') return '비포';
+  if (type === 'after') return '애프터';
+  return '기타';
 }
 
 function messageTypeLabel(type) {
@@ -477,6 +477,27 @@ function messageTypeLabel(type) {
   if (type === 'partner_assignment') return '협력사배정';
   if (type === 'customer_photo_ready') return '사진전달';
   return type;
+}
+
+function messageStatusLabel(status) {
+  if (status === 'sent') return '성공';
+  if (status === 'failed') return '실패';
+  return status || '-';
+}
+
+function timelineEventLabel(type) {
+  const labels = {
+    created: '주문 생성',
+    status_changed: '상태 변경',
+    partner_assigned: '협력사 배정',
+    message_sent: '안내 발송',
+    photo_uploaded: '사진 업로드',
+    photo_approved: '사진 승인',
+    customer_link_sent: '고객 링크 발송',
+    memo_added: '메모 추가',
+    payment_updated: '결제/정산 변경',
+  };
+  return labels[type] || type;
 }
 
 function toActionErrorMessage(error) {

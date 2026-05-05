@@ -72,6 +72,12 @@ export function updateAdminPartner(partnerId, input) {
   });
 }
 
+export function deleteAdminPartner(partnerId) {
+  return apiRequest(`/admin/partners/${encodeURIComponent(partnerId)}`, {
+    method: 'DELETE',
+  });
+}
+
 export function resetAdminPartnerPassword(partnerId, input = {}) {
   return apiRequest(`/admin/partners/${encodeURIComponent(partnerId)}/reset-password`, {
     method: 'POST',
@@ -102,6 +108,12 @@ export function updateServiceCategory(categoryId, input) {
   });
 }
 
+export function deleteServiceCategory(categoryId) {
+  return apiRequest(`/admin/services/categories/${encodeURIComponent(categoryId)}`, {
+    method: 'DELETE',
+  });
+}
+
 export function createServiceItem(input) {
   return apiRequest('/admin/services/items', {
     method: 'POST',
@@ -113,5 +125,11 @@ export function updateServiceItem(itemId, input) {
   return apiRequest(`/admin/services/items/${encodeURIComponent(itemId)}`, {
     method: 'PATCH',
     body: input,
+  });
+}
+
+export function deleteServiceItem(itemId) {
+  return apiRequest(`/admin/services/items/${encodeURIComponent(itemId)}`, {
+    method: 'DELETE',
   });
 }

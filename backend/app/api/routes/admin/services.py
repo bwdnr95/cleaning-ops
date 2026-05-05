@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy.orm import Session
 
 from app.api.deps import CurrentUser, get_session, require_admin
@@ -46,6 +46,19 @@ def update_service_category(
         raise service_catalog_http_error(exc) from exc
 
 
+@router.delete("/categories/{category_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_service_category(
+    category_id: str,
+    db: Session = Depends(get_session),
+    _: CurrentUser = Depends(require_admin),
+) -> Response:
+    try:
+        ServiceCatalogService(db).delete_category(category_id)
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
+    except ValueError as exc:
+        raise service_catalog_http_error(exc) from exc
+
+
 @router.post("/items", response_model=ServiceItemRead, status_code=201)
 def create_service_item(
     payload: ServiceItemCreate,
@@ -67,6 +80,19 @@ def update_service_item(
 ) -> ServiceItemRead:
     try:
         return ServiceCatalogService(db).update_item(item_id, payload)
+    except ValueError as exc:
+        raise service_catalog_http_error(exc) from exc
+
+
+@router.delete("/items/{item_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_service_item(
+    item_id: str,
+    db: Session = Depends(get_session),
+    _: CurrentUser = Depends(require_admin),
+) -> Response:
+    try:
+        ServiceCatalogService(db).delete_item(item_id)
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
     except ValueError as exc:
         raise service_catalog_http_error(exc) from exc
 

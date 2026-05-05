@@ -5,10 +5,11 @@ import { Icon } from '../../../components/common/ui';
 import { useApiResource } from '../../../api/useApiResource';
 
 export function CalendarPage({ onOpenOrder, onCreateOrder }) {
-  const [view, setView] = React.useState('month');
   const [siteOpen, setSiteOpen] = React.useState(true);
   const [selectedPartnerId, setSelectedPartnerId] = React.useState('');
+  const [partnerQuery, setPartnerQuery] = React.useState('');
   const [currentMonth, setCurrentMonth] = React.useState(() => startOfMonth(new Date()));
+  const [selectedDay, setSelectedDay] = React.useState(null);
   const year = currentMonth.getFullYear();
   const month = currentMonth.getMonth() + 1;
   const calendarKey = `${year}-${month}`;
@@ -21,12 +22,16 @@ export function CalendarPage({ onOpenOrder, onCreateOrder }) {
   const allOrders = calendar.data || [];
   const orders = selectedPartnerId ? allOrders.filter((order) => order.partner_id === selectedPartnerId) : allOrders;
   const sites = toSites(partners.data || [], allOrders);
+  const visibleSites = sites.filter((site) => site.name.toLowerCase().includes(partnerQuery.trim().toLowerCase()));
   const daysInMonth = new Date(year, month, 0).getDate();
   const firstDayOfWeek = new Date(year, month - 1, 1).getDay();
   const totalCells = Math.ceil((daysInMonth + firstDayOfWeek) / 7) * 7;
   const today = new Date();
   const isCurrentRealMonth = today.getFullYear() === year && today.getMonth() + 1 === month;
   const eventsByDay = groupOrdersByDay(orders);
+  const selectedDayNumber = Math.min(selectedDay || (isCurrentRealMonth ? today.getDate() : 1), daysInMonth);
+  const selectedEvents = eventsByDay.get(selectedDayNumber) || [];
+  const selectedSiteName = selectedPartnerId ? sites.find((site) => site.id === selectedPartnerId)?.name : '전체 협력사';
 
   const cells = Array.from({ length: totalCells }).map((_, index) => {
     const dayNum = index - firstDayOfWeek + 1;
@@ -42,6 +47,16 @@ export function CalendarPage({ onOpenOrder, onCreateOrder }) {
 
   const moveMonth = (delta) => {
     setCurrentMonth((value) => new Date(value.getFullYear(), value.getMonth() + delta, 1));
+  };
+
+  const handleToday = () => {
+    const now = new Date();
+    setCurrentMonth(startOfMonth(now));
+    setSelectedDay(now.getDate());
+  };
+
+  const selectDay = (day) => {
+    setSelectedDay(day);
   };
 
   return (
@@ -63,7 +78,7 @@ export function CalendarPage({ onOpenOrder, onCreateOrder }) {
             </button>
           </div>
           <div style={{ padding: '8px 10px', borderBottom: '1px solid var(--divider)' }}>
-            <div style={{
+            <label style={{
               display: 'flex',
               alignItems: 'center',
               gap: 6,
@@ -75,11 +90,26 @@ export function CalendarPage({ onOpenOrder, onCreateOrder }) {
               fontSize: 11.5,
               color: 'var(--text-tertiary)',
             }}>
-              <Icon name="search" size={12}/> 협력사 필터
-            </div>
+              <Icon name="search" size={12}/>
+              <input
+                value={partnerQuery}
+                onChange={(event) => setPartnerQuery(event.target.value)}
+                placeholder="협력사 검색"
+                aria-label="협력사 검색"
+                style={{
+                  flex: 1,
+                  minWidth: 0,
+                  border: 'none',
+                  outline: 'none',
+                  background: 'transparent',
+                  color: 'var(--text)',
+                  fontSize: 11.5,
+                }}
+              />
+            </label>
           </div>
           <div className="scroll" style={{ flex: 1, overflow: 'auto', padding: '6px 0' }}>
-            {sites.map((site) => {
+            {visibleSites.map((site) => {
               const active = site.id === (selectedPartnerId || 'all');
               return (
                 <button key={site.id} onClick={() => setSelectedPartnerId(site.id === 'all' ? '' : site.id)}
@@ -121,7 +151,7 @@ export function CalendarPage({ onOpenOrder, onCreateOrder }) {
               <Icon name="list" size={13}/>
             </button>
           )}
-          <button className="btn btn--secondary btn--sm" onClick={() => setCurrentMonth(startOfMonth(new Date()))}>오늘</button>
+          <button className="btn btn--secondary btn--sm" onClick={handleToday}>오늘</button>
           <div style={{ display: 'flex' }}>
             <button className="btn btn--ghost btn--sm" style={{ padding: '0 4px' }} onClick={() => moveMonth(-1)}><Icon name="chevronLeft" size={13}/></button>
             <button className="btn btn--ghost btn--sm" style={{ padding: '0 4px' }} onClick={() => moveMonth(1)}><Icon name="chevronRight" size={13}/></button>
@@ -136,146 +166,172 @@ export function CalendarPage({ onOpenOrder, onCreateOrder }) {
           <Legend tone="success" label="완료"/>
           <Legend tone="purple" label="작업중"/>
           <div style={{ width: 1, height: 18, background: 'var(--border)' }}/>
-          <div style={{
-            display: 'flex',
-            background: 'var(--bg-subtle)',
-            border: '1px solid var(--border)',
-            borderRadius: 6,
-            padding: 2,
-          }}>
-            {['month', 'week', 'day'].map((item) => (
-              <button key={item} onClick={() => setView(item)}
-                style={{
-                  padding: '0 10px',
-                  height: 22,
-                  border: 'none',
-                  borderRadius: 4,
-                  background: view === item ? 'var(--surface)' : 'transparent',
-                  color: view === item ? 'var(--text)' : 'var(--text-tertiary)',
-                  fontSize: 11.5,
-                  fontWeight: view === item ? 600 : 500,
-                  cursor: 'pointer',
-                  boxShadow: view === item ? 'var(--shadow-xs)' : 'none',
-                }}>
-                {item === 'month' ? '월' : item === 'week' ? '주' : '일'}
-              </button>
-            ))}
-          </div>
           <button className="btn btn--primary btn--sm" onClick={onCreateOrder}>
             <Icon name="plus" size={12}/> 일정 추가
           </button>
         </div>
 
-        <div className="scroll" style={{ flex: 1, overflow: 'auto', background: 'var(--bg)' }}>
+        <div style={{ flex: 1, display: 'flex', minHeight: 0, background: 'var(--bg)' }}>
           {calendar.isLoading && <CalendarState text="일정을 불러오는 중입니다." />}
           {!calendar.isLoading && calendar.error && <CalendarState text="일정을 불러오지 못했습니다." tone="danger" />}
           {!calendar.isLoading && !calendar.error && (
-            <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 600 }}>
-              <div style={{
-                display: 'grid',
-                gridTemplateColumns: 'repeat(7, 1fr)',
-                borderBottom: '1px solid var(--border)',
-                background: 'var(--surface)',
-              }}>
-                {['일', '월', '화', '수', '목', '금', '토'].map((day, index) => (
-                  <div key={day} style={{
-                    padding: '8px 12px',
-                    fontSize: 11,
-                    fontWeight: 600,
-                    color: index === 0 ? 'var(--danger-fg)' : index === 6 ? 'var(--info-fg)' : 'var(--text-tertiary)',
-                    letterSpacing: '0.04em',
-                    borderRight: index < 6 ? '1px solid var(--divider)' : 'none',
-                  }}>{day}</div>
-                ))}
-              </div>
+            <>
+              <div className="scroll" style={{ flex: 1, overflow: 'auto', minWidth: 0 }}>
+                <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 600 }}>
+                  <div style={{
+                    display: 'grid',
+                    gridTemplateColumns: 'repeat(7, 1fr)',
+                    borderBottom: '1px solid var(--border)',
+                    background: 'var(--surface)',
+                  }}>
+                    {['일', '월', '화', '수', '목', '금', '토'].map((day, index) => (
+                      <div key={day} style={{
+                        padding: '8px 12px',
+                        fontSize: 11,
+                        fontWeight: 600,
+                        color: index === 0 ? 'var(--danger-fg)' : index === 6 ? 'var(--info-fg)' : 'var(--text-tertiary)',
+                        letterSpacing: '0.04em',
+                        borderRight: index < 6 ? '1px solid var(--divider)' : 'none',
+                      }}>{day}</div>
+                    ))}
+                  </div>
 
-              <div style={{
-                flex: 1,
-                display: 'grid',
-                gridTemplateColumns: 'repeat(7, 1fr)',
-                gridAutoRows: '1fr',
-                minHeight: 0,
-              }}>
-                {cells.map((cell, index) => {
-                  if (cell.empty) {
-                    return <div key={index} style={{
-                      background: 'var(--bg-subtle)',
-                      borderRight: index % 7 < 6 ? '1px solid var(--divider)' : 'none',
-                      borderBottom: '1px solid var(--divider)',
-                    }}/>;
-                  }
+                  <div style={{
+                    flex: 1,
+                    display: 'grid',
+                    gridTemplateColumns: 'repeat(7, 1fr)',
+                    gridAutoRows: '1fr',
+                    minHeight: 0,
+                  }}>
+                    {cells.map((cell, index) => {
+                      if (cell.empty) {
+                        return <div key={index} style={{
+                          background: 'var(--bg-subtle)',
+                          borderRight: index % 7 < 6 ? '1px solid var(--divider)' : 'none',
+                          borderBottom: '1px solid var(--divider)',
+                        }}/>;
+                      }
 
-                  const isToday = isCurrentRealMonth && cell.day === today.getDate();
-                  return (
-                    <div key={index} style={{
-                      minHeight: 110,
-                      padding: 6,
-                      background: 'var(--surface)',
-                      borderRight: index % 7 < 6 ? '1px solid var(--divider)' : 'none',
-                      borderBottom: '1px solid var(--divider)',
-                      display: 'flex',
-                      flexDirection: 'column',
-                      gap: 2,
-                    }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginBottom: 2 }}>
-                        {isToday ? (
-                          <span style={{
-                            display: 'inline-flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            width: 20,
-                            height: 20,
-                            borderRadius: '50%',
-                            background: 'var(--brand)',
-                            color: '#fff',
-                            fontSize: 11,
-                            fontWeight: 700,
-                          }}>{cell.day}</span>
-                        ) : (
-                          <span style={{
-                            fontSize: 11.5,
-                            fontWeight: 600,
-                            color: cell.dow === 0 ? 'var(--danger-fg)' : cell.dow === 6 ? 'var(--info-fg)' : 'var(--text)',
-                            paddingLeft: 2,
-                          }}>{cell.day}</span>
-                        )}
-                        {cell.events.length > 0 && (
-                          <span style={{ fontSize: 9.5, color: 'var(--text-quaternary)' }}>· {cell.events.length}건</span>
-                        )}
-                      </div>
-                      {cell.events.slice(0, 3).map((event) => (
-                        <button key={event.id} onClick={() => onOpenOrder && onOpenOrder(event.id)}
+                      const isToday = isCurrentRealMonth && cell.day === today.getDate();
+                      const isSelected = cell.day === selectedDayNumber;
+                      return (
+                        <div
+                          key={index}
+                          data-testid={`calendar-day-${cell.day}`}
+                          role="button"
+                          tabIndex={0}
+                          onClick={() => selectDay(cell.day)}
+                          onKeyDown={(event) => {
+                            if (event.key === 'Enter' || event.key === ' ') {
+                              event.preventDefault();
+                              selectDay(cell.day);
+                            }
+                          }}
                           style={{
-                            padding: '2px 5px',
-                            background: event.tone === 'warn' ? 'var(--warn-bg)' : 'transparent',
-                            border: 'none',
-                            borderLeft: `2px solid var(--${event.tone}-fg)`,
-                            borderRadius: 3,
-                            fontSize: 10.5,
-                            color: 'var(--text)',
+                            minHeight: 110,
+                            padding: 6,
+                            background: isSelected ? 'var(--brand-bg)' : 'var(--surface)',
+                            borderRight: index % 7 < 6 ? '1px solid var(--divider)' : 'none',
+                            borderBottom: '1px solid var(--divider)',
+                            boxShadow: isSelected ? 'inset 0 0 0 1px var(--brand)' : 'none',
                             display: 'flex',
-                            alignItems: 'center',
-                            gap: 4,
-                            whiteSpace: 'nowrap',
-                            overflow: 'hidden',
-                            textOverflow: 'ellipsis',
+                            flexDirection: 'column',
+                            gap: 2,
                             cursor: 'pointer',
-                            textAlign: 'left',
-                          }}>
-                          <span style={{ color: 'var(--text-tertiary)', fontSize: 9.5, flexShrink: 0 }}>{event.time}</span>
-                          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{event.title}</span>
-                        </button>
-                      ))}
-                      {cell.events.length > 3 && (
-                        <div style={{ fontSize: 10, color: 'var(--text-tertiary)', padding: '0 5px' }}>
-                          + {cell.events.length - 3}건 더보기
+                            outline: 'none',
+                          }}
+                          title={`${year}-${String(month).padStart(2, '0')}-${String(cell.day).padStart(2, '0')} 일정 보기`}
+                        >
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginBottom: 2 }}>
+                            {isToday ? (
+                              <span style={{
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                width: 20,
+                                height: 20,
+                                borderRadius: '50%',
+                                background: 'var(--brand)',
+                                color: '#fff',
+                                fontSize: 11,
+                                fontWeight: 700,
+                              }}>{cell.day}</span>
+                            ) : (
+                              <span style={{
+                                fontSize: 11.5,
+                                fontWeight: 700,
+                                color: isSelected ? 'var(--brand)' : cell.dow === 0 ? 'var(--danger-fg)' : cell.dow === 6 ? 'var(--info-fg)' : 'var(--text)',
+                                paddingLeft: 2,
+                              }}>{cell.day}</span>
+                            )}
+                            {cell.events.length > 0 && (
+                              <span style={{ fontSize: 9.5, color: isSelected ? 'var(--brand)' : 'var(--text-quaternary)' }}>· {cell.events.length}건</span>
+                            )}
+                          </div>
+                          {cell.events.slice(0, 3).map((eventItem) => (
+                            <button
+                              key={eventItem.id}
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                onOpenOrder && onOpenOrder(eventItem.id);
+                              }}
+                              style={{
+                                padding: '2px 5px',
+                                background: eventItem.tone === 'warn' ? 'var(--warn-bg)' : 'var(--surface)',
+                                border: 'none',
+                                borderLeft: `2px solid var(--${eventItem.tone}-fg)`,
+                                borderRadius: 3,
+                                fontSize: 10.5,
+                                color: 'var(--text)',
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: 4,
+                                whiteSpace: 'nowrap',
+                                overflow: 'hidden',
+                                textOverflow: 'ellipsis',
+                                cursor: 'pointer',
+                                textAlign: 'left',
+                              }}>
+                              <span style={{ color: 'var(--text-tertiary)', fontSize: 9.5, flexShrink: 0 }}>{eventItem.time}</span>
+                              <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{eventItem.title}</span>
+                            </button>
+                          ))}
+                          {cell.events.length > 3 && (
+                            <button
+                              type="button"
+                              data-testid={`calendar-more-${cell.day}`}
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                selectDay(cell.day);
+                              }}
+                              style={{
+                                padding: '1px 5px',
+                                border: 'none',
+                                background: 'transparent',
+                                fontSize: 10,
+                                color: 'var(--brand)',
+                                textAlign: 'left',
+                                cursor: 'pointer',
+                              }}
+                            >
+                              + {cell.events.length - 3}건 더보기
+                            </button>
+                          )}
                         </div>
-                      )}
-                    </div>
-                  );
-                })}
+                      );
+                    })}
+                  </div>
+                </div>
               </div>
-            </div>
+              <DaySchedulePanel
+                year={year}
+                month={month}
+                day={selectedDayNumber}
+                events={selectedEvents}
+                siteName={selectedSiteName}
+                onOpenOrder={onOpenOrder}
+              />
+            </>
           )}
         </div>
       </main>
@@ -304,6 +360,101 @@ function Legend({ tone, label }) {
   );
 }
 
+function DaySchedulePanel({ year, month, day, events, siteName, onOpenOrder }) {
+  const dateText = `${year}.${String(month).padStart(2, '0')}.${String(day).padStart(2, '0')} ${weekdayLabel(year, month, day)}`;
+
+  return (
+    <aside
+      data-testid="calendar-day-panel"
+      style={{
+        width: 340,
+        flexShrink: 0,
+        borderLeft: '1px solid var(--border)',
+        background: 'var(--surface)',
+        display: 'flex',
+        flexDirection: 'column',
+        minHeight: 0,
+      }}
+    >
+      <div style={{ padding: '14px 16px 12px', borderBottom: '1px solid var(--divider)' }}>
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+          <h3 style={{ margin: 0, fontSize: 15, fontWeight: 700 }}>{dateText}</h3>
+          <span style={{ fontSize: 11.5, color: 'var(--text-tertiary)' }}>{events.length}건</span>
+        </div>
+        <div style={{ marginTop: 4, fontSize: 11.5, color: 'var(--text-tertiary)' }}>{siteName}</div>
+      </div>
+
+      <div className="scroll" style={{ flex: 1, overflow: 'auto' }}>
+        {events.length === 0 ? (
+          <div style={{ padding: 16, fontSize: 12.5, color: 'var(--text-tertiary)', lineHeight: 1.55 }}>
+            선택한 날짜에 표시할 주문이 없습니다.
+          </div>
+        ) : (
+          events.map((eventItem) => (
+            <button
+              key={eventItem.id}
+              type="button"
+              data-testid={`calendar-panel-order-${eventItem.id}`}
+              onClick={() => onOpenOrder && onOpenOrder(eventItem.id)}
+              style={{
+                width: '100%',
+                padding: '12px 16px',
+                border: 'none',
+                borderBottom: '1px solid var(--divider)',
+                background: 'transparent',
+                textAlign: 'left',
+                cursor: 'pointer',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 7,
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <span style={{ color: 'var(--text-tertiary)', fontSize: 11.5, fontVariantNumeric: 'tabular-nums', minWidth: 42 }}>
+                  {eventItem.time}
+                </span>
+                <StatusChip tone={eventItem.tone} label={eventItem.status} />
+                <span className="mono" style={{ marginLeft: 'auto', fontSize: 10.5, color: 'var(--text-quaternary)' }}>{eventItem.id}</span>
+              </div>
+              <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {eventItem.title}
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--text-secondary)' }}>
+                <span style={{ fontWeight: 600 }}>{eventItem.customer}</span>
+                <span style={{ color: 'var(--text-quaternary)' }}>·</span>
+                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{eventItem.team}</span>
+              </div>
+              <div style={{ fontSize: 11.5, color: 'var(--text-tertiary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {eventItem.address}
+              </div>
+            </button>
+          ))
+        )}
+      </div>
+    </aside>
+  );
+}
+
+function StatusChip({ tone, label }) {
+  return (
+    <span style={{
+      display: 'inline-flex',
+      alignItems: 'center',
+      gap: 5,
+      height: 20,
+      padding: '0 7px',
+      borderRadius: 6,
+      background: `var(--${tone}-bg)`,
+      color: `var(--${tone}-fg)`,
+      fontSize: 11,
+      fontWeight: 600,
+      whiteSpace: 'nowrap',
+    }}>
+      {label}
+    </span>
+  );
+}
+
 function startOfMonth(date) {
   return new Date(date.getFullYear(), date.getMonth(), 1);
 }
@@ -319,6 +470,10 @@ function groupOrdersByDay(orders) {
       id: order.id,
       time: order.requested_time || '-',
       title: order.size_or_quantity ? `${order.service_name} ${order.size_or_quantity}` : order.service_name,
+      status: order.status,
+      customer: order.customer_name,
+      address: order.customer_address,
+      team: order.team_name || '미배정',
       tone: statusTone(order.status),
     };
     groups.set(day, [...(groups.get(day) || []), event]);
@@ -342,6 +497,10 @@ function toSites(partners, orders) {
     { id: 'all', name: '전체 협력사', count: orders.length },
     ...partnerSites,
   ];
+}
+
+function weekdayLabel(year, month, day) {
+  return ['일', '월', '화', '수', '목', '금', '토'][new Date(year, month - 1, day).getDay()];
 }
 
 function statusTone(status) {

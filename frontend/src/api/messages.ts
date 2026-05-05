@@ -20,7 +20,7 @@ export function sendCustomerPhotoReady(orderId) {
   return sendAdminMessage(orderId, 'customer_photo_ready', 'customer');
 }
 
-function sendAdminMessage(orderId, messageType, recipientType) {
+export function sendAdminMessage(orderId, messageType, recipientType) {
   return apiRequest('/admin/messages/send', {
     method: 'POST',
     body: {

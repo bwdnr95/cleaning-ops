@@ -44,7 +44,7 @@ export function AdminShell({ initialPage = 'dashboard', children, onNav = undefi
         </div>
 
         <nav style={{ padding: 8, flex: 1, display: 'flex', flexDirection: 'column', gap: 1 }}>
-          <div style={{ fontSize: 10.5, color: 'var(--text-quaternary)', padding: '10px 8px 4px', letterSpacing: '0.06em', fontWeight: 600 }}>WORKSPACE</div>
+          <div style={{ fontSize: 10.5, color: 'var(--text-quaternary)', padding: '10px 8px 4px', letterSpacing: '0.06em', fontWeight: 600 }}>운영 메뉴</div>
           {NAV.map((n) => {
             const active = page === n.key;
             const badge = navBadges[n.key] ?? n.badge;
@@ -75,24 +75,6 @@ export function AdminShell({ initialPage = 'dashboard', children, onNav = undefi
               </button>
             );
           })}
-
-          <div style={{ fontSize: 10.5, color: 'var(--text-quaternary)', padding: '16px 8px 4px', letterSpacing: '0.06em', fontWeight: 600 }}>QUICK FILTERS</div>
-          {[
-            { label: '오늘 작업', count: 5 },
-            { label: '내 담당', count: 8 },
-            { label: '잔금 미확인', count: 2 },
-          ].map((f) => (
-            <button key={f.label} style={{
-              display: 'flex', alignItems: 'center', gap: 9,
-              height: 28, padding: '0 8px',
-              border: 'none', borderRadius: 5, background: 'transparent',
-              color: 'var(--text-tertiary)', fontSize: 12, cursor: 'pointer', textAlign: 'left',
-            }}>
-              <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--text-quaternary)' }}/>
-              <span style={{ flex: 1 }}>{f.label}</span>
-              <span style={{ fontSize: 11, color: 'var(--text-quaternary)' }}>{f.count}</span>
-            </button>
-          ))}
         </nav>
 
         <div style={{ padding: 10, borderTop: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -141,28 +123,7 @@ export function Topbar({ title, subtitle = undefined, breadcrumb = undefined, ac
         </div>
       </div>
 
-      <div style={{
-        display: 'flex', alignItems: 'center',
-        height: 30, width: 240, padding: '0 10px',
-        background: 'var(--bg-subtle)',
-        border: '1px solid var(--border)',
-        borderRadius: 6, gap: 6,
-        color: 'var(--text-tertiary)', fontSize: 12,
-      }}>
-        <Icon name="search" size={13}/>
-        <span style={{ flex: 1 }}>주문번호, 고객, 주소 검색</span>
-        <span className="kbd">⌘K</span>
-      </div>
-
       {actions}
-
-      <button className="btn btn--ghost btn--sm" style={{ padding: '0 6px', position: 'relative' }}>
-        <Icon name="bell" size={14}/>
-        <span style={{
-          position: 'absolute', top: 2, right: 2,
-          width: 6, height: 6, borderRadius: '50%', background: 'var(--danger)',
-        }}/>
-      </button>
     </header>
   );
 }

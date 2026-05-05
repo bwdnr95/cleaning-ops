@@ -386,6 +386,27 @@ def test_admin_service_catalog_crud_and_order_catalog_selection() -> None:
     assert item_response.status_code == 201, item_response.text
     item = item_response.json()
 
+    unused_item_response = client.post(
+        "/api/admin/services/items",
+        headers=headers,
+        json={
+            "category_id": category["id"],
+            "name": "삭제 가능한 임시상품",
+            "unit": "건",
+            "base_price": 10000,
+            "is_active": True,
+            "sort_order": 99,
+        },
+    )
+    assert unused_item_response.status_code == 201, unused_item_response.text
+    unused_item = unused_item_response.json()
+
+    delete_unused_response = client.delete(
+        f"/api/admin/services/items/{unused_item['id']}",
+        headers=headers,
+    )
+    assert delete_unused_response.status_code == 204
+
     catalog_response = client.get("/api/admin/services", headers=headers)
     assert catalog_response.status_code == 200
     active_category = next(category for category in catalog_response.json() if category["id"] == item["category_id"])
@@ -414,6 +435,13 @@ def test_admin_service_catalog_crud_and_order_catalog_selection() -> None:
     assert created["service_item_id"] == item["id"]
     assert created["service_name"] == "프리미엄 입주청소"
     assert created["total_amount"] == 390000
+
+    delete_used_response = client.delete(
+        f"/api/admin/services/items/{item['id']}",
+        headers=headers,
+    )
+    assert delete_used_response.status_code == 400
+    assert delete_used_response.json()["detail"] == "service_item_in_use"
 
     inactive_response = client.patch(
         f"/api/admin/services/items/{item['id']}",
@@ -492,6 +520,17 @@ def test_admin_can_create_partner_with_login_and_view_operational_detail() -> No
     assert detail["manager_name"] == "Manager A"
     assert "total_amount" not in detail
 
+    delete_response = client.delete(f"/api/admin/partners/{created['id']}", headers=headers)
+    deleted_list_response = client.get("/api/admin/partners?include_inactive=true", headers=headers)
+    deleted_login_response = client.post(
+        "/api/auth/partner/login",
+        json={"identifier": "01022223333", "password": "PartnerTest123!"},
+    )
+
+    assert delete_response.status_code == 204
+    assert created["id"] not in {partner["id"] for partner in deleted_list_response.json()}
+    assert deleted_login_response.status_code == 401
+
 
 def test_admin_partner_detail_counts_assigned_jobs_without_settlement_fields() -> None:
     client = make_test_client()
@@ -511,6 +550,10 @@ def test_admin_partner_detail_counts_assigned_jobs_without_settlement_fields() -
     assert "total_amount" not in body["jobs"][0]
     assert "partner_payment_amount" not in body["jobs"][0]
     assert "payment_memo" not in body["jobs"][0]
+
+    delete_response = client.delete(f"/api/admin/partners/{DEV_PARTNER_ID}", headers=headers)
+    assert delete_response.status_code == 400
+    assert delete_response.json()["detail"] == "partner_in_use"
 
 
 def test_admin_partner_deactivation_blocks_login_and_existing_partner_token() -> None:

@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy.orm import Session
 
 from app.api.deps import CurrentUser, get_session, require_admin
@@ -59,6 +59,23 @@ def update_partner(
     except ValueError as exc:
         if str(exc) == "partner_not_found":
             raise HTTPException(status_code=404, detail="partner_not_found") from exc
+        raise
+
+
+@router.delete("/{partner_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_partner(
+    partner_id: str,
+    db: Session = Depends(get_session),
+    _: CurrentUser = Depends(require_admin),
+) -> Response:
+    try:
+        PartnerService(db).delete(partner_id)
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
+    except ValueError as exc:
+        if str(exc) == "partner_not_found":
+            raise HTTPException(status_code=404, detail="partner_not_found") from exc
+        if str(exc) == "partner_in_use":
+            raise HTTPException(status_code=400, detail="partner_in_use") from exc
         raise
 
 

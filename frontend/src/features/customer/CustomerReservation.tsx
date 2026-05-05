@@ -97,7 +97,7 @@ function VerificationGate({
             data-testid="customer-token-input"
             value={customerToken}
               onChange={(event) => onCustomerTokenChange(event.target.value)}
-              placeholder="문자 링크의 token"
+              placeholder="문자 링크의 확인 코드"
               autoComplete="off"
               style={inputStyle}
               required
@@ -162,7 +162,7 @@ function ReservationContent({ order, onReset }) {
         </h1>
 
         <div style={{ display: 'flex', gap: 6, marginTop: 14, flexWrap: 'wrap' }}>
-          <Badge tone="success" dot>{order.status}</Badge>
+          <Badge tone={customerStatusTone(order.status)} dot>{customerStatusLabel(order.status)}</Badge>
           <Badge tone="brand">{order.service_name}</Badge>
         </div>
       </section>
@@ -261,7 +261,7 @@ function VisitGuide() {
         <ul style={{ margin: '8px 0 0', padding: '0 0 0 16px', fontSize: 12.5, color: '#78350f', lineHeight: 1.65 }}>
           <li>작업 공간 주변 물건은 가능한 범위에서 미리 이동해주세요.</li>
           <li>현장 상황에 따라 작업 시간은 조금 달라질 수 있습니다.</li>
-          <li>완료 사진은 관리자 검수 후 이 페이지에서 확인할 수 있습니다.</li>
+          <li>완료 사진은 확인이 끝난 뒤 이 페이지에서 확인할 수 있습니다.</li>
         </ul>
       </div>
     </section>
@@ -309,7 +309,7 @@ function CustomerPhotos({ photos }) {
             </div>
           ))}
           <div style={{ fontSize: 11.5, color: '#94a3b8', lineHeight: 1.45 }}>
-            관리자 검수가 완료되어 고객 공개 승인된 사진만 표시합니다.
+            확인 완료된 사진만 표시됩니다.
           </div>
         </div>
       )}
@@ -327,7 +327,7 @@ function PhotoPending() {
         작업 완료 후 사진이 표시됩니다
       </div>
       <div style={{ fontSize: 11.5, color: '#94a3b8' }}>
-        관리자 검수와 고객 공개 승인이 끝난 사진만 볼 수 있습니다.
+        확인 완료된 사진만 볼 수 있습니다.
       </div>
     </div>
   );
@@ -414,7 +414,42 @@ function statusHeadline(status) {
   if (status === '취소') {
     return '예약이 취소되었습니다';
   }
+  if (status === '사진검수대기') {
+    return '작업 확인 중입니다';
+  }
   return '예약이 확인되었습니다';
+}
+
+function customerStatusLabel(status) {
+  if (status === '취소') {
+    return '예약 취소';
+  }
+  if (['고객전달필요', '고객전달완료', '서비스완료'].includes(status)) {
+    return '작업 완료';
+  }
+  if (status === '작업진행') {
+    return '작업 진행 중';
+  }
+  if (status === '사진검수대기') {
+    return '확인 중';
+  }
+  if (['일정확정', '전날안내필요', '전날안내완료', '작업예정'].includes(status)) {
+    return '방문 예정';
+  }
+  return '예약 확인 중';
+}
+
+function customerStatusTone(status) {
+  if (status === '취소') {
+    return 'danger';
+  }
+  if (['고객전달필요', '고객전달완료', '서비스완료'].includes(status)) {
+    return 'success';
+  }
+  if (status === '작업진행') {
+    return 'info';
+  }
+  return 'neutral';
 }
 
 function visitHeadline(order) {

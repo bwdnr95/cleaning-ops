@@ -61,7 +61,7 @@ export function MessagesPage() {
                   </BodyCell>
                   <BodyCell>{String(message.channel || '').toUpperCase()}</BodyCell>
                   <BodyCell>
-                    <Badge tone={message.status === 'sent' ? 'success' : 'danger'} dot>{message.status}</Badge>
+                    <Badge tone={message.status === 'sent' ? 'success' : 'danger'} dot>{messageStatusLabel(message.status)}</Badge>
                   </BodyCell>
                 </React.Fragment>
               ))}
@@ -154,6 +154,12 @@ function messageTypeLabel(type) {
   if (type === 'partner_assignment') return '협력사 배정';
   if (type === 'customer_photo_ready') return '사진 링크';
   return type;
+}
+
+function messageStatusLabel(status) {
+  if (status === 'sent') return '성공';
+  if (status === 'failed') return '실패';
+  return status || '-';
 }
 
 function formatDateTime(value) {

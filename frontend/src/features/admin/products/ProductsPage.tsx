@@ -3,6 +3,8 @@ import React from 'react';
 import {
   createServiceCategory,
   createServiceItem,
+  deleteServiceCategory,
+  deleteServiceItem,
   listServiceCatalog,
   updateServiceCategory,
   updateServiceItem,
@@ -71,7 +73,7 @@ export function ProductsPage() {
       }
       catalogResource.reload();
     } catch (requestError) {
-      setError(requestError?.message || '카테고리 저장에 실패했습니다.');
+      setError(catalogErrorMessage(requestError, '카테고리 저장에 실패했습니다.'));
     } finally {
       setIsSaving(false);
     }
@@ -93,7 +95,7 @@ export function ProductsPage() {
       setNotice('새 카테고리를 등록했습니다.');
       catalogResource.reload();
     } catch (requestError) {
-      setError(requestError?.message || '카테고리 등록에 실패했습니다.');
+      setError(catalogErrorMessage(requestError, '카테고리 등록에 실패했습니다.'));
     } finally {
       setIsSaving(false);
     }
@@ -111,7 +113,31 @@ export function ProductsPage() {
       setNotice(selectedCategory.is_active ? '카테고리를 비활성화했습니다.' : '카테고리를 활성화했습니다.');
       catalogResource.reload();
     } catch (requestError) {
-      setError(requestError?.message || '카테고리 상태 변경에 실패했습니다.');
+      setError(catalogErrorMessage(requestError, '카테고리 상태 변경에 실패했습니다.'));
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const deleteCategory = async () => {
+    if (!selectedCategory) {
+      return;
+    }
+    if (!window.confirm(`'${selectedCategory.name}' 카테고리를 삭제할까요?`)) {
+      return;
+    }
+
+    setIsSaving(true);
+    setNotice('');
+    setError('');
+    try {
+      await deleteServiceCategory(selectedCategory.id);
+      setSelectedCategoryId('');
+      setSelectedItemId('');
+      setNotice('카테고리를 삭제했습니다.');
+      catalogResource.reload();
+    } catch (requestError) {
+      setError(catalogErrorMessage(requestError, '카테고리 삭제에 실패했습니다.'));
     } finally {
       setIsSaving(false);
     }
@@ -134,7 +160,7 @@ export function ProductsPage() {
       }
       catalogResource.reload();
     } catch (requestError) {
-      setError(requestError?.message || '상품 저장에 실패했습니다.');
+      setError(catalogErrorMessage(requestError, '상품 저장에 실패했습니다.'));
     } finally {
       setIsSaving(false);
     }
@@ -149,7 +175,29 @@ export function ProductsPage() {
       setNotice(item.is_active ? '상품을 비활성화했습니다.' : '상품을 활성화했습니다.');
       catalogResource.reload();
     } catch (requestError) {
-      setError(requestError?.message || '상품 상태 변경에 실패했습니다.');
+      setError(catalogErrorMessage(requestError, '상품 상태 변경에 실패했습니다.'));
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const deleteItem = async (item) => {
+    if (!window.confirm(`'${item.name}' 상품을 삭제할까요?`)) {
+      return;
+    }
+
+    setIsSaving(true);
+    setNotice('');
+    setError('');
+    try {
+      await deleteServiceItem(item.id);
+      if (selectedItemId === item.id) {
+        setSelectedItemId('');
+      }
+      setNotice('상품을 삭제했습니다.');
+      catalogResource.reload();
+    } catch (requestError) {
+      setError(catalogErrorMessage(requestError, '상품 삭제에 실패했습니다.'));
     } finally {
       setIsSaving(false);
     }
@@ -221,10 +269,21 @@ export function ProductsPage() {
                 icon="settings"
                 title={selectedCategory ? '카테고리 설정' : '카테고리 설정'}
                 right={selectedCategory && (
-                  <button type="button" className="btn btn--secondary btn--sm" onClick={toggleCategory} disabled={isSaving}>
-                    <Icon name={selectedCategory.is_active ? 'x' : 'check'} size={12} />
-                    {selectedCategory.is_active ? '비활성화' : '활성화'}
-                  </button>
+                  <div style={{ display: 'flex', gap: 6 }}>
+                    <button type="button" className="btn btn--secondary btn--sm" onClick={toggleCategory} disabled={isSaving}>
+                      <Icon name={selectedCategory.is_active ? 'x' : 'check'} size={12} />
+                      {selectedCategory.is_active ? '비활성화' : '활성화'}
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn--danger btn--sm"
+                      onClick={deleteCategory}
+                      disabled={isSaving || selectedCategory.items.length > 0}
+                      title={selectedCategory.items.length > 0 ? '상품이 없는 카테고리만 삭제할 수 있습니다.' : '카테고리 삭제'}
+                    >
+                      <Icon name="x" size={12} /> 삭제
+                    </button>
+                  </div>
                 )}
               />
               {selectedCategory ? (
@@ -253,8 +312,8 @@ export function ProductsPage() {
               />
               {selectedCategory && items.length === 0 && <StateLine text="등록된 상품이 없습니다." />}
               {selectedCategory && items.length > 0 && (
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 72px 100px 80px 96px', fontSize: 12 }}>
-                  {['상품명', '단위', '기준가', '상태', ''].map((header) => <GridHead key={header}>{header}</GridHead>)}
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 72px 100px 80px 172px', fontSize: 12 }}>
+                  {['상품명', '단위', '기준가', '상태', '관리'].map((header) => <GridHead key={header}>{header}</GridHead>)}
                   {items.map((item) => (
                     <React.Fragment key={item.id}>
                       <GridCell>
@@ -268,9 +327,29 @@ export function ProductsPage() {
                         <Badge tone={item.is_active ? 'success' : 'neutral'} dot>{item.is_active ? '활성' : '비활성'}</Badge>
                       </GridCell>
                       <GridCell>
-                        <button type="button" className="btn btn--ghost btn--sm" disabled={isSaving} onClick={() => toggleItem(item)}>
-                          {item.is_active ? '끄기' : '켜기'}
-                        </button>
+                        <div style={{ display: 'flex', gap: 4 }}>
+                          <button
+                            type="button"
+                            className="btn btn--secondary btn--sm"
+                            aria-label={`${item.name} 수정`}
+                            onClick={() => setSelectedItemId(item.id)}
+                          >
+                            수정
+                          </button>
+                          <button type="button" className="btn btn--ghost btn--sm" disabled={isSaving} onClick={() => toggleItem(item)}>
+                            {item.is_active ? '끄기' : '켜기'}
+                          </button>
+                          <button
+                            type="button"
+                            className="btn btn--danger btn--sm"
+                            aria-label={`${item.name} 삭제`}
+                            disabled={isSaving}
+                            onClick={() => deleteItem(item)}
+                            style={{ padding: '0 7px' }}
+                          >
+                            삭제
+                          </button>
+                        </div>
                       </GridCell>
                     </React.Fragment>
                   ))}
@@ -280,7 +359,7 @@ export function ProductsPage() {
 
             {selectedCategory && (
               <section className="card" style={{ padding: 0, overflow: 'hidden' }}>
-                <SectionHeader icon="plus" title={selectedItem ? '상품 수정' : '새 상품 등록'} />
+                <SectionHeader icon={selectedItem ? 'settings' : 'plus'} title={selectedItem ? `상품 수정 · ${selectedItem.name}` : '새 상품 등록'} />
                 <form onSubmit={saveItem} style={{ padding: 14, display: 'grid', gridTemplateColumns: '1fr 92px 140px 90px auto', gap: 10, alignItems: 'end' }}>
                   <FormField testId="products-item-name" label="상품명" value={itemForm.name} onChange={(value) => setItemForm({ ...itemForm, name: value })} required />
                   <label style={{ display: 'flex', flexDirection: 'column', gap: 5, minWidth: 0 }}>
@@ -495,6 +574,19 @@ function toItemPayload(form) {
 function emptyToNull(value) {
   const text = String(value || '').trim();
   return text ? text : null;
+}
+
+function catalogErrorMessage(error, fallback) {
+  const messages = {
+    service_category_not_found: '카테고리를 찾을 수 없습니다.',
+    service_category_not_available: '비활성 카테고리에는 활성 상품을 등록할 수 없습니다.',
+    service_category_has_items: '상품이 남아 있는 카테고리는 삭제할 수 없습니다.',
+    service_category_in_use: '이미 주문에 사용된 카테고리는 삭제할 수 없습니다. 비활성화를 사용해주세요.',
+    service_item_not_found: '상품을 찾을 수 없습니다.',
+    service_item_not_available: '비활성 상품은 주문에 사용할 수 없습니다.',
+    service_item_in_use: '이미 주문에 사용된 상품은 삭제할 수 없습니다. 비활성화를 사용해주세요.',
+  };
+  return messages[error?.message] || fallback;
 }
 
 function formatWon(value) {

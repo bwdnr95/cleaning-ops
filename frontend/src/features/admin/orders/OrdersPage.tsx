@@ -1,8 +1,11 @@
 import React from 'react';
+import { DatePicker } from '../../../components/common/DatePicker';
 import { Avatar, Icon } from '../../../components/common/ui';
 import { ORDERS } from '../../../mocks/cleaningOpsData';
-import { listAdminOrders } from '../../../api/admin';
+import { listAdminOrders, listPartners, updateAdminOrder } from '../../../api/admin';
+import { sendAdminMessage } from '../../../api/messages';
 import { useApiResource } from '../../../api/useApiResource';
+import { ORDER_STATUSES } from '../../../domain/orderStatus';
 import { isPaymentCheckNeeded } from '../../../domain/paymentStatus';
 
 // Orders list v3 — modern Linear/Attio style: airy, typographic, low-chrome
@@ -90,18 +93,37 @@ function SimplePill({ kind, value }) {
 
 const TODAY_JOB_STATUSES = ['작업예정', '작업진행', '사진검수대기'];
 const TOMORROW_NOTICE_STATUSES = ['일정확정', '전날안내필요'];
+const BULK_MESSAGE_OPTIONS = [
+  { value: 'customer_schedule_confirmed', label: '고객 일정확정 안내', recipient: 'customer' },
+  { value: 'customer_day_before', label: '고객 전날 안내', recipient: 'customer' },
+  { value: 'partner_assignment', label: '협력사 배정 안내', recipient: 'partner' },
+  { value: 'customer_photo_ready', label: '고객 사진 확인 안내', recipient: 'customer' },
+];
 
-export function OrdersPage({ onOpenOrder, onCreateOrder, initialTab = 'all' }) {
+export function OrdersPage({ onOpenOrder, onCreateOrder, onEditOrder, initialTab = 'all' }) {
   const ordersResource = useApiResource(listAdminOrders);
+  const partnersResource = useApiResource(listPartners);
   const orders = ordersResource.data ? ordersResource.data.map(toOrderRow) : ORDERS;
-  const [tab, setTab] = React.useState('all');
+  const [tab, setTab] = React.useState(initialTab);
   const [selected, setSelected] = React.useState(new Set());
   const [hoverRow, setHoverRow] = React.useState(null);
   const [sortBy, setSortBy] = React.useState('visit');
+  const [query, setQuery] = React.useState('');
+  const [dateFilter, setDateFilter] = React.useState(() => createInitialDateFilter(initialTab));
+  const [actionError, setActionError] = React.useState('');
+  const [actionNotice, setActionNotice] = React.useState(null);
+  const [isSavingAction, setIsSavingAction] = React.useState(false);
+  const [bulkAction, setBulkAction] = React.useState(null);
+  const [bulkStatus, setBulkStatus] = React.useState('일정확정');
+  const [bulkPartnerId, setBulkPartnerId] = React.useState('');
+  const [bulkMessageType, setBulkMessageType] = React.useState('customer_schedule_confirmed');
   const statusTabs = getStatusTabs(orders);
+  const isDateFilterActive = dateFilter.start !== '' || dateFilter.end !== '';
+  const partners = partnersResource.data || [];
 
   React.useEffect(() => {
     setTab(initialTab);
+    setDateFilter(createInitialDateFilter(initialTab));
   }, [initialTab]);
 
   const toggleRow = (id) => {
@@ -110,18 +132,117 @@ export function OrdersPage({ onOpenOrder, onCreateOrder, initialTab = 'all' }) {
     setSelected(next);
   };
 
-  const filtered = orders.filter((o) => {
-    if (tab === 'today') return isTodayDate(o.scheduledDate) && TODAY_JOB_STATUSES.includes(o.status);
-    if (tab === 'tomorrow_notice') return isTomorrowDate(o.scheduledDate) && TOMORROW_NOTICE_STATUSES.includes(o.status);
-    if (tab === 'partner_pending') return o.status === '협력사확인중';
-    if (tab === 'pending') return ['신규접수', '상담중', '협력사확인중'].includes(o.status);
-    if (tab === 'work') return ['일정확정', '전날안내필요', '전날안내완료', '작업예정', '작업진행', '사진검수대기'].includes(o.status);
-    if (tab === 'deliver') return ['고객전달필요'].includes(o.status);
-    if (tab === 'payment_check') return isPaymentCheckNeeded(o.paymentStatus);
-    if (tab === 'done') return ['고객전달완료', '서비스완료'].includes(o.status);
-    if (tab === 'cancel') return o.status === '취소';
-    return true;
-  });
+  const handleCancelOrder = async (order) => {
+    if (!window.confirm(`${order.id} 주문을 취소 처리할까요?`)) {
+      return;
+    }
+
+    setActionError('');
+    setIsSavingAction(true);
+    try {
+      await updateAdminOrder(order.id, { status: '취소' });
+      ordersResource.reload();
+    } catch {
+      setActionError('주문 취소 처리에 실패했습니다.');
+    } finally {
+      setIsSavingAction(false);
+    }
+  };
+
+  const runSelectedOrdersAction = async ({ execute, successLabel }) => {
+    const selectedIds = [...selected];
+    if (selectedIds.length === 0) {
+      return;
+    }
+
+    setActionError('');
+    setActionNotice(null);
+    setIsSavingAction(true);
+    const failures = [];
+
+    for (const orderId of selectedIds) {
+      try {
+        await execute(orderId);
+      } catch (error) {
+        failures.push({ orderId, message: normalizeActionError(error) });
+      }
+    }
+
+    ordersResource.reload();
+    const successCount = selectedIds.length - failures.length;
+    setSelected(new Set(failures.map((failure) => failure.orderId)));
+    setActionNotice({
+      tone: failures.length > 0 ? 'warn' : 'success',
+      text: failures.length > 0
+        ? `${successCount}건 처리, ${failures.length}건 실패 · ${failures.slice(0, 2).map((failure) => `${shortOrderId(failure.orderId)} ${failure.message}`).join(', ')}`
+        : `${successCount}건 ${successLabel}`,
+    });
+    setIsSavingAction(false);
+  };
+
+  const handleBulkStatusChange = async () => {
+    await runSelectedOrdersAction({
+      successLabel: `${bulkStatus} 상태로 변경했습니다.`,
+      execute: (orderId) => updateAdminOrder(orderId, { status: bulkStatus }),
+    });
+  };
+
+  const handleBulkPartnerAssign = async () => {
+    const partner = partners.find((item) => item.id === bulkPartnerId);
+    if (!partner) {
+      setActionNotice({ tone: 'danger', text: '배정할 협력사를 선택해주세요.' });
+      return;
+    }
+
+    await runSelectedOrdersAction({
+      successLabel: `${partner.name}에 배정했습니다.`,
+      execute: (orderId) => updateAdminOrder(orderId, { partner_id: partner.id, team_name: partner.name }),
+    });
+  };
+
+  const handleBulkMessageSend = async () => {
+    const option = BULK_MESSAGE_OPTIONS.find((item) => item.value === bulkMessageType);
+    if (!option) {
+      setActionNotice({ tone: 'danger', text: '발송할 메시지 타입을 선택해주세요.' });
+      return;
+    }
+
+    await runSelectedOrdersAction({
+      successLabel: `${option.label}를 발송했습니다.`,
+      execute: (orderId) => sendAdminMessage(orderId, option.value, option.recipient),
+    });
+  };
+
+  const filtered = sortOrders(
+    orders
+      .filter((o) => {
+        if (tab === 'today') return isTodayDate(o.scheduledDate) && TODAY_JOB_STATUSES.includes(o.status);
+        if (tab === 'tomorrow_notice') return isTomorrowDate(o.scheduledDate) && TOMORROW_NOTICE_STATUSES.includes(o.status);
+        if (tab === 'partner_pending') return o.status === '협력사확인중';
+        if (tab === 'pending') return ['신규접수', '상담중', '협력사확인중'].includes(o.status);
+        if (tab === 'work') return ['일정확정', '전날안내필요', '전날안내완료', '작업예정', '작업진행', '사진검수대기'].includes(o.status);
+        if (tab === 'deliver') return ['고객전달필요'].includes(o.status);
+        if (tab === 'payment_check') return isPaymentCheckNeeded(o.paymentStatus);
+        if (tab === 'done') return ['고객전달완료', '서비스완료'].includes(o.status);
+        if (tab === 'cancel') return o.status === '취소';
+        return true;
+      })
+      .filter((o) => matchesDateFilter(o.scheduledDate, dateFilter))
+      .filter((o) => matchesOrderQuery(o, query)),
+    sortBy,
+  );
+
+  const setDatePreset = (preset) => {
+    setDateFilter(createDateFilter(preset));
+  };
+
+  const setDateBoundary = (key, value) => {
+    setDateFilter((current) => ({
+      ...current,
+      preset: 'range',
+      [key]: value,
+    }));
+  };
 
   return (
     <div data-testid="admin-orders-page" style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0, background: 'var(--bg)' }}>
@@ -154,11 +275,11 @@ export function OrdersPage({ onOpenOrder, onCreateOrder, initialTab = 'all' }) {
         </div>
       </div>
 
-      {/* Toolbar — search, filters, tabs in one airy row */}
+      {/* Toolbar — real search, visit-date filtering, and sort */}
       <div style={{
         padding: '0 24px 12px',
         background: 'var(--bg)',
-        display: 'flex', alignItems: 'center', gap: 8,
+        display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap',
       }}>
         <div style={{
           display: 'flex', alignItems: 'center', gap: 8,
@@ -169,19 +290,72 @@ export function OrdersPage({ onOpenOrder, onCreateOrder, initialTab = 'all' }) {
           boxShadow: 'var(--shadow-xs)',
         }}>
           <Icon name="search" size={13}/>
-          <span>검색</span>
-          <span style={{
-            marginLeft: 'auto',
-            fontSize: 10.5, color: 'var(--text-quaternary)',
-            padding: '1px 5px', border: '1px solid var(--border)', borderRadius: 4,
-          }}>⌘K</span>
+          <input
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder="주문번호, 고객, 주소 검색"
+            aria-label="주문 검색"
+            style={{
+              flex: 1,
+              minWidth: 0,
+              border: 'none',
+              outline: 'none',
+              background: 'transparent',
+              color: 'var(--text)',
+              fontSize: 12,
+            }}
+          />
         </div>
-        <SoftChip label="이번 달"   />
-        <SoftChip label="협력사 전체" />
-        <SoftChip label="결제 전체"   />
-        <button style={softGhostBtn}>
-          <Icon name="plus" size={11}/> 필터
-        </button>
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 6,
+          minHeight: 32,
+          paddingLeft: 4,
+        }}>
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, color: 'var(--text-tertiary)', fontSize: 12, fontWeight: 600, whiteSpace: 'nowrap' }}>
+            <Icon name="calendar" size={12}/> 방문일
+          </span>
+          {[
+            ['all', '전체'],
+            ['today', '오늘'],
+            ['tomorrow', '내일'],
+            ['week', '이번주'],
+          ].map(([key, label]) => (
+            <button
+              key={key}
+              type="button"
+              data-testid={`orders-date-preset-${key}`}
+              aria-pressed={dateFilter.preset === key}
+              onClick={() => setDatePreset(key)}
+              style={datePresetButton(dateFilter.preset === key)}
+            >
+              {label}
+            </button>
+          ))}
+          <DatePicker
+            compact
+            testId="orders-date-start"
+            ariaLabel="방문일 시작"
+            placeholder="시작일"
+            value={dateFilter.start}
+            onChange={(value) => setDateBoundary('start', value)}
+          />
+          <span style={{ color: 'var(--text-quaternary)', fontSize: 12 }}>~</span>
+          <DatePicker
+            compact
+            testId="orders-date-end"
+            ariaLabel="방문일 종료"
+            placeholder="종료일"
+            value={dateFilter.end}
+            onChange={(value) => setDateBoundary('end', value)}
+          />
+          {isDateFilterActive && (
+            <button type="button" data-testid="orders-date-clear" style={softGhostBtn} onClick={() => setDatePreset('all')}>
+              해제
+            </button>
+          )}
+        </div>
         <div style={{ flex: 1 }}/>
         <button style={softGhostBtn} onClick={() => setSortBy(sortBy === 'visit' ? 'received' : 'visit')}>
           <Icon name="list" size={11}/> {sortBy === 'visit' ? '방문일순' : '접수일순'}
@@ -197,7 +371,11 @@ export function OrdersPage({ onOpenOrder, onCreateOrder, initialTab = 'all' }) {
         {statusTabs.map((t) => {
           const active = tab === t.key;
           return (
-            <button key={t.key} onClick={() => setTab(t.key)}
+            <button
+              key={t.key}
+              data-testid={`orders-tab-${t.key}`}
+              aria-pressed={active}
+              onClick={() => setTab(t.key)}
               style={{
                 position: 'relative',
                 padding: '10px 12px',
@@ -231,16 +409,35 @@ export function OrdersPage({ onOpenOrder, onCreateOrder, initialTab = 'all' }) {
         }}>
           <span style={{ fontWeight: 500, color: 'var(--text)' }}>{selected.size}건 선택</span>
           <span style={{ color: 'var(--text-quaternary)' }}>·</span>
-          <button style={softGhostBtn}>상태 변경</button>
-          <button style={softGhostBtn}>메시지</button>
-          <button style={softGhostBtn}>협력사 배정</button>
+          <button data-testid="orders-bulk-status-open" style={bulkActionButton(bulkAction === 'status')} onClick={() => setBulkAction(bulkAction === 'status' ? null : 'status')}>상태 변경</button>
+          <button data-testid="orders-bulk-message-open" style={bulkActionButton(bulkAction === 'message')} onClick={() => setBulkAction(bulkAction === 'message' ? null : 'message')}>메시지</button>
+          <button data-testid="orders-bulk-partner-open" style={bulkActionButton(bulkAction === 'partner')} onClick={() => setBulkAction(bulkAction === 'partner' ? null : 'partner')}>협력사 배정</button>
           <div style={{ flex: 1 }}/>
-          <button style={softGhostBtn} onClick={() => setSelected(new Set())}>해제</button>
+          <button style={softGhostBtn} onClick={() => { setSelected(new Set()); setBulkAction(null); }}>해제</button>
         </div>
+      )}
+
+      {selected.size > 0 && bulkAction && (
+        <BulkActionPanel
+          action={bulkAction}
+          bulkStatus={bulkStatus}
+          onStatusChange={setBulkStatus}
+          bulkPartnerId={bulkPartnerId}
+          onPartnerChange={setBulkPartnerId}
+          partners={partners}
+          bulkMessageType={bulkMessageType}
+          onMessageTypeChange={setBulkMessageType}
+          isSaving={isSavingAction}
+          onApplyStatus={() => void handleBulkStatusChange()}
+          onApplyPartner={() => void handleBulkPartnerAssign()}
+          onApplyMessage={() => void handleBulkMessageSend()}
+        />
       )}
 
       {/* Table — airy, no inner borders, hover float */}
       <div className="scroll" style={{ flex: 1, overflow: 'auto', padding: '4px 12px 20px' }}>
+        {actionError && <ListNotice text={actionError} tone="danger" />}
+        {actionNotice && <ListNotice testId="orders-bulk-notice" text={actionNotice.text} tone={actionNotice.tone} />}
         {ordersResource.isLoading && <ListNotice text="주문 목록을 불러오는 중입니다." />}
         {!ordersResource.isLoading && ordersResource.error && <ListNotice text="주문 목록을 불러오지 못했습니다." tone="danger" />}
         {!ordersResource.isLoading && !ordersResource.error && filtered.length === 0 && <ListNotice text="표시할 주문이 없습니다." />}
@@ -259,7 +456,7 @@ export function OrdersPage({ onOpenOrder, onCreateOrder, initialTab = 'all' }) {
             <col style={{ width: 70 }}/>
             <col style={{ width: 70 }}/>
             <col style={{ width: 80 }}/>
-            <col style={{ width: 50 }}/>
+            <col style={{ width: 132 }}/>
           </colgroup>
           <thead>
             <tr>
@@ -280,7 +477,7 @@ export function OrdersPage({ onOpenOrder, onCreateOrder, initialTab = 'all' }) {
               <th>결제</th>
               <th>사진</th>
               <th>고객전달</th>
-              <th></th>
+              <th>관리</th>
             </tr>
           </thead>
           <tbody>
@@ -342,17 +539,28 @@ export function OrdersPage({ onOpenOrder, onCreateOrder, initialTab = 'all' }) {
                   <td><SimplePill kind="photo" value={o.photo}/></td>
                   <td><SimplePill kind="deliver" value={o.delivered}/></td>
                   <td onClick={(e) => e.stopPropagation()} style={{ textAlign: 'right' }}>
-                    {hoverRow === o.id ? (
-                      <div style={{ display: 'inline-flex', gap: 1 }}>
-                        <button style={iconBtn} title="메시지"><Icon name="send" size={12}/></button>
-                        <button style={iconBtn} title="사진"><Icon name="image" size={12}/></button>
-                        <button style={iconBtn} title="더보기"><Icon name="moreHorizontal" size={13}/></button>
-                      </div>
-                    ) : (
-                      <button style={{ ...iconBtn, opacity: 0.4 }}>
-                        <Icon name="moreHorizontal" size={13}/>
+                    <div style={{ display: 'inline-flex', gap: 4, opacity: hoverRow === o.id ? 1 : 0.78 }}>
+                      <button
+                        type="button"
+                        className="btn btn--secondary btn--sm"
+                        aria-label={`${o.id} 수정`}
+                        onClick={() => onEditOrder ? onEditOrder(o.id) : onOpenOrder && onOpenOrder(o.id)}
+                      >
+                        수정
                       </button>
-                    )}
+                      {!isCancelled && (
+                        <button
+                          type="button"
+                          className="btn btn--danger btn--sm"
+                          aria-label={`${o.id} 취소`}
+                          disabled={isSavingAction}
+                          onClick={() => void handleCancelOrder(o)}
+                          style={{ padding: '0 7px' }}
+                        >
+                          취소
+                        </button>
+                      )}
+                    </div>
                   </td>
                 </tr>
               );
@@ -369,7 +577,7 @@ export function OrdersPage({ onOpenOrder, onCreateOrder, initialTab = 'all' }) {
         fontSize: 11.5, color: 'var(--text-tertiary)',
         background: 'var(--bg)',
       }}>
-        <span>{filtered.length}건 표시 · 50건/페이지</span>
+        <span>{filtered.length}건 표시 · {formatDateFilterSummary(dateFilter)}</span>
         <div style={{ flex: 1 }}/>
         <button style={iconBtn}><Icon name="chevronLeft" size={11}/></button>
         <span style={{ fontVariantNumeric: 'tabular-nums' }}>1 / 4</span>
@@ -398,11 +606,88 @@ function InsightDivider() {
   return <span style={{ width: 1, height: 14, background: 'var(--border)', alignSelf: 'center' }}/>;
 }
 
-function ListNotice({ text, tone = 'muted' }) {
+function BulkActionPanel({
+  action,
+  bulkStatus,
+  onStatusChange,
+  bulkPartnerId,
+  onPartnerChange,
+  partners,
+  bulkMessageType,
+  onMessageTypeChange,
+  isSaving,
+  onApplyStatus,
+  onApplyPartner,
+  onApplyMessage,
+}) {
   return (
-    <div style={{
+    <div
+      data-testid="orders-bulk-panel"
+      style={{
+        padding: '10px 24px',
+        background: 'var(--surface)',
+        borderBottom: '1px solid var(--border)',
+        display: 'flex',
+        alignItems: 'center',
+        gap: 8,
+        minHeight: 48,
+      }}
+    >
+      {action === 'status' && (
+        <>
+          <span style={panelLabelStyle}>선택 주문 상태</span>
+          <select data-testid="orders-bulk-status-select" className="input" value={bulkStatus} onChange={(event) => onStatusChange(event.target.value)} style={{ width: 180, height: 32 }}>
+            {ORDER_STATUSES.map((status) => <option key={status} value={status}>{status}</option>)}
+          </select>
+          <button data-testid="orders-bulk-status-apply" className="btn btn--primary btn--sm" disabled={isSaving} onClick={onApplyStatus}>
+            {isSaving ? '처리 중' : '적용'}
+          </button>
+        </>
+      )}
+
+      {action === 'partner' && (
+        <>
+          <span style={panelLabelStyle}>선택 주문 배정</span>
+          <select data-testid="orders-bulk-partner-select" className="input" value={bulkPartnerId} onChange={(event) => onPartnerChange(event.target.value)} style={{ width: 220, height: 32 }}>
+            <option value="">협력사 선택</option>
+            {partners.map((partner) => <option key={partner.id} value={partner.id}>{partner.name}</option>)}
+          </select>
+          <button data-testid="orders-bulk-partner-apply" className="btn btn--primary btn--sm" disabled={isSaving} onClick={onApplyPartner}>
+            {isSaving ? '처리 중' : '배정'}
+          </button>
+        </>
+      )}
+
+      {action === 'message' && (
+        <>
+          <span style={panelLabelStyle}>선택 주문 발송</span>
+          <select data-testid="orders-bulk-message-type" className="input" value={bulkMessageType} onChange={(event) => onMessageTypeChange(event.target.value)} style={{ width: 220, height: 32 }}>
+            {BULK_MESSAGE_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+          </select>
+          <button data-testid="orders-bulk-message-apply" className="btn btn--primary btn--sm" disabled={isSaving} onClick={onApplyMessage}>
+            {isSaving ? '발송 중' : '발송'}
+          </button>
+        </>
+      )}
+      <span style={{ color: 'var(--text-tertiary)', fontSize: 11.5 }}>
+        각 주문의 타임라인과 발송 이력에 처리 결과가 기록됩니다.
+      </span>
+    </div>
+  );
+}
+
+function ListNotice({ text, tone = 'muted', testId = undefined }) {
+  const color = tone === 'danger'
+    ? 'var(--danger-fg)'
+    : tone === 'success'
+      ? 'var(--success-fg)'
+      : tone === 'warn'
+        ? 'var(--warn-fg)'
+        : 'var(--text-tertiary)';
+  return (
+    <div data-testid={testId} style={{
       padding: '18px 12px',
-      color: tone === 'danger' ? 'var(--danger-fg)' : 'var(--text-tertiary)',
+      color,
       fontSize: 12.5,
     }}>
       {text}
@@ -425,6 +710,67 @@ function getStatusTabs(orders) {
   ];
 }
 
+function matchesOrderQuery(order, query) {
+  const keyword = query.trim().toLowerCase();
+  if (!keyword) {
+    return true;
+  }
+
+  return [
+    order.id,
+    order.status,
+    order.product,
+    order.address,
+    order.customer,
+    order.phone,
+    order.team,
+  ].some((value) => String(value || '').toLowerCase().includes(keyword));
+}
+
+function normalizeActionError(error) {
+  const detail = error?.detail || error?.message || '';
+  const map = {
+    order_not_found: '주문 없음',
+    partner_not_assigned: '협력사 미배정',
+    partner_not_found: '협력사 없음',
+    no_customer_visible_photos: '공개 사진 없음',
+    invalid_recipient_type: '수신자 오류',
+  };
+  return map[detail] || '처리 실패';
+}
+
+function shortOrderId(orderId) {
+  return String(orderId || '').slice(0, 8);
+}
+
+function matchesDateFilter(value, dateFilter) {
+  if (!dateFilter.start && !dateFilter.end) {
+    return true;
+  }
+
+  if (!value) {
+    return false;
+  }
+
+  const { start, end } = normalizeDateRange(dateFilter.start, dateFilter.end);
+
+  if (start && value < start) {
+    return false;
+  }
+  if (end && value > end) {
+    return false;
+  }
+  return true;
+}
+
+function sortOrders(orders, sortBy) {
+  return [...orders].sort((a, b) => {
+    const aValue = sortBy === 'received' ? a.received : (a.scheduledDate || '9999-99-99');
+    const bValue = sortBy === 'received' ? b.received : (b.scheduledDate || '9999-99-99');
+    return String(aValue).localeCompare(String(bValue));
+  });
+}
+
 function toOrderRow(order) {
   return {
     id: order.id,
@@ -444,6 +790,75 @@ function toOrderRow(order) {
     photo: toPhotoState(order.status),
     delivered: toDeliveredState(order.status),
   };
+}
+
+function createDateFilter(preset) {
+  const today = new Date();
+  if (preset === 'today') {
+    const value = toDateString(today);
+    return { preset, start: value, end: value };
+  }
+  if (preset === 'tomorrow') {
+    const value = toDateString(addDays(today, 1));
+    return { preset, start: value, end: value };
+  }
+  if (preset === 'week') {
+    return {
+      preset,
+      start: toDateString(startOfWeek(today)),
+      end: toDateString(addDays(startOfWeek(today), 6)),
+    };
+  }
+  return { preset: 'all', start: '', end: '' };
+}
+
+function createInitialDateFilter(initialTab) {
+  if (initialTab === 'tomorrow_notice') {
+    return createDateFilter('tomorrow');
+  }
+  if (initialTab === 'payment_check') {
+    return createDateFilter('all');
+  }
+  return createDateFilter('today');
+}
+
+function normalizeDateRange(start, end) {
+  if (start && end && start > end) {
+    return { start: end, end: start };
+  }
+  return { start, end };
+}
+
+function formatDateFilterSummary(dateFilter) {
+  if (!dateFilter.start && !dateFilter.end) {
+    return '전체 방문일';
+  }
+
+  const { start, end } = normalizeDateRange(dateFilter.start, dateFilter.end);
+  if (start && end && start === end) {
+    return `${formatFullDate(start)} 방문`;
+  }
+  if (start && end) {
+    return `${formatFullDate(start)} ~ ${formatFullDate(end)}`;
+  }
+  if (start) {
+    return `${formatFullDate(start)} 이후`;
+  }
+  return `${formatFullDate(end)} 이전`;
+}
+
+function toDateString(date) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+}
+
+function addDays(date, days) {
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate() + days);
+}
+
+function startOfWeek(date) {
+  const day = date.getDay();
+  const mondayOffset = day === 0 ? -6 : 1 - day;
+  return addDays(date, mondayOffset);
 }
 
 function isTodayDate(value) {
@@ -474,6 +889,15 @@ function formatDate(value) {
 
   const date = new Date(`${value}T00:00:00`);
   return `${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+}
+
+function formatFullDate(value) {
+  if (!value) {
+    return '';
+  }
+
+  const [year, month, day] = value.split('-');
+  return `${year}.${month}.${day}`;
 }
 
 function maskPhone(phone) {
@@ -534,25 +958,6 @@ function formatCompactWon(value) {
   return `₩${amount.toLocaleString()}`;
 }
 
-function SoftChip({ label }) {
-  return (
-    <button style={{
-      display: 'inline-flex', alignItems: 'center', gap: 5,
-      height: 30, padding: '0 10px',
-      background: 'transparent',
-      border: 'none', borderRadius: 8,
-      fontSize: 12, fontWeight: 500,
-      color: 'var(--text-secondary)',
-      cursor: 'pointer',
-    }}
-    onMouseEnter={(e) => e.currentTarget.style.background = 'var(--bg-subtle)'}
-    onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}>
-      {label}
-      <Icon name="chevronDown" size={11} color="var(--text-quaternary)"/>
-    </button>
-  );
-}
-
 const softGhostBtn = {
   display: 'inline-flex', alignItems: 'center', gap: 5,
   height: 30, padding: '0 10px',
@@ -562,6 +967,36 @@ const softGhostBtn = {
   color: 'var(--text-tertiary)',
   cursor: 'pointer',
 };
+
+const panelLabelStyle = {
+  color: 'var(--text-tertiary)',
+  fontSize: 12,
+  fontWeight: 700,
+  whiteSpace: 'nowrap',
+};
+
+function bulkActionButton(active) {
+  return {
+    ...softGhostBtn,
+    background: active ? 'var(--brand-bg)' : 'transparent',
+    color: active ? 'var(--brand)' : 'var(--text-tertiary)',
+  };
+}
+
+function datePresetButton(active) {
+  return {
+    height: 30,
+    padding: '0 9px',
+    border: 'none',
+    borderRadius: 8,
+    background: active ? 'var(--brand-bg)' : 'transparent',
+    color: active ? 'var(--brand)' : 'var(--text-tertiary)',
+    fontSize: 12,
+    fontWeight: 600,
+    cursor: 'pointer',
+    whiteSpace: 'nowrap',
+  };
+}
 
 const iconBtn = {
   display: 'inline-flex', alignItems: 'center', justifyContent: 'center',

@@ -105,6 +105,21 @@ class PartnerService:
         self.db.commit()
         return self.get_detail(partner_id)
 
+    def delete(self, partner_id: str) -> None:
+        partner = self.partners.get(partner_id)
+        if partner is None:
+            raise ValueError("partner_not_found")
+        if scalar_count(self.db, Order.partner_id == partner_id) > 0:
+            raise ValueError("partner_in_use")
+
+        for user in self._list_partner_users(partner_id):
+            user.is_active = False
+            user.partner_id = None
+            self.refresh_tokens.revoke_active_for_user(user.id)
+
+        self.db.delete(partner)
+        self.db.commit()
+
     def reset_password(
         self,
         partner_id: str,

@@ -17,6 +17,7 @@ test('admin sees blocked message actions clearly on orders without partner or ap
 
   await loginAsAdmin(page);
   await page.getByTestId('admin-nav-orders').click();
+  await page.getByTestId('orders-date-clear').click();
   await page.getByTestId(`admin-order-row-${order.id}`).click();
   await expect(page.getByTestId('admin-order-detail-page')).toBeVisible();
 
@@ -54,6 +55,7 @@ test('admin order list and detail stay usable with long operational text', async
 
   await loginAsAdmin(page);
   await page.getByTestId('admin-nav-orders').click();
+  await page.getByTestId('orders-date-clear').click();
 
   const row = page.getByTestId(`admin-order-row-${order.id}`);
   await expect(row).toBeVisible();

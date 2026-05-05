@@ -7,7 +7,7 @@ import { useAuth } from '../../store/authStore';
 const LOGIN_META = {
   admin: {
     title: '관리자 로그인',
-    eyebrow: 'Operations desk',
+    eyebrow: '운영 관리자',
     description: '주문 접수, 배정, 사진 검수까지 운영 흐름을 관리합니다.',
     identifierLabel: '이메일 또는 전화번호',
     identifierPlaceholder: 'admin@cleanops.kr',
@@ -15,7 +15,7 @@ const LOGIN_META = {
   },
   partner: {
     title: '협력사 로그인',
-    eyebrow: 'Partner jobs',
+    eyebrow: '협력사 현장',
     description: '배정된 현장 일정과 작업 사진 업로드를 확인합니다.',
     identifierLabel: '전화번호 또는 이메일',
     identifierPlaceholder: '01012345678',

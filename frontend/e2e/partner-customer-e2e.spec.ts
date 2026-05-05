@@ -23,6 +23,7 @@ test('partner uploads job photos and customer sees only admin-approved photos', 
   await expect(partnerPage.getByText('Internal payment memo')).toHaveCount(0);
 
   await partnerPage.getByTestId('partner-start-job').click();
+  await expect(partnerPage.getByText('작업 중')).toBeVisible();
   await partnerPage.getByTestId('partner-before-photo-input').setInputFiles({
     name: 'before-partner-r1.jpg',
     mimeType: 'image/jpeg',

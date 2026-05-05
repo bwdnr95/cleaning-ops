@@ -17,6 +17,7 @@ export function PhotoReviewPage() {
   const items = queue.data || [];
   const selected = items[selectedIdx] || items[0] || null;
   const photos = selected?.photos || [];
+  const pendingPhotos = photos.filter((photo) => !photo.is_customer_visible);
   const activePhoto = photos.find((photo) => photo.id === activePhotoId) || photos[0] || null;
 
   React.useEffect(() => {
@@ -41,7 +42,7 @@ export function PhotoReviewPage() {
     setError(null);
     setIsApproving(true);
     try {
-      for (const photo of photos) {
+      for (const photo of pendingPhotos) {
         await approvePhoto(photo.id);
       }
       queue.reload();
@@ -107,7 +108,7 @@ export function PhotoReviewPage() {
                 <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 3 }}>
                   <span className="mono" style={{ fontSize: 10.5, color: 'var(--text-tertiary)' }}>{item.order_id}</span>
                   <Badge tone={item.pending_photo_count > 0 ? 'warn' : 'success'}>
-                    {item.pending_photo_count > 0 ? `${item.pending_photo_count} 검수` : '전달대기'}
+                    {item.pending_photo_count > 0 ? `${item.pending_photo_count} 검수` : '전달 대기'}
                   </Badge>
                 </div>
                 <div style={{ fontSize: 12, fontWeight: 500, marginBottom: 2 }}>{formatServiceName(item)}</div>
@@ -198,7 +199,7 @@ export function PhotoReviewPage() {
             <KVStack>
               <KVRow label="유형" value={photoTypeLabel(activePhoto.photo_type)}/>
               <KVRow label="파일" value={activePhoto.file_name || '-'} small/>
-              <KVRow label="공개" value="승인 전"/>
+              <KVRow label="공개" value={activePhoto.is_customer_visible ? '공개' : '비공개'}/>
             </KVStack>
           ) : (
             <div style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>선택된 사진이 없습니다.</div>
@@ -227,13 +228,13 @@ export function PhotoReviewPage() {
             fontSize: 11.5, color: 'var(--text-secondary)',
           }}>
             <div style={{ fontWeight: 600, color: 'var(--brand)', marginBottom: 2 }}>승인 후 자동 처리</div>
-            승인된 사진만 고객 페이지에 노출되고 주문 상태는 고객전달필요로 이동합니다.
+            승인된 사진만 고객 페이지에 노출되고 주문은 고객 전달 단계로 이동합니다.
           </div>
-          <button data-testid="photo-approve-selected" className="btn btn--primary btn--block btn--lg" disabled={!activePhoto || isApproving} onClick={() => activePhoto && void handleApprove(activePhoto.id)}>
+          <button data-testid="photo-approve-selected" className="btn btn--primary btn--block btn--lg" disabled={!activePhoto || activePhoto.is_customer_visible || isApproving} onClick={() => activePhoto && void handleApprove(activePhoto.id)}>
             <Icon name="check" size={14}/> 선택 사진 승인
           </button>
-          <button className="btn btn--secondary btn--block" disabled={photos.length === 0 || isApproving} onClick={() => void handleApproveAll()}>
-            <Icon name="eye" size={13}/> 모두 승인
+          <button className="btn btn--secondary btn--block" disabled={pendingPhotos.length === 0 || isApproving} onClick={() => void handleApproveAll()}>
+            <Icon name="eye" size={13}/> 미승인 모두 승인
           </button>
           <button data-testid="photo-send-customer-link" className="btn btn--secondary btn--block" disabled={isSending || !selected.can_send_customer_link} onClick={() => void handleSendCustomerLink()}>
             <Icon name="send" size={13}/> 고객 링크 발송

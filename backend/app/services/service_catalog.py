@@ -1,7 +1,9 @@
 from uuid import uuid4
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.models.order import Order
 from app.models.service_item import ServiceCategory, ServiceItem
 from app.repositories.service_catalog import ServiceCategoryRepository, ServiceItemRepository
 from app.schemas.service_catalog import (
@@ -54,6 +56,19 @@ class ServiceCatalogService:
             items=self.items.list_by_category(category.id, include_inactive=True),
         )
 
+    def delete_category(self, category_id: str) -> None:
+        category = self.categories.get(category_id)
+        if category is None:
+            raise ValueError("service_category_not_found")
+
+        if self.items.list_by_category(category.id, include_inactive=True):
+            raise ValueError("service_category_has_items")
+        if self._has_order_with_category(category.id):
+            raise ValueError("service_category_in_use")
+
+        self.db.delete(category)
+        self.db.commit()
+
     def create_item(self, payload: ServiceItemCreate) -> ServiceItemRead:
         category = self.categories.get(payload.category_id)
         if category is None:
@@ -87,6 +102,16 @@ class ServiceCatalogService:
         self.db.refresh(item)
         return to_item_dto(item)
 
+    def delete_item(self, item_id: str) -> None:
+        item = self.items.get(item_id)
+        if item is None:
+            raise ValueError("service_item_not_found")
+        if self._has_order_with_item(item.id):
+            raise ValueError("service_item_in_use")
+
+        self.db.delete(item)
+        self.db.commit()
+
     def get_available_item(self, item_id: str) -> tuple[ServiceItem, ServiceCategory]:
         item = self.items.get(item_id)
         if item is None:
@@ -105,6 +130,12 @@ class ServiceCatalogService:
         if not category.is_active:
             raise ValueError("service_category_not_available")
         return category
+
+    def _has_order_with_item(self, item_id: str) -> bool:
+        return self.db.scalar(select(Order.id).where(Order.service_item_id == item_id).limit(1)) is not None
+
+    def _has_order_with_category(self, category_id: str) -> bool:
+        return self.db.scalar(select(Order.id).where(Order.service_category_id == category_id).limit(1)) is not None
 
 
 def to_category_detail_dto(category: ServiceCategory, *, items: list[ServiceItem]) -> ServiceCategoryDetailRead:
