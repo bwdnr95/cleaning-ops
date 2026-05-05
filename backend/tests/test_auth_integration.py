@@ -1047,6 +1047,8 @@ def test_partner_upload_admin_approve_customer_visibility_flow(tmp_path, monkeyp
     assert delivery_item["pending_photo_count"] == 0
     assert delivery_item["approved_photo_count"] == 1
     assert delivery_item["can_send_customer_link"] is True
+    assert delivery_item["photos"][0]["id"] == uploaded["id"]
+    assert delivery_item["photos"][0]["is_customer_visible"] is True
 
     after_approval = client.post(
         "/api/customer/orders/seed-customer-token-2450/verify",
@@ -1085,6 +1087,15 @@ def test_partner_upload_admin_approve_customer_visibility_flow(tmp_path, monkeyp
     delivered_events = {event["event_type"] for event in delivered["timeline"]}
     assert "message_sent" in delivered_events
     assert "customer_link_sent" in delivered_events
+
+    delivered_queue = client.get(
+        "/api/admin/photos/review-queue",
+        headers={"Authorization": f"Bearer {admin_session['access_token']}"},
+    )
+    assert delivered_queue.status_code == 200
+    delivered_item = delivered_queue.json()[0]
+    assert delivered_item["order_id"] == "seed-order-2450"
+    assert delivered_item["can_send_customer_link"] is False
 
 
 def test_partner_upload_rejects_invalid_photo_content_type(tmp_path, monkeypatch) -> None:

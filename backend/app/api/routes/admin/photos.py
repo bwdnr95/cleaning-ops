@@ -17,6 +17,7 @@ def list_photo_review_queue(
 ) -> list[AdminPhotoReviewItem]:
     items = []
     for order, photos, approved_count in PhotoRepository(db).list_review_queue():
+        pending_count = len([photo for photo in photos if not photo.is_customer_visible])
         items.append(
             AdminPhotoReviewItem(
                 order_id=order.id,
@@ -27,7 +28,7 @@ def list_photo_review_queue(
                 team_name=order.team_name,
                 scheduled_date=order.scheduled_date.isoformat() if order.scheduled_date else None,
                 requested_time=order.requested_time,
-                pending_photo_count=len(photos),
+                pending_photo_count=pending_count,
                 approved_photo_count=approved_count,
                 can_send_customer_link=approved_count > 0
                 and order.status not in {OrderStatus.CUSTOMER_DELIVERY_DONE, OrderStatus.COMPLETED},

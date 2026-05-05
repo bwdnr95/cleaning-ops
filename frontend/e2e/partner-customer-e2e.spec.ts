@@ -51,6 +51,8 @@ test('partner uploads job photos and customer sees only admin-approved photos', 
   await adminPage.getByTestId('admin-nav-photos').click();
   await expect(adminPage.getByTestId('admin-photo-review-page')).toBeVisible();
   await expect(adminPage.getByText(flow.orderId).first()).toBeVisible();
+  await adminPage.getByTestId('photo-filter-review').click();
+  await adminPage.getByTestId(`photo-review-item-${flow.orderId}`).click();
   await expect(adminPage.getByTestId('photo-send-customer-link')).toBeDisabled();
 
   await adminPage.getByTestId('photo-approve-selected').click();

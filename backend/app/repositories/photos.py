@@ -26,6 +26,7 @@ class PhotoRepository(Repository[OrderPhoto]):
                 or_(
                     OrderPhoto.is_customer_visible.is_(False),
                     Order.status == OrderStatus.CUSTOMER_DELIVERY_NEEDED,
+                    Order.status == OrderStatus.CUSTOMER_DELIVERY_DONE,
                 )
             )
             .distinct()
@@ -36,6 +37,6 @@ class PhotoRepository(Repository[OrderPhoto]):
             all_photos = self.list_for_order(order.id)
             pending_photos = [photo for photo in all_photos if not photo.is_customer_visible]
             approved_count = len(all_photos) - len(pending_photos)
-            if pending_photos or (order.status == OrderStatus.CUSTOMER_DELIVERY_NEEDED and approved_count > 0):
-                items.append((order, pending_photos, approved_count))
+            if pending_photos or (order.status in {OrderStatus.CUSTOMER_DELIVERY_NEEDED, OrderStatus.CUSTOMER_DELIVERY_DONE} and approved_count > 0):
+                items.append((order, all_photos, approved_count))
         return items

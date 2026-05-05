@@ -254,6 +254,14 @@ test('admin photo review keeps customer send disabled until a photo is approved'
   await page.getByTestId('admin-nav-photos').click();
   await expect(page.getByTestId('admin-photo-review-page')).toBeVisible();
   await expect(page.getByText(orderId).first()).toBeVisible();
+  await expect(page.getByText('관리자 승인 게이트')).toBeVisible();
+  await expect(page.getByTestId('photo-filter-review')).toHaveAttribute('aria-pressed', 'false');
+  await page.getByTestId('photo-filter-review').click();
+  await expect(page.getByTestId(`photo-review-item-${orderId}`)).toBeVisible();
+  await page.getByTestId('photo-open-order').click();
+  await expect(page.getByTestId('admin-order-detail-page')).toBeVisible();
+  await page.getByTestId('admin-nav-photos').click();
+  await expect(page.getByTestId('admin-photo-review-page')).toBeVisible();
   await expect(page.getByTestId('photo-send-customer-link')).toBeDisabled();
 
   await page.getByTestId('photo-approve-selected').click();
@@ -275,6 +283,12 @@ test('admin photo review keeps customer send disabled until a photo is approved'
     messages: 1,
     timeline: expect.arrayContaining(['photo_approved', 'message_sent', 'customer_link_sent']),
   }));
+
+  await page.getByTestId('photo-filter-done').click();
+  await expect(page.getByTestId(`photo-review-item-${orderId}`)).toBeVisible();
+  await expect(page.getByTestId('photo-send-customer-link')).toBeDisabled();
+  await page.getByTestId('photo-open-messages').click();
+  await expect(page.getByTestId('admin-messages-page')).toBeVisible();
 });
 
 async function loginAsAdmin(page) {

@@ -213,7 +213,16 @@ export function App() {
                           onCreateOrder={() => setOrderForm({ mode: 'create', orderId: null })}
                         />
                       )}
-                      {page === 'photos' && <PhotoReviewPage />}
+                      {page === 'photos' && (
+                        <PhotoReviewPage
+                          onOpenOrder={(orderId) => setDetailOrderId(orderId)}
+                          onNav={(nextPage) => {
+                            setDetailOrderId(null);
+                            setOrderForm(null);
+                            setPage(nextPage);
+                          }}
+                        />
+                      )}
                       {page === 'products' && <ProductsPage />}
                       {page === 'partners' && <PartnersPage />}
                       {page === 'sends' && <MessagesPage />}
