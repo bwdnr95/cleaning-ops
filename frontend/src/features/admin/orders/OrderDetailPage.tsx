@@ -335,7 +335,7 @@ export function OrderDetailPage({ orderId, onBack, onEdit }) {
             </div>
 
             {(notice || error) && (
-              <div style={{
+              <div data-testid={error ? 'admin-action-error' : 'admin-action-notice'} style={{
                 padding: 10,
                 borderRadius: 6,
                 background: error ? 'var(--danger-bg)' : 'var(--success-bg)',

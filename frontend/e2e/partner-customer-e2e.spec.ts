@@ -28,12 +28,12 @@ test('partner uploads job photos and customer sees only admin-approved photos', 
     mimeType: 'image/jpeg',
     buffer: Buffer.from('fake-before-jpeg-bytes'),
   });
+  await expect(partnerPage.getByText('B-1')).toBeVisible();
   await partnerPage.getByTestId('partner-after-photo-input').setInputFiles({
     name: 'after-partner-r1.jpg',
     mimeType: 'image/jpeg',
     buffer: Buffer.from('fake-after-jpeg-bytes'),
   });
-  await expect(partnerPage.getByText('B-1')).toBeVisible();
   await expect(partnerPage.getByText('A-1')).toBeVisible();
   await partnerPage.getByTestId('partner-complete-job').click();
 

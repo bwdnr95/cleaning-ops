@@ -127,7 +127,7 @@ function VerificationGate({
           />
         </label>
 
-        {error && <div style={errorStyle}>{error}</div>}
+        {error && <div data-testid="customer-verify-error" style={errorStyle}>{error}</div>}
 
         <button
           type="submit"
