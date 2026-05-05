@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from app.core.security import TokenError, decode_access_token
 from app.db.session import get_db
 from app.domain.constants import UserRole
+from app.repositories.partners import PartnerRepository
 from app.repositories.users import UserRepository
 
 
@@ -39,6 +40,10 @@ def get_current_user(
     user = UserRepository(db).get(str(payload["sub"]))
     if user is None or not user.is_active:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="user_not_found")
+    if user.role == UserRole.PARTNER:
+        partner = PartnerRepository(db).get(user.partner_id or "")
+        if partner is None or not partner.is_active:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="user_not_found")
 
     return CurrentUser(id=user.id, role=user.role, partner_id=user.partner_id)
 

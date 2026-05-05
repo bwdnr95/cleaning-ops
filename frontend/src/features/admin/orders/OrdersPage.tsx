@@ -3,6 +3,7 @@ import { Avatar, Icon } from '../../../components/common/ui';
 import { ORDERS } from '../../../mocks/cleaningOpsData';
 import { listAdminOrders } from '../../../api/admin';
 import { useApiResource } from '../../../api/useApiResource';
+import { isPaymentCheckNeeded } from '../../../domain/paymentStatus';
 
 // Orders list v3 — modern Linear/Attio style: airy, typographic, low-chrome
 
@@ -87,7 +88,10 @@ function SimplePill({ kind, value }) {
   );
 }
 
-export function OrdersPage({ onOpenOrder, onCreateOrder }) {
+const TODAY_JOB_STATUSES = ['작업예정', '작업진행', '사진검수대기'];
+const TOMORROW_NOTICE_STATUSES = ['일정확정', '전날안내필요'];
+
+export function OrdersPage({ onOpenOrder, onCreateOrder, initialTab = 'all' }) {
   const ordersResource = useApiResource(listAdminOrders);
   const orders = ordersResource.data ? ordersResource.data.map(toOrderRow) : ORDERS;
   const [tab, setTab] = React.useState('all');
@@ -96,6 +100,10 @@ export function OrdersPage({ onOpenOrder, onCreateOrder }) {
   const [sortBy, setSortBy] = React.useState('visit');
   const statusTabs = getStatusTabs(orders);
 
+  React.useEffect(() => {
+    setTab(initialTab);
+  }, [initialTab]);
+
   const toggleRow = (id) => {
     const next = new Set(selected);
     if (next.has(id)) next.delete(id); else next.add(id);
@@ -103,17 +111,20 @@ export function OrdersPage({ onOpenOrder, onCreateOrder }) {
   };
 
   const filtered = orders.filter((o) => {
-    if (tab === 'today') return ['작업진행', '작업예정', '사진검수대기'].includes(o.status);
+    if (tab === 'today') return isTodayDate(o.scheduledDate) && TODAY_JOB_STATUSES.includes(o.status);
+    if (tab === 'tomorrow_notice') return isTomorrowDate(o.scheduledDate) && TOMORROW_NOTICE_STATUSES.includes(o.status);
+    if (tab === 'partner_pending') return o.status === '협력사확인중';
     if (tab === 'pending') return ['신규접수', '상담중', '협력사확인중'].includes(o.status);
     if (tab === 'work') return ['일정확정', '전날안내필요', '전날안내완료', '작업예정', '작업진행', '사진검수대기'].includes(o.status);
     if (tab === 'deliver') return ['고객전달필요'].includes(o.status);
+    if (tab === 'payment_check') return isPaymentCheckNeeded(o.paymentStatus);
     if (tab === 'done') return ['고객전달완료', '서비스완료'].includes(o.status);
     if (tab === 'cancel') return o.status === '취소';
     return true;
   });
 
   return (
-    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0, background: 'var(--bg)' }}>
+    <div data-testid="admin-orders-page" style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0, background: 'var(--bg)' }}>
       {/* Insight line — typographic, no card chrome */}
       <div style={{
         padding: '18px 24px 14px',
@@ -129,7 +140,7 @@ export function OrdersPage({ onOpenOrder, onCreateOrder }) {
           <InsightDivider/>
           <Insight num={orders.filter((order) => order.status === '고객전달필요').length} label="고객 전달" />
           <InsightDivider/>
-          <Insight num={formatCompactWon(orders.filter((order) => order.paid === 'pending').reduce((sum, order) => sum + order.amount, 0))} label="미수금" danger/>
+          <Insight num={formatCompactWon(orders.filter((order) => isPaymentCheckNeeded(order.paymentStatus)).reduce((sum, order) => sum + order.amount, 0))} label="미수금" danger/>
           <InsightDivider/>
           <Insight num={formatCompactWon(orders.reduce((sum, order) => sum + order.amount, 0))} label="이번 달" muted/>
         </div>
@@ -137,7 +148,7 @@ export function OrdersPage({ onOpenOrder, onCreateOrder }) {
           <button className="btn btn--secondary btn--sm">
             <Icon name="fileText" size={12}/> 내보내기
           </button>
-          <button className="btn btn--primary btn--sm" onClick={onCreateOrder}>
+          <button data-testid="admin-orders-create" className="btn btn--primary btn--sm" onClick={onCreateOrder}>
             <Icon name="plus" size={12}/> 신규 주문
           </button>
         </div>
@@ -279,6 +290,7 @@ export function OrdersPage({ onOpenOrder, onCreateOrder }) {
               const isCancelled = o.status === '취소';
               return (
                 <tr key={o.id}
+                  data-testid={`admin-order-row-${o.id}`}
                   className={[
                     selected.has(o.id) ? 'is-selected' : '',
                     isCancelled ? 'is-muted' : '',
@@ -401,10 +413,13 @@ function ListNotice({ text, tone = 'muted' }) {
 function getStatusTabs(orders) {
   return [
     { key: 'all', label: '전체', count: orders.length },
-    { key: 'today', label: '오늘 작업', count: orders.filter((o) => ['작업진행', '작업예정', '사진검수대기'].includes(o.status)).length },
+    { key: 'today', label: '오늘 작업', count: orders.filter((o) => isTodayDate(o.scheduledDate) && TODAY_JOB_STATUSES.includes(o.status)).length },
+    { key: 'tomorrow_notice', label: '내일 안내', count: orders.filter((o) => isTomorrowDate(o.scheduledDate) && TOMORROW_NOTICE_STATUSES.includes(o.status)).length },
+    { key: 'partner_pending', label: '협력사 확인', count: orders.filter((o) => o.status === '협력사확인중').length },
     { key: 'pending', label: '확인 대기', count: orders.filter((o) => ['신규접수', '상담중', '협력사확인중'].includes(o.status)).length },
     { key: 'work', label: '작업/검수', count: orders.filter((o) => ['일정확정', '전날안내필요', '전날안내완료', '작업예정', '작업진행', '사진검수대기'].includes(o.status)).length },
     { key: 'deliver', label: '고객 전달', count: orders.filter((o) => ['고객전달필요'].includes(o.status)).length },
+    { key: 'payment_check', label: '결제 확인', count: orders.filter((o) => isPaymentCheckNeeded(o.paymentStatus)).length },
     { key: 'done', label: '완료', count: orders.filter((o) => ['고객전달완료', '서비스완료'].includes(o.status)).length },
     { key: 'cancel', label: '취소', count: orders.filter((o) => o.status === '취소').length },
   ];
@@ -416,6 +431,7 @@ function toOrderRow(order) {
     status: order.status,
     received: formatDate(order.received_date),
     visit: formatDate(order.scheduled_date) || '미정',
+    scheduledDate: order.scheduled_date,
     timeWindow: order.requested_time || '-',
     team: order.team_name || '미배정',
     product: order.size_or_quantity ? `${order.service_name} (${order.size_or_quantity})` : order.service_name,
@@ -423,10 +439,32 @@ function toOrderRow(order) {
     customer: order.customer_name,
     phone: maskPhone(order.customer_phone),
     amount: Number(order.total_amount || 0),
+    paymentStatus: order.payment_status,
     paid: toPaidState(order.payment_status),
     photo: toPhotoState(order.status),
     delivered: toDeliveredState(order.status),
   };
+}
+
+function isTodayDate(value) {
+  return isRelativeDate(value, 0);
+}
+
+function isTomorrowDate(value) {
+  return isRelativeDate(value, 1);
+}
+
+function isRelativeDate(value, offsetDays) {
+  if (!value) {
+    return false;
+  }
+  const target = new Date();
+  target.setHours(0, 0, 0, 0);
+  target.setDate(target.getDate() + offsetDays);
+  const date = new Date(`${value}T00:00:00`);
+  return date.getFullYear() === target.getFullYear()
+    && date.getMonth() === target.getMonth()
+    && date.getDate() === target.getDate();
 }
 
 function formatDate(value) {
@@ -450,6 +488,9 @@ function maskPhone(phone) {
 }
 
 function toPaidState(status) {
+  if (!status) {
+    return null;
+  }
   if (['paid', 'complete', 'completed', 'deposit_paid'].includes(status)) {
     return status === 'deposit_paid' ? 'partial' : 'paid';
   }

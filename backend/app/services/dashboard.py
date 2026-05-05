@@ -4,6 +4,7 @@ from sqlalchemy import extract, func, select
 from sqlalchemy.orm import Session
 
 from app.domain.constants import OrderStatus
+from app.domain.payment_status import PAYMENT_CHECK_STATUSES
 from app.models.message import MessageLog
 from app.models.order import Order
 from app.models.photo import OrderPhoto
@@ -41,7 +42,7 @@ class DashboardService:
             photo_review_pending=self._count(Order.status == OrderStatus.PHOTO_REVIEW_PENDING),
             customer_delivery_needed=self._count(Order.status == OrderStatus.CUSTOMER_DELIVERY_NEEDED),
             payment_check_needed=self._count(
-                Order.payment_status.in_(["pending", "balance_pending", "unpaid"])
+                Order.payment_status.in_(PAYMENT_CHECK_STATUSES)
             ),
             monthly_completed=self._count(Order.status == OrderStatus.COMPLETED, *month_filter),
             monthly_revenue=self._sum(

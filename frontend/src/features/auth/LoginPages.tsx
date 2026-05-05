@@ -55,7 +55,7 @@ function LoginPage({ role }) {
 
   return (
     <div className={`auth-page auth-page--${role}`}>
-      <form className="auth-panel" onSubmit={handleSubmit}>
+      <form className="auth-panel" data-testid={`${role}-login-form`} onSubmit={handleSubmit}>
         <div className="auth-mark">
           <Icon name={role === 'admin' ? 'shield' : 'truck'} size={18} />
         </div>
@@ -67,6 +67,7 @@ function LoginPage({ role }) {
           <span>{meta.identifierLabel}</span>
           <input
             className="input"
+            data-testid={`${role}-login-identifier`}
             value={identifier}
             placeholder={meta.identifierPlaceholder}
             autoComplete="username"
@@ -79,6 +80,7 @@ function LoginPage({ role }) {
           <span>비밀번호</span>
           <input
             className="input"
+            data-testid={`${role}-login-password`}
             type="password"
             value={password}
             autoComplete="current-password"
@@ -89,7 +91,7 @@ function LoginPage({ role }) {
 
         {error && <div className="auth-error">{error}</div>}
 
-        <button className="btn btn--primary btn--block btn--lg" type="submit" disabled={isSubmitting}>
+        <button className="btn btn--primary btn--block btn--lg" data-testid={`${role}-login-submit`} type="submit" disabled={isSubmitting}>
           {isSubmitting ? '확인 중' : meta.submitLabel}
         </button>
       </form>

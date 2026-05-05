@@ -78,7 +78,12 @@ class PhotoService:
             raise ValueError("photo_not_found")
         photo.is_customer_visible = True
         order = self.orders.get(photo.order_id)
-        if order is not None:
+        old_status = order.status if order is not None else None
+        if order is not None and order.status not in {
+            OrderStatus.CUSTOMER_DELIVERY_NEEDED,
+            OrderStatus.CUSTOMER_DELIVERY_DONE,
+            OrderStatus.COMPLETED,
+        }:
             order.status = OrderStatus.CUSTOMER_DELIVERY_NEEDED
         self.timeline.record(
             order_id=photo.order_id,
@@ -87,6 +92,15 @@ class PhotoService:
             title="사진 고객 공개 승인",
             metadata={"photo_id": photo.id},
         )
+        if order is not None and old_status != order.status:
+            self.timeline.record(
+                order_id=photo.order_id,
+                actor_user_id=actor_user_id,
+                event_type=TimelineEventType.STATUS_CHANGED,
+                title="고객 전달 대기",
+                description="관리자가 고객 공개 사진을 승인했습니다.",
+                metadata={"from": old_status, "to": order.status},
+            )
         self.db.commit()
         self.db.refresh(photo)
         return photo

@@ -8,6 +8,7 @@ from app.domain.constants import OrderStatus, TimelineEventType, UserRole
 from app.domain.phone import normalize_phone
 from app.models.order import Order
 from app.models.partner import Partner
+from app.models.service_item import ServiceCategory, ServiceItem
 from app.models.timeline import OrderTimeline
 from app.models.user import User
 
@@ -23,6 +24,8 @@ DEV_PARTNER_USER_ID = "seed-partner-user"
 DEV_ORDER_ID = "seed-order-2450"
 DEV_ORDER_TIMELINE_ID = "seed-order-2450-created"
 DEV_CUSTOMER_TOKEN = "seed-customer-token-2450"
+DEV_SERVICE_CATEGORY_ID = "seed-service-category-cleaning"
+DEV_SERVICE_ITEM_ID = "seed-service-item-move-in"
 
 
 @dataclass(frozen=True)
@@ -41,6 +44,7 @@ def seed_dev_data(db: Session) -> SeedSummary:
     ensure_partner(db)
     ensure_admin_user(db)
     ensure_partner_user(db)
+    ensure_service_catalog(db)
     ensure_sample_order(db)
     ensure_order_created_timeline(db)
     db.commit()
@@ -114,6 +118,35 @@ def ensure_partner_user(db: Session) -> User:
     return user
 
 
+def ensure_service_catalog(db: Session) -> tuple[ServiceCategory, ServiceItem]:
+    category = db.get(ServiceCategory, DEV_SERVICE_CATEGORY_ID)
+    if category is None:
+        category = ServiceCategory(
+            id=DEV_SERVICE_CATEGORY_ID,
+            name="주거 청소",
+            description="입주/이사/정기 청소 기본 상품",
+            is_active=True,
+            sort_order=10,
+        )
+        db.add(category)
+
+    item = db.get(ServiceItem, DEV_SERVICE_ITEM_ID)
+    if item is None:
+        item = ServiceItem(
+            id=DEV_SERVICE_ITEM_ID,
+            category_id=DEV_SERVICE_CATEGORY_ID,
+            name="입주청소",
+            unit="평",
+            base_price=280000,
+            description="기본 입주청소 상품",
+            is_active=True,
+            sort_order=10,
+        )
+        db.add(item)
+
+    return category, item
+
+
 def ensure_sample_order(db: Session) -> Order:
     order = db.get(Order, DEV_ORDER_ID)
     if order is not None:
@@ -127,8 +160,8 @@ def ensure_sample_order(db: Session) -> Order:
         requested_time="09:00",
         partner_id=DEV_PARTNER_ID,
         team_name="강남 1팀",
-        service_category_id=None,
-        service_item_id=None,
+        service_category_id=DEV_SERVICE_CATEGORY_ID,
+        service_item_id=DEV_SERVICE_ITEM_ID,
         service_name="입주청소",
         size_or_quantity="24평",
         service_detail="방 3, 욕실 2",

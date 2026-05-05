@@ -4,6 +4,7 @@ from uuid import uuid4
 from sqlalchemy.orm import Session
 
 from app.domain.constants import OrderStatus, TimelineEventType
+from app.domain.payment_status import PAYMENT_TRACKED_FIELDS
 from app.domain.phone import normalize_phone
 from app.models.order import Order
 from app.models.photo import OrderPhoto
@@ -19,6 +20,7 @@ from app.schemas.order import (
     PartnerJobRead,
 )
 from app.schemas.photo import PhotoRead
+from app.services.service_catalog import ServiceCatalogService
 from app.services.timeline import TimelineService
 
 
@@ -26,14 +28,17 @@ class OrderService:
     def __init__(self, db: Session) -> None:
         self.db = db
         self.orders = OrderRepository(db)
+        self.service_catalog = ServiceCatalogService(db)
         self.timeline = TimelineService(db)
 
     def create(self, payload: OrderCreate, *, actor_user_id: str | None = None) -> Order:
+        values = payload.model_dump(exclude={"customer_phone"})
+        self._apply_service_catalog(values)
         order = Order(
             id=str(uuid4()),
             customer_token=token_urlsafe(24),
             customer_phone=normalize_phone(payload.customer_phone),
-            **payload.model_dump(exclude={"customer_phone"}),
+            **values,
         )
         self.orders.add(order)
         self.timeline.record(
@@ -42,6 +47,14 @@ class OrderService:
             event_type=TimelineEventType.CREATED,
             title="주문 생성",
         )
+        if order.partner_id:
+            self.timeline.record(
+                order_id=order.id,
+                actor_user_id=actor_user_id,
+                event_type=TimelineEventType.PARTNER_ASSIGNED,
+                title="협력사 배정",
+                metadata={"partner_id": order.partner_id},
+            )
         self.db.commit()
         self.db.refresh(order)
         return order
@@ -52,7 +65,9 @@ class OrderService:
             raise ValueError("order_not_found")
 
         changes = payload.model_dump(exclude_unset=True)
+        self._apply_service_catalog(changes)
         old_status = order.status
+        payment_changes = collect_payment_changes(order, changes)
         for key, value in changes.items():
             if key == "customer_phone" and value is not None:
                 value = normalize_phone(value)
@@ -76,9 +91,33 @@ class OrderService:
                 metadata={"partner_id": changes["partner_id"]},
             )
 
+        if payment_changes:
+            self.timeline.record(
+                order_id=order.id,
+                actor_user_id=actor_user_id,
+                event_type=TimelineEventType.MEMO_ADDED,
+                title="결제/정산 변경",
+                description="관리자가 결제 또는 협력사 정산 정보를 변경했습니다.",
+                metadata={"changes": payment_changes},
+            )
+
         self.db.commit()
         self.db.refresh(order)
         return order
+
+    def _apply_service_catalog(self, values: dict) -> None:
+        service_item_id = values.get("service_item_id")
+        if service_item_id:
+            item, _category = self.service_catalog.get_available_item(service_item_id)
+            values["service_category_id"] = item.category_id
+            values["service_name"] = item.name
+            if values.get("total_amount") is None:
+                values["total_amount"] = float(item.base_price or 0)
+            return
+
+        service_category_id = values.get("service_category_id")
+        if service_category_id:
+            self.service_catalog.require_available_category(service_category_id)
 
     def get_for_partner(self, order_id: str, *, partner_id: str) -> Order:
         order = self.orders.get(order_id)
@@ -256,3 +295,23 @@ def to_customer_photo_dto(photo: OrderPhoto) -> CustomerPhotoRead:
         file_url=photo.file_url,
         file_name=photo.file_name,
     )
+
+
+def collect_payment_changes(order: Order, changes: dict) -> dict[str, dict[str, object | None]]:
+    payment_changes: dict[str, dict[str, object | None]] = {}
+    for field in PAYMENT_TRACKED_FIELDS:
+        if field not in changes:
+            continue
+        before = to_timeline_value(getattr(order, field))
+        after = to_timeline_value(changes[field])
+        if before != after:
+            payment_changes[field] = {"from": before, "to": after}
+    return payment_changes
+
+
+def to_timeline_value(value) -> object | None:
+    if hasattr(value, "value"):
+        return value.value
+    if hasattr(value, "as_integer_ratio") and not isinstance(value, (int, float)):
+        return float(value)
+    return value

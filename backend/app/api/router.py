@@ -1,7 +1,7 @@
 from fastapi import APIRouter
 
 from app.api.routes import auth
-from app.api.routes.admin import calendar, dashboard, messages, orders, partners, photos
+from app.api.routes.admin import calendar, dashboard, messages, orders, partners, photos, services
 from app.api.routes.customer import orders as customer_orders
 from app.api.routes.partner import jobs
 
@@ -13,5 +13,6 @@ api_router.include_router(orders.router, prefix="/admin/orders", tags=["admin-or
 api_router.include_router(partners.router, prefix="/admin/partners", tags=["admin-partners"])
 api_router.include_router(photos.router, prefix="/admin/photos", tags=["admin-photos"])
 api_router.include_router(messages.router, prefix="/admin/messages", tags=["admin-messages"])
+api_router.include_router(services.router, prefix="/admin/services", tags=["admin-services"])
 api_router.include_router(jobs.router, prefix="/partner/jobs", tags=["partner-jobs"])
 api_router.include_router(customer_orders.router, prefix="/customer/orders", tags=["customer-orders"])

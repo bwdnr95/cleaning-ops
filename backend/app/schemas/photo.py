@@ -37,4 +37,7 @@ class AdminPhotoReviewItem(ApiModel):
     team_name: str | None = None
     scheduled_date: str | None = None
     requested_time: str | None = None
+    pending_photo_count: int = 0
+    approved_photo_count: int = 0
+    can_send_customer_link: bool = False
     photos: list[PhotoRead]

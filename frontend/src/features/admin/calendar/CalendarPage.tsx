@@ -45,7 +45,7 @@ export function CalendarPage({ onOpenOrder, onCreateOrder }) {
   };
 
   return (
-    <div style={{ flex: 1, display: 'flex', minHeight: 0, background: 'var(--bg)' }}>
+    <div data-testid="admin-calendar-page" style={{ flex: 1, display: 'flex', minHeight: 0, background: 'var(--bg)' }}>
       {siteOpen && (
         <aside style={{
           width: 220,

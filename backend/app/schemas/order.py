@@ -138,4 +138,4 @@ class CustomerOrderRead(ApiModel):
 
 
 class CustomerVerifyRequest(ApiModel):
-    phone_suffix: str = Field(min_length=4, max_length=4)
+    phone_suffix: str = Field(min_length=4, max_length=4, pattern=r"^\d{4}$")

@@ -4,16 +4,16 @@ import { Avatar, Icon } from '../common/ui';
 // Admin app shell — sidebar + topbar + page router
 
 export const NAV = [
-  { key: 'dashboard',  label: '대시보드',     icon: 'home',     badge: null },
-  { key: 'orders',     label: '주문관리',     icon: 'inbox',    badge: '12' },
-  { key: 'calendar',   label: '일정 캘린더',  icon: 'calendar', badge: null },
-  { key: 'photos',     label: '사진검수',     icon: 'image',    badge: '6' },
+  { key: 'dashboard',  label: '대시보드',     icon: 'home' },
+  { key: 'orders',     label: '주문관리',     icon: 'inbox' },
+  { key: 'calendar',   label: '일정 캘린더',  icon: 'calendar' },
+  { key: 'photos',     label: '사진검수',     icon: 'image' },
   { key: 'products',   label: '상품관리',     icon: 'package',  badge: null },
   { key: 'partners',   label: '협력사관리',   icon: 'truck',    badge: null },
   { key: 'sends',      label: '발송이력',     icon: 'send',     badge: null },
 ];
 
-export function AdminShell({ initialPage = 'dashboard', children, onNav = undefined }) {
+export function AdminShell({ initialPage = 'dashboard', children, onNav = undefined, navBadges = {} }) {
   const [page, setPage] = React.useState(initialPage);
 
   const handleNav = (k) => {
@@ -22,7 +22,7 @@ export function AdminShell({ initialPage = 'dashboard', children, onNav = undefi
   };
 
   return (
-    <div style={{ display: 'flex', height: '100%', background: 'var(--bg)' }}>
+    <div data-testid="admin-shell" style={{ display: 'flex', height: '100%', background: 'var(--bg)' }}>
       {/* Sidebar */}
       <aside style={{
         width: 220, flexShrink: 0,
@@ -47,8 +47,9 @@ export function AdminShell({ initialPage = 'dashboard', children, onNav = undefi
           <div style={{ fontSize: 10.5, color: 'var(--text-quaternary)', padding: '10px 8px 4px', letterSpacing: '0.06em', fontWeight: 600 }}>WORKSPACE</div>
           {NAV.map((n) => {
             const active = page === n.key;
+            const badge = navBadges[n.key] ?? n.badge;
             return (
-              <button key={n.key} onClick={() => handleNav(n.key)}
+              <button key={n.key} data-testid={`admin-nav-${n.key}`} onClick={() => handleNav(n.key)}
                 style={{
                   display: 'flex', alignItems: 'center', gap: 9,
                   height: 30, padding: '0 8px',
@@ -63,14 +64,14 @@ export function AdminShell({ initialPage = 'dashboard', children, onNav = undefi
                 onMouseLeave={(e) => { if (!active) e.currentTarget.style.background = 'transparent'; }}>
                 <Icon name={n.icon} size={14}/>
                 <span style={{ flex: 1 }}>{n.label}</span>
-                {n.badge && (
+                {badge ? (
                   <span style={{
                     fontSize: 10.5, fontWeight: 600,
                     padding: '1px 6px', borderRadius: 10,
                     background: active ? 'var(--brand)' : 'var(--neutral-bg)',
                     color: active ? '#fff' : 'var(--neutral-fg)',
-                  }}>{n.badge}</span>
-                )}
+                  }} data-testid={`admin-nav-badge-${n.key}`}>{badge}</span>
+                ) : null}
               </button>
             );
           })}
@@ -108,7 +109,7 @@ export function AdminShell({ initialPage = 'dashboard', children, onNav = undefi
 
       {/* Main */}
       <main style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
-        {children({ page, setPage: handleNav })}
+        {children({ page, setPage })}
       </main>
     </div>
   );
@@ -135,7 +136,7 @@ export function Topbar({ title, subtitle = undefined, breadcrumb = undefined, ac
           </div>
         )}
         <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
-          <h1 style={{ margin: 0, fontSize: 15, fontWeight: 600, letterSpacing: '-0.015em' }}>{title}</h1>
+          <h1 data-testid="admin-topbar-title" style={{ margin: 0, fontSize: 15, fontWeight: 600, letterSpacing: '-0.015em' }}>{title}</h1>
           {subtitle && <span style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>{subtitle}</span>}
         </div>
       </div>

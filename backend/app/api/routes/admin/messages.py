@@ -8,6 +8,14 @@ from app.services.messages import MessageService
 router = APIRouter()
 
 
+@router.get("", response_model=list[MessageLogRead])
+def list_messages(
+    db: Session = Depends(get_session),
+    _: CurrentUser = Depends(require_admin),
+) -> list:
+    return MessageService(db).list_logs()
+
+
 @router.post("/send", response_model=MessageLogRead)
 def send_message(
     payload: MessageSendRequest,
@@ -19,4 +27,8 @@ def send_message(
     except ValueError as exc:
         if str(exc) == "order_not_found":
             raise HTTPException(status_code=404, detail="order_not_found") from exc
+        if str(exc) == "no_customer_visible_photos":
+            raise HTTPException(status_code=400, detail="no_customer_visible_photos") from exc
+        if str(exc) in {"partner_not_assigned", "partner_not_found", "invalid_recipient_type"}:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
         raise

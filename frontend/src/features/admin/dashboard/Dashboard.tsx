@@ -5,7 +5,7 @@ import { useApiResource } from '../../../api/useApiResource';
 
 // Admin Dashboard — KPI grid + work queues + today/tomorrow + recent
 
-export function Dashboard({ onOpenOrder, onNav }) {
+export function Dashboard({ onOpenOrder, onNav, onCreateOrder }) {
   const summary = useApiResource(getDashboardSummary);
   const orders = useApiResource(listAdminOrders);
   const recentActivity = useApiResource(getDashboardRecentActivity);
@@ -15,24 +15,25 @@ export function Dashboard({ onOpenOrder, onNav }) {
   const tomorrowJobs = orders.data ? toDashJobs(orders.data, 'tomorrow') : TOMORROW_JOBS;
   const recentPhotos = recentActivity.data ? toRecentPhotos(recentActivity.data.photos) : RECENT_PHOTOS;
   const recentSends = recentActivity.data ? toRecentSends(recentActivity.data.messages) : RECENT_SENDS;
+  const workCount = summary.data ? queues.reduce((sum, item) => sum + Number(item.count || 0), 0) : 0;
 
   return (
-    <div className="scroll" style={{ flex: 1, overflow: 'auto', padding: 20, background: 'var(--bg)' }}>
+    <div data-testid="admin-dashboard-page" className="scroll" style={{ flex: 1, overflow: 'auto', padding: 20, background: 'var(--bg)' }}>
       <div style={{ maxWidth: 1320, margin: '0 auto' }}>
 
         {/* Greeting */}
         <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', marginBottom: 14 }}>
           <div>
-            <div style={{ fontSize: 11.5, color: 'var(--text-tertiary)', marginBottom: 2 }}>2026년 5월 2일 토요일 · 오전 9:14</div>
+            <div style={{ fontSize: 11.5, color: 'var(--text-tertiary)', marginBottom: 2 }}>{formatDashboardDate(new Date())}</div>
             <h2 style={{ margin: 0, fontSize: 18, fontWeight: 600, letterSpacing: '-0.02em' }}>
-              안녕하세요 전소영님 <span style={{ color: 'var(--text-tertiary)', fontWeight: 400 }}>— 오늘 처리할 일 12건이 있습니다</span>
+              안녕하세요 전소영님 <span style={{ color: 'var(--text-tertiary)', fontWeight: 400 }}>— 지금 처리할 일 {summary.isLoading ? '-' : workCount}건이 있습니다</span>
             </h2>
           </div>
           <div style={{ display: 'flex', gap: 6 }}>
             <button className="btn btn--secondary btn--sm">
               <Icon name="refresh" size={12}/> 새로고침
             </button>
-            <button className="btn btn--primary btn--sm">
+            <button data-testid="dashboard-create-order" className="btn btn--primary btn--sm" onClick={onCreateOrder}>
               <Icon name="plus" size={12}/> 신규 주문 등록
             </button>
           </div>
@@ -66,7 +67,7 @@ export function Dashboard({ onOpenOrder, onNav }) {
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: 10 }}>
             {queues.map((q) => (
-              <button key={q.key} onClick={() => onNav && onNav('orders')}
+              <button key={q.key} onClick={() => onNav && onNav(q.targetPage || 'orders', { ordersTab: q.ordersTab || 'all' })}
                 className="card"
                 style={{
                   padding: 12, textAlign: 'left', cursor: 'pointer',
@@ -283,12 +284,12 @@ function toKpis(summary) {
 
 function toQueues(summary) {
   return [
-    { key: 'partner_pending', title: '협력사 확인 필요', count: summary.partner_pending, tone: 'warn', icon: 'clock', desc: '배정 후 확인 대기' },
-    { key: 'tomorrow_notify', title: '내일 안내 발송 필요', count: summary.tomorrow_notice_targets, tone: 'warn', icon: 'send', desc: '내일 작업 예정' },
-    { key: 'today_work', title: '오늘 작업 예정', count: summary.today_jobs, tone: 'info', icon: 'truck', desc: '진행/예정 작업' },
-    { key: 'photo_review', title: '사진 검수 대기', count: summary.photo_review_pending, tone: 'purple', icon: 'image', desc: '관리자 승인 필요' },
-    { key: 'customer_deliver', title: '고객 전달 필요', count: summary.customer_delivery_needed, tone: 'warn', icon: 'sparkles', desc: '검수 완료 후 전달' },
-    { key: 'payment_check', title: '결제 확인 필요', count: summary.payment_check_needed, tone: 'danger', icon: 'creditCard', desc: '잔금/미수 확인' },
+    { key: 'partner_pending', title: '협력사 확인 필요', count: summary.partner_pending, tone: 'warn', icon: 'clock', desc: '배정 후 확인 대기', targetPage: 'orders', ordersTab: 'partner_pending' },
+    { key: 'tomorrow_notify', title: '내일 안내 발송 필요', count: summary.tomorrow_notice_targets, tone: 'warn', icon: 'send', desc: '내일 작업 예정', targetPage: 'orders', ordersTab: 'tomorrow_notice' },
+    { key: 'today_work', title: '오늘 작업 예정', count: summary.today_jobs, tone: 'info', icon: 'truck', desc: '진행/예정 작업', targetPage: 'orders', ordersTab: 'today' },
+    { key: 'photo_review', title: '사진 검수 대기', count: summary.photo_review_pending, tone: 'purple', icon: 'image', desc: '관리자 승인 필요', targetPage: 'photos' },
+    { key: 'customer_deliver', title: '고객 전달 필요', count: summary.customer_delivery_needed, tone: 'warn', icon: 'sparkles', desc: '검수 완료 후 전달', targetPage: 'photos' },
+    { key: 'payment_check', title: '결제 확인 필요', count: summary.payment_check_needed, tone: 'danger', icon: 'creditCard', desc: '잔금/미수 확인', targetPage: 'orders', ordersTab: 'payment_check' },
   ];
 }
 
@@ -301,6 +302,11 @@ function toDashJobs(orders, target) {
 
   return orders
     .filter((order) => isSameDate(order.scheduled_date, wanted))
+    .filter((order) => (
+      target === 'tomorrow'
+        ? ['일정확정', '전날안내필요'].includes(order.status)
+        : ['작업예정', '작업진행', '사진검수대기'].includes(order.status)
+    ))
     .slice(0, 5)
     .map((order) => ({
       id: order.id,
@@ -400,4 +406,9 @@ function maskPhone(phone) {
     return phone;
   }
   return `${digits.slice(0, 3)}-${digits.slice(3, 4)}***-${digits.slice(-4)}`;
+}
+
+function formatDashboardDate(value) {
+  const weekdays = ['일요일', '월요일', '화요일', '수요일', '목요일', '금요일', '토요일'];
+  return `${value.getFullYear()}년 ${value.getMonth() + 1}월 ${value.getDate()}일 ${weekdays[value.getDay()]} · ${formatShortTime(value.toISOString())}`;
 }

@@ -1,12 +1,14 @@
 import React from 'react';
 
-import { createAdminOrder, getAdminOrder, listPartners, updateAdminOrder } from '../../../api/admin';
+import { createAdminOrder, getAdminOrder, listPartners, listServiceCatalog, updateAdminOrder } from '../../../api/admin';
 import { Icon } from '../../../components/common/ui';
 import { ORDER_STATUSES } from '../../../domain/orderStatus';
+import { PARTNER_PAYMENT_STATUSES, PAYMENT_STATUSES } from '../../../domain/paymentStatus';
 import { useApiResource } from '../../../api/useApiResource';
 
 export function OrderFormPage({ mode = 'create', orderId = null, onCancel, onSaved }) {
   const partners = useApiResource(listPartners);
+  const serviceCatalog = useApiResource(listServiceCatalog);
   const [form, setForm] = React.useState(() => createEmptyForm());
   const [isLoadingOrder, setIsLoadingOrder] = React.useState(mode === 'edit');
   const [isSaving, setIsSaving] = React.useState(false);
@@ -59,6 +61,17 @@ export function OrderFormPage({ mode = 'create', orderId = null, onCancel, onSav
     }));
   };
 
+  const handleServiceItemChange = (serviceItemId) => {
+    const option = flattenServiceItems(serviceCatalog.data || []).find((item) => item.id === serviceItemId);
+    setForm((current) => ({
+      ...current,
+      service_category_id: option?.category_id || '',
+      service_item_id: serviceItemId,
+      service_name: option?.name || current.service_name,
+      total_amount: option && current.total_amount === '' ? String(Math.round(Number(option.base_price || 0))) : current.total_amount,
+    }));
+  };
+
   const handleSubmit = async (event) => {
     event.preventDefault();
     setError(null);
@@ -87,7 +100,7 @@ export function OrderFormPage({ mode = 'create', orderId = null, onCancel, onSav
   }
 
   return (
-    <form onSubmit={handleSubmit} style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0, background: 'var(--bg)' }}>
+    <form data-testid="admin-order-form" onSubmit={handleSubmit} style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0, background: 'var(--bg)' }}>
       <div style={{
         padding: '10px 20px',
         background: 'var(--surface)',
@@ -104,7 +117,7 @@ export function OrderFormPage({ mode = 'create', orderId = null, onCancel, onSav
           {mode === 'edit' ? '주문 수정' : '신규 주문 등록'}
         </h2>
         <div style={{ flex: 1 }}/>
-        <button type="submit" className="btn btn--primary btn--sm" disabled={isSaving}>
+        <button type="submit" data-testid="order-save" className="btn btn--primary btn--sm" disabled={isSaving}>
           <Icon name="check" size={13}/> {isSaving ? '저장 중' : '저장'}
         </button>
       </div>
@@ -114,20 +127,30 @@ export function OrderFormPage({ mode = 'create', orderId = null, onCancel, onSav
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
             <Section title="고객 정보">
               <FieldGrid>
-                <TextField label="고객명" required value={form.customer_name} onChange={(value) => setField('customer_name', value)} />
-                <TextField label="연락처" required value={form.customer_phone} onChange={(value) => setField('customer_phone', value)} placeholder="010-0000-0000" />
+                <TextField testId="order-customer-name" label="고객명" required value={form.customer_name} onChange={(value) => setField('customer_name', value)} />
+                <TextField testId="order-customer-phone" label="연락처" required value={form.customer_phone} onChange={(value) => setField('customer_phone', value)} placeholder="010-0000-0000" />
                 <TextField label="유입 경로" value={form.source_channel} onChange={(value) => setField('source_channel', value)} />
-                <TextField label="주소" required span={2} value={form.customer_address} onChange={(value) => setField('customer_address', value)} />
+                <TextField testId="order-customer-address" label="주소" required span={2} value={form.customer_address} onChange={(value) => setField('customer_address', value)} />
               </FieldGrid>
             </Section>
 
             <Section title="상품 / 일정">
               <FieldGrid>
-                <TextField label="상품명" required value={form.service_name} onChange={(value) => setField('service_name', value)} />
+                <Field label="카탈로그 상품">
+                  <select className="input" data-testid="order-service-item" value={form.service_item_id} onChange={(event) => handleServiceItemChange(event.target.value)}>
+                    <option value="">직접 입력</option>
+                    {flattenServiceItems(serviceCatalog.data || []).map((item) => (
+                      <option key={item.id} value={item.id}>
+                        {item.category_name} / {item.name} · {formatWon(item.base_price)}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+                <TextField testId="order-service-name" label="상품명" required value={form.service_name} onChange={(value) => setField('service_name', value)} />
                 <TextField label="수량/규격" value={form.size_or_quantity} onChange={(value) => setField('size_or_quantity', value)} />
                 <TextField label="접수일" type="date" value={form.received_date} onChange={(value) => setField('received_date', value)} />
-                <TextField label="방문 예정일" type="date" value={form.scheduled_date} onChange={(value) => setField('scheduled_date', value)} />
-                <TextField label="요청 시간" value={form.requested_time} onChange={(value) => setField('requested_time', value)} placeholder="14:00 또는 오후 2-5시" />
+                <TextField testId="order-scheduled-date" label="방문 예정일" type="date" value={form.scheduled_date} onChange={(value) => setField('scheduled_date', value)} />
+                <TextField testId="order-requested-time" label="요청 시간" value={form.requested_time} onChange={(value) => setField('requested_time', value)} placeholder="14:00 또는 오후 2-5시" />
                 <TextField label="상품 상세" span={2} multiline value={form.service_detail} onChange={(value) => setField('service_detail', value)} />
                 <TextField label="요청사항" span={2} multiline value={form.special_request} onChange={(value) => setField('special_request', value)} />
               </FieldGrid>
@@ -135,11 +158,18 @@ export function OrderFormPage({ mode = 'create', orderId = null, onCancel, onSav
 
             <Section title="금액 / 결제">
               <FieldGrid>
-                <TextField label="총 금액" type="number" value={form.total_amount} onChange={(value) => setField('total_amount', value)} />
+                <TextField testId="order-total-amount" label="총 금액" type="number" value={form.total_amount} onChange={(value) => setField('total_amount', value)} />
                 <TextField label="계약금" type="number" value={form.deposit_amount} onChange={(value) => setField('deposit_amount', value)} />
                 <TextField label="잔금" type="number" value={form.balance_amount} onChange={(value) => setField('balance_amount', value)} />
                 <TextField label="현장 추가" type="number" value={form.onsite_extra_amount} onChange={(value) => setField('onsite_extra_amount', value)} />
-                <TextField label="결제 상태" value={form.payment_status} onChange={(value) => setField('payment_status', value)} />
+                <Field label="결제 상태">
+                  <select className="input" data-testid="order-payment-status" value={form.payment_status} onChange={(event) => setField('payment_status', event.target.value)}>
+                    <option value="">미입력</option>
+                    {PAYMENT_STATUSES.map((status) => (
+                      <option key={status.value} value={status.value}>{status.label}</option>
+                    ))}
+                  </select>
+                </Field>
                 <TextField label="VAT" value={form.vat_type} onChange={(value) => setField('vat_type', value)} />
                 <TextField label="결제 메모" span={2} multiline value={form.payment_memo} onChange={(value) => setField('payment_memo', value)} />
                 <TextField label="증빙 메모" span={2} multiline value={form.evidence_memo} onChange={(value) => setField('evidence_memo', value)} />
@@ -149,7 +179,7 @@ export function OrderFormPage({ mode = 'create', orderId = null, onCancel, onSav
             <Section title="협력사 / 정산">
               <FieldGrid>
                 <Field label="협력사">
-                  <select className="input" value={form.partner_id} onChange={(event) => handlePartnerChange(event.target.value)}>
+                  <select className="input" data-testid="order-partner" value={form.partner_id} onChange={(event) => handlePartnerChange(event.target.value)}>
                     <option value="">미배정</option>
                     {(partners.data || []).map((partner) => (
                       <option key={partner.id} value={partner.id}>{partner.name}</option>
@@ -158,7 +188,14 @@ export function OrderFormPage({ mode = 'create', orderId = null, onCancel, onSav
                 </Field>
                 <TextField label="팀명" value={form.team_name} onChange={(value) => setField('team_name', value)} />
                 <TextField label="협력사 지급액" type="number" value={form.partner_payment_amount} onChange={(value) => setField('partner_payment_amount', value)} />
-                <TextField label="협력사 정산 상태" value={form.partner_payment_status} onChange={(value) => setField('partner_payment_status', value)} />
+                <Field label="협력사 정산 상태">
+                  <select className="input" data-testid="order-partner-payment-status" value={form.partner_payment_status} onChange={(event) => setField('partner_payment_status', event.target.value)}>
+                    <option value="">미입력</option>
+                    {PARTNER_PAYMENT_STATUSES.map((status) => (
+                      <option key={status.value} value={status.value}>{status.label}</option>
+                    ))}
+                  </select>
+                </Field>
               </FieldGrid>
             </Section>
           </div>
@@ -239,12 +276,13 @@ function Field({ label, children, span = 1 }) {
   );
 }
 
-function TextField({ label, value, onChange, type = 'text', required = false, span = 1, multiline = false, placeholder = '' }) {
+function TextField({ label, value, onChange, type = 'text', required = false, span = 1, multiline = false, placeholder = '', testId = undefined }) {
   return (
     <Field label={`${label}${required ? ' *' : ''}`} span={span}>
       {multiline ? (
         <textarea
           className="input"
+          data-testid={testId}
           value={value}
           placeholder={placeholder}
           onChange={(event) => onChange(event.target.value)}
@@ -253,6 +291,7 @@ function TextField({ label, value, onChange, type = 'text', required = false, sp
       ) : (
         <input
           className="input"
+          data-testid={testId}
           type={type}
           value={value}
           placeholder={placeholder}
@@ -271,6 +310,8 @@ function createEmptyForm() {
     requested_time: '',
     partner_id: '',
     team_name: '',
+    service_category_id: '',
+    service_item_id: '',
     service_name: '',
     size_or_quantity: '',
     service_detail: '',
@@ -301,6 +342,8 @@ function toForm(order) {
     requested_time: order.requested_time || '',
     partner_id: order.partner_id || '',
     team_name: order.team_name || '',
+    service_category_id: order.service_category_id || '',
+    service_item_id: order.service_item_id || '',
     service_name: order.service_name || '',
     size_or_quantity: order.size_or_quantity || '',
     service_detail: order.service_detail || '',
@@ -331,6 +374,8 @@ function toPayload(form) {
     requested_time: emptyToNull(form.requested_time),
     partner_id: emptyToNull(form.partner_id),
     team_name: emptyToNull(form.team_name),
+    service_category_id: emptyToNull(form.service_category_id),
+    service_item_id: emptyToNull(form.service_item_id),
     service_name: form.service_name.trim(),
     size_or_quantity: emptyToNull(form.size_or_quantity),
     service_detail: emptyToNull(form.service_detail),
@@ -368,4 +413,17 @@ function numberOrNull(value) {
 
 function toInputNumber(value) {
   return value === null || value === undefined ? '' : String(value);
+}
+
+function flattenServiceItems(categories) {
+  return categories.flatMap((category) => (
+    (category.items || [])
+      .filter((item) => item.is_active && category.is_active)
+      .map((item) => ({ ...item, category_name: category.name }))
+  ));
+}
+
+function formatWon(value) {
+  const amount = Number(value || 0);
+  return `₩${Math.round(amount).toLocaleString()}`;
 }

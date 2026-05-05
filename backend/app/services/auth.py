@@ -18,6 +18,7 @@ from app.core.time import utc_now
 from app.domain.constants import AuditEventType, AuditSeverity, UserRole
 from app.models.refresh_token import RefreshToken
 from app.models.user import User
+from app.repositories.partners import PartnerRepository
 from app.repositories.refresh_tokens import RefreshTokenRepository
 from app.repositories.users import UserRepository
 from app.schemas.auth import AuthUserRead, LoginResponse
@@ -35,6 +36,7 @@ class AuthService:
     def __init__(self, db: Session) -> None:
         self.db = db
         self.users = UserRepository(db)
+        self.partners = PartnerRepository(db)
         self.refresh_tokens = RefreshTokenRepository(db)
         self.audit = AuditService(db)
 
@@ -71,6 +73,9 @@ class AuthService:
         if expected_role == UserRole.PARTNER and user.partner_id is None:
             self._record_failure(login_key)
             raise AuthError("partner_scope_required")
+        if expected_role == UserRole.PARTNER and not self._partner_is_active(user.partner_id):
+            self._record_failure(login_key)
+            raise AuthError("invalid_credentials")
 
         self._reset_failures(login_key)
         response = self._issue_token_pair(user)
@@ -100,6 +105,8 @@ class AuthService:
 
         user = self.users.get(user_id)
         if user is None or not user.is_active:
+            raise AuthError("invalid_refresh_token")
+        if self._role(user) == UserRole.PARTNER and not self._partner_is_active(user.partner_id):
             raise AuthError("invalid_refresh_token")
 
         token_record.revoked_at = utc_now()
@@ -206,6 +213,12 @@ class AuthService:
 
     def _role(self, user: User) -> UserRole:
         return user.role if isinstance(user.role, UserRole) else UserRole(str(user.role))
+
+    def _partner_is_active(self, partner_id: str | None) -> bool:
+        if partner_id is None:
+            return False
+        partner = self.partners.get(partner_id)
+        return bool(partner and partner.is_active)
 
 
 def to_auth_user_dto(user: User) -> AuthUserRead:

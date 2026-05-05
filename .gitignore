@@ -8,11 +8,15 @@ venv/
 
 # Backend local data
 backend/cleaning_ops.db
+backend/e2e_cleaning_ops.db
+backend/e2e_storage/
 *.sqlite3
 
 # Frontend
 frontend/node_modules/
 frontend/dist/
+frontend/playwright-report/
+frontend/test-results/
 
 # Env
 .env

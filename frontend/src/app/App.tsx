@@ -2,13 +2,18 @@ import React from 'react';
 
 import { DesktopFrame, PhoneFrame } from '../components/frames/DeviceFrames';
 import { AdminShell, Topbar } from '../components/layout/AdminShell';
+import { getDashboardSummary } from '../api/admin';
+import { useApiResource } from '../api/useApiResource';
 import { AdminLoginPage, PartnerLoginPage } from '../features/auth/LoginPages';
 import { CalendarPage } from '../features/admin/calendar/CalendarPage';
 import { Dashboard } from '../features/admin/dashboard/Dashboard';
+import { MessagesPage } from '../features/admin/messages/MessagesPage';
 import { OrderDetailPage } from '../features/admin/orders/OrderDetailPage';
 import { OrderFormPage } from '../features/admin/orders/OrderFormPage';
 import { OrdersPage } from '../features/admin/orders/OrdersPage';
+import { PartnersPage } from '../features/admin/partners/PartnersPage';
 import { PhotoReviewPage } from '../features/admin/photo-review/PhotoReviewPage';
+import { ProductsPage } from '../features/admin/products/ProductsPage';
 import { CustomerReservation } from '../features/customer/CustomerReservation';
 import { PartnerJobDetail } from '../features/partner/PartnerJobDetail';
 import { useAuth } from '../store/authStore';
@@ -34,18 +39,51 @@ const ADMIN_PAGE_META = {
     subtitle: '6건 대기',
     breadcrumb: ['Workspace', '사진검수'],
   },
+  products: {
+    title: '상품관리',
+    subtitle: '서비스 기준가',
+    breadcrumb: ['Workspace', '상품관리'],
+  },
+  sends: {
+    title: '발송이력',
+    subtitle: '고객/협력사 안내',
+    breadcrumb: ['Workspace', '발송이력'],
+  },
+  partners: {
+    title: '협력사관리',
+    subtitle: '계정 / 배정 현황',
+    breadcrumb: ['Workspace', '협력사관리'],
+  },
 };
 
 export function App() {
   const auth = useAuth();
+  const isStandaloneCustomerLink = isCustomerLinkRoute();
   const [mode, setMode] = React.useState('admin');
   const [theme, setTheme] = React.useState('light');
   const [detailOrderId, setDetailOrderId] = React.useState(null);
   const [orderForm, setOrderForm] = React.useState(null);
+  const [ordersTab, setOrdersTab] = React.useState('all');
+  const adminSummaryLoader = React.useCallback(() => {
+    if (auth.user?.role !== 'admin') {
+      return Promise.resolve(null);
+    }
+    return getDashboardSummary();
+  }, [auth.user?.role]);
+  const adminSummary = useApiResource(adminSummaryLoader, auth.user?.role || 'guest');
+  const navBadges = toAdminNavBadges(adminSummary.data);
 
   React.useEffect(() => {
     document.documentElement.dataset.theme = theme;
   }, [theme]);
+
+  if (isStandaloneCustomerLink) {
+    return (
+      <div style={{ minHeight: '100vh', height: '100vh', background: '#f7f6f3' }}>
+        <CustomerReservation />
+      </div>
+    );
+  }
 
   return (
     <div className="app-root">
@@ -89,7 +127,15 @@ export function App() {
         {mode === 'admin' && (
           <DesktopFrame>
             {auth.user?.role === 'admin' ? (
-              <AdminShell initialPage="dashboard">
+              <AdminShell
+                initialPage="dashboard"
+                onNav={() => {
+                  setDetailOrderId(null);
+                  setOrderForm(null);
+                  setOrdersTab('all');
+                }}
+                navBadges={navBadges}
+              >
                 {({ page, setPage }) => {
                   if (orderForm) {
                     return (
@@ -134,12 +180,22 @@ export function App() {
                       <Topbar {...meta} />
                       {page === 'dashboard' && (
                         <Dashboard
-                          onNav={setPage}
+                          onCreateOrder={() => setOrderForm({ mode: 'create', orderId: null })}
+                          onNav={(nextPage, options = {}) => {
+                            const nextOrdersTab = 'ordersTab' in options ? options.ordersTab : null;
+                            setDetailOrderId(null);
+                            setOrderForm(null);
+                            if (typeof nextOrdersTab === 'string') {
+                              setOrdersTab(nextOrdersTab);
+                            }
+                            setPage(nextPage);
+                          }}
                           onOpenOrder={(orderId) => setDetailOrderId(orderId)}
                         />
                       )}
                       {page === 'orders' && (
                         <OrdersPage
+                          initialTab={ordersTab}
                           onOpenOrder={(orderId) => setDetailOrderId(orderId)}
                           onCreateOrder={() => setOrderForm({ mode: 'create', orderId: null })}
                         />
@@ -151,7 +207,10 @@ export function App() {
                         />
                       )}
                       {page === 'photos' && <PhotoReviewPage />}
-                      {!['dashboard', 'orders', 'calendar', 'photos'].includes(page) && (
+                      {page === 'products' && <ProductsPage />}
+                      {page === 'partners' && <PartnersPage />}
+                      {page === 'sends' && <MessagesPage />}
+                      {!['dashboard', 'orders', 'calendar', 'photos', 'products', 'partners', 'sends'].includes(page) && (
                         <ComingSoon page={page} />
                       )}
                     </>
@@ -190,4 +249,27 @@ function ComingSoon({ page }) {
       </div>
     </div>
   );
+}
+
+function toAdminNavBadges(summary) {
+  if (!summary) {
+    return {};
+  }
+
+  const orderQueueCount = Number(summary.partner_pending || 0)
+    + Number(summary.today_jobs || 0)
+    + Number(summary.tomorrow_notice_targets || 0)
+    + Number(summary.customer_delivery_needed || 0)
+    + Number(summary.payment_check_needed || 0);
+  const photoQueueCount = Number(summary.photo_review_pending || 0)
+    + Number(summary.customer_delivery_needed || 0);
+
+  return {
+    orders: orderQueueCount > 0 ? String(orderQueueCount) : null,
+    photos: photoQueueCount > 0 ? String(photoQueueCount) : null,
+  };
+}
+
+function isCustomerLinkRoute() {
+  return /^\/(?:c|customer)(?:\/|$)/.test(window.location.pathname);
 }

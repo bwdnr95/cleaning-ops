@@ -26,7 +26,10 @@ def create_order(
     db: Session = Depends(get_session),
     user: CurrentUser = Depends(require_admin),
 ):
-    return to_admin_order_dto(OrderService(db).create(payload, actor_user_id=user.id))
+    try:
+        return to_admin_order_dto(OrderService(db).create(payload, actor_user_id=user.id))
+    except ValueError as exc:
+        raise order_http_error(exc) from exc
 
 
 @router.get("/{order_id}", response_model=AdminOrderDetailRead)
@@ -56,6 +59,10 @@ def update_order(
     try:
         return to_admin_order_dto(OrderService(db).update(order_id, payload, actor_user_id=user.id))
     except ValueError as exc:
-        if str(exc) == "order_not_found":
-            raise HTTPException(status_code=404, detail="order_not_found") from exc
-        raise
+        raise order_http_error(exc) from exc
+
+
+def order_http_error(exc: ValueError) -> HTTPException:
+    detail = str(exc)
+    status_code = 404 if detail == "order_not_found" else 400
+    return HTTPException(status_code=status_code, detail=detail)

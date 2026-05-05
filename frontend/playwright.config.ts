@@ -1,0 +1,45 @@
+import { defineConfig, devices } from '@playwright/test';
+
+const frontendPort = Number(process.env.E2E_FRONTEND_PORT ?? 5176);
+const backendPort = Number(process.env.E2E_BACKEND_PORT ?? 8003);
+const frontendUrl = `http://127.0.0.1:${frontendPort}`;
+const backendUrl = `http://127.0.0.1:${backendPort}`;
+
+export default defineConfig({
+  testDir: './e2e',
+  timeout: 60_000,
+  expect: {
+    timeout: 10_000,
+  },
+  fullyParallel: false,
+  workers: 1,
+  reporter: 'list',
+  use: {
+    baseURL: frontendUrl,
+    trace: 'retain-on-failure',
+  },
+  webServer: [
+    {
+      command: `powershell -NoProfile -ExecutionPolicy Bypass -File .\\scripts\\start_e2e_backend.ps1 -Port ${backendPort} -FrontendUrl ${frontendUrl}`,
+      cwd: '../backend',
+      url: `${backendUrl}/health`,
+      timeout: 120_000,
+      reuseExistingServer: false,
+    },
+    {
+      command: `npm run dev -- --host 127.0.0.1 --port ${frontendPort}`,
+      url: frontendUrl,
+      timeout: 120_000,
+      reuseExistingServer: false,
+      env: {
+        VITE_API_BASE_URL: `${backendUrl}/api`,
+      },
+    },
+  ],
+  projects: [
+    {
+      name: 'chromium',
+      use: { ...devices['Desktop Chrome'] },
+    },
+  ],
+});

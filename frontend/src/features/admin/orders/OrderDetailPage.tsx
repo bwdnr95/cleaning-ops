@@ -1,9 +1,20 @@
 import React from 'react';
 
 import { getAdminOrder, listPartners, updateAdminOrder } from '../../../api/admin';
-import { sendCustomerPhotoReady } from '../../../api/messages';
+import {
+  sendCustomerDayBefore,
+  sendCustomerPhotoReady,
+  sendCustomerScheduleConfirmed,
+  sendPartnerAssignment,
+} from '../../../api/messages';
 import { Avatar, Badge, Icon, StatusBadge } from '../../../components/common/ui';
 import { ORDER_STATUSES } from '../../../domain/orderStatus';
+import {
+  PARTNER_PAYMENT_STATUSES,
+  PAYMENT_STATUSES,
+  partnerPaymentStatusLabel,
+  paymentStatusLabel,
+} from '../../../domain/paymentStatus';
 import { useApiResource } from '../../../api/useApiResource';
 
 export function OrderDetailPage({ orderId, onBack, onEdit }) {
@@ -13,6 +24,8 @@ export function OrderDetailPage({ orderId, onBack, onEdit }) {
   const order = orderResource.data;
   const [selectedStatus, setSelectedStatus] = React.useState('');
   const [selectedPartnerId, setSelectedPartnerId] = React.useState('');
+  const [selectedPaymentStatus, setSelectedPaymentStatus] = React.useState('');
+  const [selectedPartnerPaymentStatus, setSelectedPartnerPaymentStatus] = React.useState('');
   const [isSaving, setIsSaving] = React.useState(false);
   const [notice, setNotice] = React.useState(null);
   const [error, setError] = React.useState(null);
@@ -21,6 +34,8 @@ export function OrderDetailPage({ orderId, onBack, onEdit }) {
     if (order) {
       setSelectedStatus(order.status);
       setSelectedPartnerId(order.partner_id || '');
+      setSelectedPaymentStatus(order.payment_status || '');
+      setSelectedPartnerPaymentStatus(order.partner_payment_status || '');
     }
   }, [order]);
 
@@ -44,6 +59,41 @@ export function OrderDetailPage({ orderId, onBack, onEdit }) {
     });
   };
 
+  const handlePaymentUpdate = async () => {
+    await runAction(async () => {
+      await updateAdminOrder(order.id, {
+        payment_status: selectedPaymentStatus || null,
+        partner_payment_status: selectedPartnerPaymentStatus || null,
+      });
+      setNotice('결제/정산 변경을 타임라인에 기록했습니다.');
+      orderResource.reload();
+    });
+  };
+
+  const handleSendCustomerScheduleConfirmed = async () => {
+    await runAction(async () => {
+      await sendCustomerScheduleConfirmed(order.id);
+      setNotice('고객 일정확정 안내를 발송했습니다.');
+      orderResource.reload();
+    });
+  };
+
+  const handleSendCustomerDayBefore = async () => {
+    await runAction(async () => {
+      await sendCustomerDayBefore(order.id);
+      setNotice('고객 전날 안내를 발송했습니다.');
+      orderResource.reload();
+    });
+  };
+
+  const handleSendPartnerAssignment = async () => {
+    await runAction(async () => {
+      await sendPartnerAssignment(order.id);
+      setNotice('협력사 배정 안내를 발송했습니다.');
+      orderResource.reload();
+    });
+  };
+
   const handleSendCustomerPhotoReady = async () => {
     await runAction(async () => {
       await sendCustomerPhotoReady(order.id);
@@ -58,8 +108,8 @@ export function OrderDetailPage({ orderId, onBack, onEdit }) {
     setIsSaving(true);
     try {
       await action();
-    } catch {
-      setError('요청을 처리하지 못했습니다. 잠시 후 다시 시도해 주세요.');
+    } catch (requestError) {
+      setError(toActionErrorMessage(requestError));
     } finally {
       setIsSaving(false);
     }
@@ -83,7 +133,7 @@ export function OrderDetailPage({ orderId, onBack, onEdit }) {
   const selectedPartner = (partnersResource.data || []).find((partner) => partner.id === order.partner_id);
 
   return (
-    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0, background: 'var(--bg)' }}>
+    <div data-testid="admin-order-detail-page" style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0, background: 'var(--bg)' }}>
       <div style={{
         padding: '10px 20px',
         background: 'var(--surface)',
@@ -141,7 +191,7 @@ export function OrderDetailPage({ orderId, onBack, onEdit }) {
               </div>
               <div style={{ marginTop: 10 }}>
                 <KV col={2}>
-                  <KVItem label="결제 상태" value={order.payment_status || '-'}/>
+                  <KVItem label="결제 상태" value={paymentStatusLabel(order.payment_status)}/>
                   <KVItem label="VAT" value={order.vat_type || '-'}/>
                   <KVItem label="결제 메모" value={order.payment_memo || '-'} span={2} multiline/>
                   <KVItem label="증빙 메모" value={order.evidence_memo || '-'} span={2} multiline/>
@@ -155,7 +205,7 @@ export function OrderDetailPage({ orderId, onBack, onEdit }) {
                 <div style={{ flex: 1 }}>
                   <div style={{ fontSize: 13, fontWeight: 600 }}>{order.team_name || selectedPartner?.name || '미배정'}</div>
                   <div style={{ fontSize: 11.5, color: 'var(--text-tertiary)', marginTop: 2 }}>
-                    협력사 ID: {order.partner_id || '-'} · 정산 상태: {order.partner_payment_status || '-'}
+                    협력사 ID: {order.partner_id || '-'} · 정산 상태: {partnerPaymentStatusLabel(order.partner_payment_status)}
                   </div>
                 </div>
                 <Badge tone={order.partner_id ? 'success' : 'warn'} dot>
@@ -191,7 +241,7 @@ export function OrderDetailPage({ orderId, onBack, onEdit }) {
                   {messageLogs.map((log) => (
                     <div key={log.id} style={{ display: 'grid', gridTemplateColumns: '120px 1fr 70px', gap: 10, alignItems: 'center', fontSize: 12, padding: '8px 0', borderBottom: '1px solid var(--divider)' }}>
                       <span className="mono" style={{ color: 'var(--text-tertiary)', fontSize: 10.5 }}>{formatDateTime(log.sent_at || log.created_at)}</span>
-                      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{log.message_type} · {log.recipient_name}</span>
+                      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{messageTypeLabel(log.message_type)} · {log.recipient_name}</span>
                       <Badge tone={log.status === 'sent' ? 'success' : 'danger'}>{log.status}</Badge>
                     </div>
                   ))}
@@ -225,11 +275,61 @@ export function OrderDetailPage({ orderId, onBack, onEdit }) {
             </div>
 
             <div className="card" style={{ padding: 14 }}>
+              <PanelTitle>결제 / 정산</PanelTitle>
+              <label style={{ display: 'flex', flexDirection: 'column', gap: 5, marginBottom: 8 }}>
+                <span style={{ fontSize: 10.5, color: 'var(--text-tertiary)', fontWeight: 600 }}>고객 결제 상태</span>
+                <select className="input" value={selectedPaymentStatus} onChange={(event) => setSelectedPaymentStatus(event.target.value)} style={{ width: '100%', height: 34 }}>
+                  <option value="">미입력</option>
+                  {PAYMENT_STATUSES.map((status) => (
+                    <option key={status.value} value={status.value}>{status.label}</option>
+                  ))}
+                </select>
+              </label>
+              <label style={{ display: 'flex', flexDirection: 'column', gap: 5, marginBottom: 8 }}>
+                <span style={{ fontSize: 10.5, color: 'var(--text-tertiary)', fontWeight: 600 }}>협력사 정산 상태</span>
+                <select className="input" value={selectedPartnerPaymentStatus} onChange={(event) => setSelectedPartnerPaymentStatus(event.target.value)} style={{ width: '100%', height: 34 }}>
+                  <option value="">미입력</option>
+                  {PARTNER_PAYMENT_STATUSES.map((status) => (
+                    <option key={status.value} value={status.value}>{status.label}</option>
+                  ))}
+                </select>
+              </label>
+              <button
+                className="btn btn--secondary btn--block"
+                disabled={
+                  isSaving
+                  || (
+                    selectedPaymentStatus === (order.payment_status || '')
+                    && selectedPartnerPaymentStatus === (order.partner_payment_status || '')
+                  )
+                }
+                onClick={() => void handlePaymentUpdate()}
+              >
+                <Icon name="creditCard" size={13}/> 결제/정산 저장
+              </button>
+            </div>
+
+            <div className="card" style={{ padding: 14 }}>
+              <PanelTitle>안내 발송</PanelTitle>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <button data-testid="send-customer-schedule-confirmed" className="btn btn--secondary btn--block" disabled={isSaving} onClick={() => void handleSendCustomerScheduleConfirmed()}>
+                  <Icon name="send" size={13}/> 일정확정 안내
+                </button>
+                <button data-testid="send-customer-day-before" className="btn btn--secondary btn--block" disabled={isSaving} onClick={() => void handleSendCustomerDayBefore()}>
+                  <Icon name="send" size={13}/> 전날 안내
+                </button>
+                <button data-testid="send-partner-assignment" className="btn btn--secondary btn--block" disabled={isSaving || !order.partner_id} onClick={() => void handleSendPartnerAssignment()}>
+                  <Icon name="truck" size={13}/> 협력사 배정 안내
+                </button>
+              </div>
+            </div>
+
+            <div className="card" style={{ padding: 14 }}>
               <PanelTitle>고객 전달</PanelTitle>
               <div className="mono" style={{ padding: '7px 9px', background: 'var(--bg-subtle)', border: '1px solid var(--border)', borderRadius: 6, fontSize: 10.5, color: 'var(--text-tertiary)', marginBottom: 8, overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                /customer?t={order.customer_token}
+                /c/{order.customer_token}
               </div>
-              <button className="btn btn--secondary btn--block" disabled={isSaving} onClick={() => void handleSendCustomerPhotoReady()}>
+              <button data-testid="send-customer-photo-ready" className="btn btn--secondary btn--block" disabled={isSaving} onClick={() => void handleSendCustomerPhotoReady()}>
                 <Icon name="send" size={13}/> 사진 링크 발송
               </button>
             </div>
@@ -369,4 +469,22 @@ function photoTypeLabel(type) {
   if (type === 'before') return 'before';
   if (type === 'after') return 'after';
   return 'etc';
+}
+
+function messageTypeLabel(type) {
+  if (type === 'customer_schedule_confirmed') return '일정확정';
+  if (type === 'customer_day_before') return '전날안내';
+  if (type === 'partner_assignment') return '협력사배정';
+  if (type === 'customer_photo_ready') return '사진전달';
+  return type;
+}
+
+function toActionErrorMessage(error) {
+  if (error?.message === 'partner_not_assigned') {
+    return '협력사 배정 후 안내를 발송할 수 있습니다.';
+  }
+  if (error?.message === 'no_customer_visible_photos') {
+    return '고객 공개 승인된 사진이 있어야 사진 링크를 발송할 수 있습니다.';
+  }
+  return '요청을 처리하지 못했습니다. 잠시 후 다시 시도해 주세요.';
 }

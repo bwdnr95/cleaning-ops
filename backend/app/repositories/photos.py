@@ -1,6 +1,7 @@
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
+from app.domain.constants import OrderStatus
 from app.models.order import Order
 from app.models.photo import OrderPhoto
 from app.repositories.base import Repository
@@ -17,16 +18,24 @@ class PhotoRepository(Repository[OrderPhoto]):
         stmt = stmt.order_by(OrderPhoto.photo_type.asc(), OrderPhoto.created_at.asc(), OrderPhoto.id.asc())
         return list(self.db.scalars(stmt))
 
-    def list_review_queue(self) -> list[tuple[Order, list[OrderPhoto]]]:
+    def list_review_queue(self) -> list[tuple[Order, list[OrderPhoto], int]]:
         stmt = (
-            select(Order, OrderPhoto)
+            select(Order)
             .join(OrderPhoto, OrderPhoto.order_id == Order.id)
-            .where(OrderPhoto.is_customer_visible.is_(False))
-            .order_by(OrderPhoto.created_at.asc(), OrderPhoto.id.asc())
+            .where(
+                or_(
+                    OrderPhoto.is_customer_visible.is_(False),
+                    Order.status == OrderStatus.CUSTOMER_DELIVERY_NEEDED,
+                )
+            )
+            .distinct()
+            .order_by(Order.scheduled_date.asc().nulls_last(), Order.id.asc())
         )
-        grouped: dict[str, tuple[Order, list[OrderPhoto]]] = {}
-        for order, photo in self.db.execute(stmt):
-            if order.id not in grouped:
-                grouped[order.id] = (order, [])
-            grouped[order.id][1].append(photo)
-        return list(grouped.values())
+        items: list[tuple[Order, list[OrderPhoto], int]] = []
+        for order in self.db.scalars(stmt):
+            all_photos = self.list_for_order(order.id)
+            pending_photos = [photo for photo in all_photos if not photo.is_customer_visible]
+            approved_count = len(all_photos) - len(pending_photos)
+            if pending_photos or (order.status == OrderStatus.CUSTOMER_DELIVERY_NEEDED and approved_count > 0):
+                items.append((order, pending_photos, approved_count))
+        return items
