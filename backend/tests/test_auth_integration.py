@@ -254,6 +254,38 @@ def test_admin_payment_and_settlement_update_records_timeline_and_queue() -> Non
     assert summary_response.json()["payment_check_needed"] == 1
 
 
+def test_admin_schedule_update_records_timeline() -> None:
+    client = make_test_client()
+    admin_session = login(client, "/api/auth/admin/login", DEV_ADMIN_EMAIL, DEV_ADMIN_PASSWORD)
+    headers = {"Authorization": f"Bearer {admin_session['access_token']}"}
+
+    update_response = client.patch(
+        "/api/admin/orders/seed-order-2450",
+        headers=headers,
+        json={
+            "scheduled_date": "2026-05-06",
+            "requested_time": "16:30",
+        },
+    )
+    detail_response = client.get("/api/admin/orders/seed-order-2450", headers=headers)
+
+    assert update_response.status_code == 200
+    assert detail_response.status_code == 200
+    detail = detail_response.json()
+    assert detail["scheduled_date"] == "2026-05-06"
+    assert detail["requested_time"] == "16:30"
+
+    schedule_events = [
+        event
+        for event in detail["timeline"]
+        if event["event_type"] == "memo_added" and event["title"] == "방문 일정 변경"
+    ]
+    assert schedule_events
+    changes = schedule_events[-1]["event_metadata"]["changes"]
+    assert changes["scheduled_date"] == {"from": "2026-05-04", "to": "2026-05-06"}
+    assert changes["requested_time"] == {"from": "09:00", "to": "16:30"}
+
+
 def test_admin_calendar_lists_monthly_scheduled_orders_and_partner_filter() -> None:
     client = make_test_client()
     admin_session = login(client, "/api/auth/admin/login", DEV_ADMIN_EMAIL, DEV_ADMIN_PASSWORD)

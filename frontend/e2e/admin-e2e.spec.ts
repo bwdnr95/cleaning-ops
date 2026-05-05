@@ -126,6 +126,37 @@ test('admin can run selected order bulk operations from the order list', async (
   ]);
 });
 
+test('admin can adjust schedule from order detail and jump to related ops pages', async ({ page, request }) => {
+  const order = await createDetailActionOrder(request);
+
+  await loginAsAdmin(page);
+  await page.getByTestId('admin-nav-orders').click();
+  await expect(page.getByTestId('admin-orders-page')).toBeVisible();
+  await page.getByTestId(`admin-order-row-${order.id}`).click();
+  await expect(page.getByTestId('admin-order-detail-page')).toBeVisible();
+
+  await pickDate(page, 'detail-scheduled-date', '2026-05-06');
+  await page.getByTestId('detail-requested-time').fill('16:30');
+  await page.getByTestId('detail-schedule-save').click();
+  await expect(page.getByTestId('admin-action-notice')).toContainText('방문 일정 변경');
+
+  await expect.poll(async () => {
+    const [detail] = await getOrderDetails(request, [order]);
+    return {
+      scheduledDate: detail.scheduled_date,
+      requestedTime: detail.requested_time,
+      hasScheduleTimeline: detail.timeline.some((event) => event.event_type === 'memo_added' && event.title === '방문 일정 변경'),
+    };
+  }).toEqual({
+    scheduledDate: '2026-05-06',
+    requestedTime: '16:30',
+    hasScheduleTimeline: true,
+  });
+
+  await page.getByTestId('detail-nav-calendar').click();
+  await expect(page.getByTestId('admin-calendar-page')).toBeVisible();
+});
+
 test('admin can add a catalog item in product ops and use it in an order', async ({ page }) => {
   const itemName = `E2E Admin QA Item ${Date.now()}`;
   const updatedItemName = `${itemName} Updated`;
@@ -379,6 +410,24 @@ async function createBulkActionOrders(request) {
   }
 
   return created;
+}
+
+async function createDetailActionOrder(request) {
+  const adminSession = await loginViaApi(request, 'admin');
+  const adminHeaders = authHeaders(adminSession.access_token);
+  return checkedJson(await request.post(`${backendUrl}/api/admin/orders`, {
+    headers: adminHeaders,
+    data: {
+      received_date: '2026-05-05',
+      scheduled_date: '2026-05-05',
+      requested_time: '09:00',
+      service_name: 'Detail Schedule QA',
+      customer_name: 'Detail Schedule Customer',
+      customer_phone: '010-9000-0505',
+      customer_address: 'Seoul Detail Schedule QA',
+      customer_visible_payment: false,
+    },
+  }));
 }
 
 async function pickDate(page, pickerTestId, dateValue) {

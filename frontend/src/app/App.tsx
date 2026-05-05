@@ -170,6 +170,11 @@ export function App() {
                           orderId={detailOrderId}
                           onBack={() => setDetailOrderId(null)}
                           onEdit={() => setOrderForm({ mode: 'edit', orderId: detailOrderId })}
+                          onNav={(nextPage) => {
+                            setDetailOrderId(null);
+                            setOrderForm(null);
+                            setPage(nextPage);
+                          }}
                         />
                       </>
                     );

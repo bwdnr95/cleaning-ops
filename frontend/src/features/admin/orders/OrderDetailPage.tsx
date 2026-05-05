@@ -7,6 +7,7 @@ import {
   sendCustomerScheduleConfirmed,
   sendPartnerAssignment,
 } from '../../../api/messages';
+import { DatePicker } from '../../../components/common/DatePicker';
 import { Avatar, Badge, Icon, StatusBadge } from '../../../components/common/ui';
 import { ORDER_STATUSES } from '../../../domain/orderStatus';
 import {
@@ -17,13 +18,15 @@ import {
 } from '../../../domain/paymentStatus';
 import { useApiResource } from '../../../api/useApiResource';
 
-export function OrderDetailPage({ orderId, onBack, onEdit }) {
+export function OrderDetailPage({ orderId, onBack, onEdit, onNav }) {
   const loadOrder = React.useCallback(() => getAdminOrder(orderId), [orderId]);
   const orderResource = useApiResource(loadOrder, orderId);
   const partnersResource = useApiResource(listPartners);
   const order = orderResource.data;
   const [selectedStatus, setSelectedStatus] = React.useState('');
   const [selectedPartnerId, setSelectedPartnerId] = React.useState('');
+  const [selectedScheduledDate, setSelectedScheduledDate] = React.useState('');
+  const [selectedRequestedTime, setSelectedRequestedTime] = React.useState('');
   const [selectedPaymentStatus, setSelectedPaymentStatus] = React.useState('');
   const [selectedPartnerPaymentStatus, setSelectedPartnerPaymentStatus] = React.useState('');
   const [isSaving, setIsSaving] = React.useState(false);
@@ -34,6 +37,8 @@ export function OrderDetailPage({ orderId, onBack, onEdit }) {
     if (order) {
       setSelectedStatus(order.status);
       setSelectedPartnerId(order.partner_id || '');
+      setSelectedScheduledDate(order.scheduled_date || '');
+      setSelectedRequestedTime(order.requested_time || '');
       setSelectedPaymentStatus(order.payment_status || '');
       setSelectedPartnerPaymentStatus(order.partner_payment_status || '');
     }
@@ -55,6 +60,17 @@ export function OrderDetailPage({ orderId, onBack, onEdit }) {
         team_name: partner?.name || null,
       });
       setNotice('협력사 배정을 타임라인에 기록했습니다.');
+      orderResource.reload();
+    });
+  };
+
+  const handleScheduleUpdate = async () => {
+    await runAction(async () => {
+      await updateAdminOrder(order.id, {
+        scheduled_date: selectedScheduledDate || null,
+        requested_time: selectedRequestedTime || null,
+      });
+      setNotice('방문 일정 변경을 타임라인에 기록했습니다.');
       orderResource.reload();
     });
   };
@@ -131,6 +147,7 @@ export function OrderDetailPage({ orderId, onBack, onEdit }) {
   const messageLogs = order.message_logs || [];
   const timeline = order.timeline || [];
   const selectedPartner = (partnersResource.data || []).find((partner) => partner.id === order.partner_id);
+  const hasScheduleChanges = selectedScheduledDate !== (order.scheduled_date || '') || selectedRequestedTime !== (order.requested_time || '');
 
   return (
     <div data-testid="admin-order-detail-page" style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0, background: 'var(--bg)' }}>
@@ -155,6 +172,9 @@ export function OrderDetailPage({ orderId, onBack, onEdit }) {
         </button>
         <button className="btn btn--secondary btn--sm" onClick={onEdit}>
           수정
+        </button>
+        <button className="btn btn--ghost btn--sm" onClick={() => onNav?.('calendar')}>
+          <Icon name="calendar" size={12}/> 일정표
         </button>
       </div>
 
@@ -275,6 +295,38 @@ export function OrderDetailPage({ orderId, onBack, onEdit }) {
             </div>
 
             <div className="card" style={{ padding: 14 }}>
+              <PanelTitle>방문 일정</PanelTitle>
+              <label style={{ display: 'flex', flexDirection: 'column', gap: 5, marginBottom: 8 }}>
+                <span style={{ fontSize: 10.5, color: 'var(--text-tertiary)', fontWeight: 600 }}>방문 예정일</span>
+                <DatePicker
+                  testId="detail-scheduled-date"
+                  value={selectedScheduledDate}
+                  onChange={setSelectedScheduledDate}
+                  placeholder="방문일 선택"
+                />
+              </label>
+              <label style={{ display: 'flex', flexDirection: 'column', gap: 5, marginBottom: 8 }}>
+                <span style={{ fontSize: 10.5, color: 'var(--text-tertiary)', fontWeight: 600 }}>요청 시간</span>
+                <input
+                  data-testid="detail-requested-time"
+                  className="input"
+                  value={selectedRequestedTime}
+                  onChange={(event) => setSelectedRequestedTime(event.target.value)}
+                  placeholder="14:00 또는 오후 2-5시"
+                  style={{ width: '100%', height: 34 }}
+                />
+              </label>
+              <button
+                data-testid="detail-schedule-save"
+                className="btn btn--secondary btn--block"
+                disabled={isSaving || !hasScheduleChanges}
+                onClick={() => void handleScheduleUpdate()}
+              >
+                <Icon name="calendar" size={13}/> 일정 저장
+              </button>
+            </div>
+
+            <div className="card" style={{ padding: 14 }}>
               <PanelTitle>결제 / 정산</PanelTitle>
               <label style={{ display: 'flex', flexDirection: 'column', gap: 5, marginBottom: 8 }}>
                 <span style={{ fontSize: 10.5, color: 'var(--text-tertiary)', fontWeight: 600 }}>고객 결제 상태</span>
@@ -320,6 +372,21 @@ export function OrderDetailPage({ orderId, onBack, onEdit }) {
                 </button>
                 <button data-testid="send-partner-assignment" className="btn btn--secondary btn--block" disabled={isSaving || !order.partner_id} onClick={() => void handleSendPartnerAssignment()}>
                   <Icon name="truck" size={13}/> 협력사 배정 안내
+                </button>
+              </div>
+            </div>
+
+            <div className="card" style={{ padding: 14 }}>
+              <PanelTitle>관련 화면</PanelTitle>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <button data-testid="detail-nav-calendar" className="btn btn--secondary btn--block" onClick={() => onNav?.('calendar')}>
+                  <Icon name="calendar" size={13}/> 일정 캘린더
+                </button>
+                <button data-testid="detail-nav-photos" className="btn btn--secondary btn--block" onClick={() => onNav?.('photos')}>
+                  <Icon name="image" size={13}/> 사진검수
+                </button>
+                <button data-testid="detail-nav-messages" className="btn btn--secondary btn--block" onClick={() => onNav?.('sends')}>
+                  <Icon name="send" size={13}/> 발송이력
                 </button>
               </div>
             </div>

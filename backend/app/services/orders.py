@@ -68,6 +68,7 @@ class OrderService:
         self._apply_service_catalog(changes)
         old_status = order.status
         payment_changes = collect_payment_changes(order, changes)
+        schedule_changes = collect_schedule_changes(order, changes)
         for key, value in changes.items():
             if key == "customer_phone" and value is not None:
                 value = normalize_phone(value)
@@ -99,6 +100,16 @@ class OrderService:
                 title="결제/정산 변경",
                 description="관리자가 결제 또는 협력사 정산 정보를 변경했습니다.",
                 metadata={"changes": payment_changes},
+            )
+
+        if schedule_changes:
+            self.timeline.record(
+                order_id=order.id,
+                actor_user_id=actor_user_id,
+                event_type=TimelineEventType.MEMO_ADDED,
+                title="방문 일정 변경",
+                description="관리자가 방문 예정일 또는 요청 시간을 변경했습니다.",
+                metadata={"changes": schedule_changes},
             )
 
         self.db.commit()
@@ -309,9 +320,23 @@ def collect_payment_changes(order: Order, changes: dict) -> dict[str, dict[str, 
     return payment_changes
 
 
+def collect_schedule_changes(order: Order, changes: dict) -> dict[str, dict[str, object | None]]:
+    schedule_changes: dict[str, dict[str, object | None]] = {}
+    for field in ("scheduled_date", "requested_time"):
+        if field not in changes:
+            continue
+        before = to_timeline_value(getattr(order, field))
+        after = to_timeline_value(changes[field])
+        if before != after:
+            schedule_changes[field] = {"from": before, "to": after}
+    return schedule_changes
+
+
 def to_timeline_value(value) -> object | None:
     if hasattr(value, "value"):
         return value.value
+    if hasattr(value, "isoformat") and not isinstance(value, str):
+        return value.isoformat()
     if hasattr(value, "as_integer_ratio") and not isinstance(value, (int, float)):
         return float(value)
     return value
