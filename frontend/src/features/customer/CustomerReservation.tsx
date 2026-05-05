@@ -77,7 +77,7 @@ function VerificationGate({
 }) {
   return (
     <main className="scroll" style={{ flex: 1, overflow: 'auto', padding: '28px 20px' }}>
-      <form onSubmit={onVerify} style={gateCardStyle}>
+      <form data-testid="customer-verify-form" onSubmit={onVerify} style={gateCardStyle}>
         <div style={shieldStyle}>
           <Icon name="shield" size={20} />
         </div>
@@ -93,8 +93,9 @@ function VerificationGate({
         {!isTokenFromLink && (
           <label style={fieldStyle}>
             <span style={labelStyle}>링크 토큰</span>
-            <input
-              value={customerToken}
+          <input
+            data-testid="customer-token-input"
+            value={customerToken}
               onChange={(event) => onCustomerTokenChange(event.target.value)}
               placeholder="문자 링크의 token"
               autoComplete="off"
@@ -114,6 +115,7 @@ function VerificationGate({
         <label style={fieldStyle}>
           <span style={labelStyle}>전화번호 뒤 4자리</span>
           <input
+            data-testid="customer-phone-suffix"
             value={phoneSuffix}
             onChange={(event) => onPhoneSuffixChange(event.target.value.replace(/\D/g, '').slice(0, 4))}
             placeholder="1234"
@@ -129,6 +131,7 @@ function VerificationGate({
 
         <button
           type="submit"
+          data-testid="customer-verify-submit"
           disabled={isVerifying || phoneSuffix.length !== 4 || !customerToken.trim()}
           style={{
             ...primaryButtonStyle,
@@ -150,7 +153,7 @@ function VerificationGate({
 
 function ReservationContent({ order, onReset }) {
   return (
-    <main className="scroll" style={{ flex: 1, overflow: 'auto' }}>
+    <main data-testid="customer-order-page" className="scroll" style={{ flex: 1, overflow: 'auto' }}>
       <section style={{ padding: '24px 20px 16px' }}>
         <div style={eyebrowStyle}>{statusHeadline(order.status)}</div>
         <h1 style={contentTitleStyle}>
@@ -276,7 +279,7 @@ function CustomerPhotos({ photos }) {
   })).filter((group) => group.photos.length > 0);
 
   return (
-    <section style={{ padding: '12px 16px 24px' }}>
+    <section data-testid="customer-photos" style={{ padding: '12px 16px 24px' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
         <span style={{ fontSize: 13, fontWeight: 800 }}>작업 완료 사진</span>
         <Badge tone={photos.length ? 'success' : 'neutral'}>{photos.length ? `${photos.length}장 공개` : '대기중'}</Badge>
@@ -293,6 +296,7 @@ function CustomerPhotos({ photos }) {
                 {group.photos.map((photo) => (
                   <figure key={photo.id} style={{ margin: 0 }}>
                     <img
+                      data-testid={`customer-photo-${photo.id}`}
                       src={photo.file_url}
                       alt={photo.file_name || `${group.title} 사진`}
                       loading="lazy"
@@ -315,7 +319,7 @@ function CustomerPhotos({ photos }) {
 
 function PhotoPending() {
   return (
-    <div style={photoPendingStyle}>
+    <div data-testid="customer-photo-pending" style={photoPendingStyle}>
       <div style={photoPendingIconStyle}>
         <Icon name="camera" size={18} />
       </div>

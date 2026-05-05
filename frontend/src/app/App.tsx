@@ -108,6 +108,7 @@ export function App() {
           ].map(([key, label]) => (
             <button
               key={key}
+              data-testid={`app-mode-${key}`}
               className={mode === key ? 'app-tab is-active' : 'app-tab'}
               onClick={() => setMode(key)}
             >

@@ -106,7 +106,7 @@ export function PartnerJobDetail() {
   const canStart = job.status !== '작업진행' && job.status !== '사진검수대기';
 
   return (
-    <div style={{ height: '100%', display: 'flex', flexDirection: 'column', background: '#f4f6f8', overflow: 'hidden' }}>
+    <div data-testid="partner-job-detail-page" style={{ height: '100%', display: 'flex', flexDirection: 'column', background: '#f4f6f8', overflow: 'hidden' }}>
       <div style={{ padding: '12px 16px 10px', background: '#fff', borderBottom: '1px solid var(--border)' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
           <button onClick={() => setSelectedJobId(null)} style={{ padding: 0, border: 'none', background: 'transparent', cursor: 'pointer' }}>
@@ -165,7 +165,7 @@ export function PartnerJobDetail() {
           onAdd={() => beforeInputRef.current?.click()}
           disabled={isUploading}
         />
-        <input ref={beforeInputRef} type="file" accept="image/jpeg,image/png,image/webp" capture="environment" style={{ display: 'none' }} onChange={(event) => void handlePhotoSelected('before', event)} />
+        <input ref={beforeInputRef} data-testid="partner-before-photo-input" type="file" accept="image/jpeg,image/png,image/webp" capture="environment" style={{ display: 'none' }} onChange={(event) => void handlePhotoSelected('before', event)} />
 
         <PhotoPanel
           title="애프터 사진"
@@ -175,7 +175,7 @@ export function PartnerJobDetail() {
           onAdd={() => afterInputRef.current?.click()}
           disabled={isUploading}
         />
-        <input ref={afterInputRef} type="file" accept="image/jpeg,image/png,image/webp" capture="environment" style={{ display: 'none' }} onChange={(event) => void handlePhotoSelected('after', event)} />
+        <input ref={afterInputRef} data-testid="partner-after-photo-input" type="file" accept="image/jpeg,image/png,image/webp" capture="environment" style={{ display: 'none' }} onChange={(event) => void handlePhotoSelected('after', event)} />
         {uploadError && <div style={{ margin: '-2px 2px 10px', color: 'var(--danger-fg)', fontSize: 11.5 }}>{uploadError}</div>}
 
         <Panel>
@@ -190,11 +190,11 @@ export function PartnerJobDetail() {
       <div style={{ padding: '10px 14px 12px', background: '#fff', borderTop: '1px solid var(--border)', boxShadow: '0 -4px 12px rgba(15,23,42,0.04)' }}>
         <div style={{ display: 'grid', gridTemplateColumns: canStart ? '1fr 1fr' : '1fr', gap: 8 }}>
           {canStart && (
-            <button disabled={isSavingStatus} onClick={() => void handleStatusAction('start')} style={secondaryCtaStyle(isSavingStatus)}>
+            <button data-testid="partner-start-job" disabled={isSavingStatus} onClick={() => void handleStatusAction('start')} style={secondaryCtaStyle(isSavingStatus)}>
               <Icon name="clock" size={16}/> 작업 시작
             </button>
           )}
-          <button disabled={isSavingStatus} onClick={() => void handleStatusAction('complete')} style={primaryCtaStyle(isSavingStatus)}>
+          <button data-testid="partner-complete-job" disabled={isSavingStatus} onClick={() => void handleStatusAction('complete')} style={primaryCtaStyle(isSavingStatus)}>
             <Icon name="check" size={16}/> 작업 완료
           </button>
         </div>
@@ -213,14 +213,14 @@ function PartnerJobList({ jobs, onSelect }) {
   }
 
   return (
-    <div style={{ height: '100%', background: '#f4f6f8', overflow: 'auto', padding: 14 }}>
+    <div data-testid="partner-jobs-page" style={{ height: '100%', background: '#f4f6f8', overflow: 'auto', padding: 14 }}>
       <div style={{ marginBottom: 14 }}>
         <div className="app-eyebrow">Partner jobs</div>
         <h2 style={{ margin: '2px 0 0', fontSize: 20 }}>내 작업</h2>
       </div>
       <div style={{ display: 'grid', gap: 10 }}>
         {jobs.map((job) => (
-          <button key={job.id} onClick={() => onSelect(job.id)} style={{ textAlign: 'left', background: '#fff', border: '1px solid var(--border)', borderRadius: 10, padding: 14, cursor: 'pointer' }}>
+          <button key={job.id} data-testid={`partner-job-row-${job.id}`} onClick={() => onSelect(job.id)} style={{ textAlign: 'left', background: '#fff', border: '1px solid var(--border)', borderRadius: 10, padding: 14, cursor: 'pointer' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
               <StatusBadge status={job.status}/>
               <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--text-tertiary)' }}>{formatKoreanDate(job.scheduled_date)}</span>
