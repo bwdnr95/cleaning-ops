@@ -289,6 +289,13 @@ test('admin photo review keeps customer send disabled until a photo is approved'
   await expect(page.getByTestId('photo-send-customer-link')).toBeDisabled();
   await page.getByTestId('photo-open-messages').click();
   await expect(page.getByTestId('admin-messages-page')).toBeVisible();
+  await page.getByTestId('messages-type-customer_photo_ready').click();
+  await page.getByTestId('messages-search').fill(orderId);
+  await expect(page.getByTestId(`message-open-order-${orderId}`).first()).toBeVisible();
+  await page.getByRole('button', { name: '재발송' }).first().click();
+  await expect(page.getByTestId('messages-action-notice')).toContainText('사진 전달');
+  await page.getByTestId(`message-open-order-${orderId}`).first().click();
+  await expect(page.getByTestId('admin-order-detail-page')).toBeVisible();
 });
 
 async function loginAsAdmin(page) {

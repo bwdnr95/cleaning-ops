@@ -1,17 +1,61 @@
 import React from 'react';
 
-import { listAdminMessages } from '../../../api/messages';
+import { listAdminMessages, sendAdminMessage } from '../../../api/messages';
+import { DatePicker } from '../../../components/common/DatePicker';
 import { Badge, Icon } from '../../../components/common/ui';
 import { useApiResource } from '../../../api/useApiResource';
 
-export function MessagesPage() {
+const MESSAGE_TYPE_OPTIONS = [
+  { value: 'all', label: '전체' },
+  { value: 'customer_schedule_confirmed', label: '일정확정' },
+  { value: 'customer_day_before', label: '전날안내' },
+  { value: 'partner_assignment', label: '협력사배정' },
+  { value: 'customer_photo_ready', label: '사진전달' },
+];
+
+const STATUS_OPTIONS = [
+  { value: 'all', label: '전체' },
+  { value: 'sent', label: '성공' },
+  { value: 'failed', label: '실패' },
+];
+
+export function MessagesPage({ onOpenOrder }) {
   const messagesResource = useApiResource(listAdminMessages);
   const messages = messagesResource.data || [];
+  const [query, setQuery] = React.useState('');
+  const [typeFilter, setTypeFilter] = React.useState('all');
+  const [statusFilter, setStatusFilter] = React.useState('all');
+  const [dateStart, setDateStart] = React.useState('');
+  const [dateEnd, setDateEnd] = React.useState('');
+  const [isResending, setIsResending] = React.useState(false);
+  const [notice, setNotice] = React.useState(null);
+  const [error, setError] = React.useState(null);
   const stats = toStats(messages);
+  const filtered = messages.filter((message) => (
+    matchesQuery(message, query)
+    && matchesType(message, typeFilter)
+    && matchesStatus(message, statusFilter)
+    && matchesDate(message, dateStart, dateEnd)
+  ));
+
+  const handleResend = async (message) => {
+    setNotice(null);
+    setError(null);
+    setIsResending(true);
+    try {
+      const resent = await sendAdminMessage(message.order_id, message.message_type, message.recipient_type);
+      setNotice(`${shortOrderId(message.order_id)} ${messageTypeLabel(message.message_type)} 재발송 결과: ${messageStatusLabel(resent.status)}`);
+      messagesResource.reload();
+    } catch (requestError) {
+      setError(toActionErrorMessage(requestError));
+    } finally {
+      setIsResending(false);
+    }
+  };
 
   return (
     <div data-testid="admin-messages-page" style={{ flex: 1, overflow: 'auto', background: 'var(--bg)', padding: 20 }}>
-      <div style={{ maxWidth: 1220, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 14 }}>
+      <div style={{ maxWidth: 1320, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 14 }}>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10 }}>
           <StatCard label="전체 발송" value={messages.length} icon="send" />
           <StatCard label="성공" value={stats.sent} icon="check" tone="success" />
@@ -21,32 +65,104 @@ export function MessagesPage() {
 
         <section className="card" style={{ padding: 0, overflow: 'hidden' }}>
           <div style={{
-            height: 42,
-            padding: '0 14px',
+            minHeight: 48,
+            padding: '9px 14px',
             display: 'flex',
             alignItems: 'center',
             gap: 8,
             borderBottom: '1px solid var(--divider)',
+            flexWrap: 'wrap',
           }}>
             <Icon name="history" size={14} color="var(--text-tertiary)" />
             <strong style={{ fontSize: 13 }}>발송 이력</strong>
+            <span style={{ fontSize: 11.5, color: 'var(--text-tertiary)' }}>
+              SOL API 전환 시에도 이 화면에서 발송 성공/실패와 재발송을 추적합니다.
+            </span>
             <div style={{ flex: 1 }} />
             <button className="btn btn--ghost btn--sm" onClick={messagesResource.reload}>
               <Icon name="refresh" size={12}/> 새로고침
             </button>
           </div>
 
+          <div style={{
+            padding: '10px 14px',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
+            borderBottom: '1px solid var(--divider)',
+            flexWrap: 'wrap',
+          }}>
+            <SearchBox value={query} onChange={setQuery} />
+            <Segmented
+              testPrefix="messages-type"
+              value={typeFilter}
+              options={MESSAGE_TYPE_OPTIONS}
+              onChange={setTypeFilter}
+            />
+            <Segmented
+              testPrefix="messages-status"
+              value={statusFilter}
+              options={STATUS_OPTIONS}
+              onChange={setStatusFilter}
+            />
+            <DatePicker
+              compact
+              testId="messages-date-start"
+              ariaLabel="발송일 시작"
+              placeholder="시작일"
+              value={dateStart}
+              onChange={setDateStart}
+            />
+            <span style={{ color: 'var(--text-quaternary)', fontSize: 12 }}>~</span>
+            <DatePicker
+              compact
+              testId="messages-date-end"
+              ariaLabel="발송일 종료"
+              placeholder="종료일"
+              value={dateEnd}
+              onChange={setDateEnd}
+            />
+            {(query || typeFilter !== 'all' || statusFilter !== 'all' || dateStart || dateEnd) && (
+              <button
+                type="button"
+                data-testid="messages-filter-clear"
+                className="btn btn--ghost btn--sm"
+                onClick={() => {
+                  setQuery('');
+                  setTypeFilter('all');
+                  setStatusFilter('all');
+                  setDateStart('');
+                  setDateEnd('');
+                }}
+              >
+                필터 해제
+              </button>
+            )}
+          </div>
+
+          {notice && <StateLine testId="messages-action-notice" text={notice} tone="success" />}
+          {error && <StateLine testId="messages-action-error" text={error} tone="danger" />}
           {messagesResource.isLoading && <StateLine text="발송 이력을 불러오는 중입니다." />}
           {!messagesResource.isLoading && messagesResource.error && <StateLine text="발송 이력을 불러오지 못했습니다." tone="danger" />}
-          {!messagesResource.isLoading && !messagesResource.error && messages.length === 0 && <StateLine text="아직 발송 이력이 없습니다." />}
-          {!messagesResource.isLoading && !messagesResource.error && messages.length > 0 && (
-            <div style={{ display: 'grid', gridTemplateColumns: '140px 150px 110px 1fr 92px 82px', fontSize: 12 }}>
-              {['발송시각', '유형', '수신자', '내용', '채널', '상태'].map((header) => (
+          {!messagesResource.isLoading && !messagesResource.error && filtered.length === 0 && <StateLine text="표시할 발송 이력이 없습니다." />}
+          {!messagesResource.isLoading && !messagesResource.error && filtered.length > 0 && (
+            <div style={{ display: 'grid', gridTemplateColumns: '132px 120px 132px 136px 1fr 72px 76px 128px', fontSize: 12 }}>
+              {['발송시각', '주문번호', '유형', '수신자', '내용', '채널', '상태', '관리'].map((header) => (
                 <HeaderCell key={header}>{header}</HeaderCell>
               ))}
-              {messages.map((message) => (
+              {filtered.map((message) => (
                 <React.Fragment key={message.id}>
                   <BodyCell mono>{formatDateTime(message.sent_at || message.created_at)}</BodyCell>
+                  <BodyCell>
+                    <button
+                      type="button"
+                      data-testid={`message-open-order-${message.order_id}`}
+                      onClick={() => onOpenOrder?.(message.order_id)}
+                      style={linkButtonStyle}
+                    >
+                      {shortOrderId(message.order_id)}
+                    </button>
+                  </BodyCell>
                   <BodyCell>{messageTypeLabel(message.message_type)}</BodyCell>
                   <BodyCell>
                     <div style={{ minWidth: 0 }}>
@@ -55,13 +171,26 @@ export function MessagesPage() {
                     </div>
                   </BodyCell>
                   <BodyCell>
-                    <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    <span title={message.content} style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                       {message.content}
                     </span>
                   </BodyCell>
-                  <BodyCell>{String(message.channel || '').toUpperCase()}</BodyCell>
+                  <BodyCell>{channelLabel(message.channel)}</BodyCell>
                   <BodyCell>
                     <Badge tone={message.status === 'sent' ? 'success' : 'danger'} dot>{messageStatusLabel(message.status)}</Badge>
+                  </BodyCell>
+                  <BodyCell>
+                    <div style={{ display: 'inline-flex', gap: 5 }}>
+                      <button
+                        type="button"
+                        data-testid={`message-resend-${message.id}`}
+                        className="btn btn--secondary btn--sm"
+                        disabled={isResending}
+                        onClick={() => void handleResend(message)}
+                      >
+                        재발송
+                      </button>
+                    </div>
                   </BodyCell>
                 </React.Fragment>
               ))}
@@ -69,6 +198,73 @@ export function MessagesPage() {
           )}
         </section>
       </div>
+    </div>
+  );
+}
+
+function SearchBox({ value, onChange }) {
+  return (
+    <label style={{
+      display: 'flex',
+      alignItems: 'center',
+      gap: 8,
+      padding: '0 10px',
+      height: 30,
+      minWidth: 250,
+      background: 'var(--surface)',
+      border: '1px solid var(--border)',
+      borderRadius: 8,
+      color: 'var(--text-tertiary)',
+      fontSize: 12,
+    }}>
+      <Icon name="search" size={13}/>
+      <input
+        data-testid="messages-search"
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        placeholder="주문번호, 고객/협력사, 내용 검색"
+        aria-label="발송 이력 검색"
+        style={{
+          flex: 1,
+          minWidth: 0,
+          border: 'none',
+          outline: 'none',
+          background: 'transparent',
+          color: 'var(--text)',
+          fontSize: 12,
+        }}
+      />
+    </label>
+  );
+}
+
+function Segmented({ testPrefix, value, options, onChange }) {
+  return (
+    <div style={{ display: 'inline-flex', gap: 2, padding: 2, background: 'var(--bg-subtle)', border: '1px solid var(--border)', borderRadius: 8 }}>
+      {options.map((option) => (
+        <button
+          key={option.value}
+          type="button"
+          data-testid={`${testPrefix}-${option.value}`}
+          aria-pressed={value === option.value}
+          onClick={() => onChange(option.value)}
+          style={{
+            height: 24,
+            padding: '0 8px',
+            border: 'none',
+            borderRadius: 6,
+            background: value === option.value ? 'var(--surface)' : 'transparent',
+            color: value === option.value ? 'var(--text)' : 'var(--text-tertiary)',
+            boxShadow: value === option.value ? 'var(--shadow-xs)' : 'none',
+            fontSize: 11.5,
+            fontWeight: 600,
+            cursor: 'pointer',
+            whiteSpace: 'nowrap',
+          }}
+        >
+          {option.label}
+        </button>
+      ))}
     </div>
   );
 }
@@ -115,7 +311,7 @@ function BodyCell({ children, mono = false }) {
   return (
     <div style={{
       minWidth: 0,
-      minHeight: 44,
+      minHeight: 46,
       padding: '9px 12px',
       borderBottom: '1px solid var(--divider)',
       display: 'flex',
@@ -128,12 +324,17 @@ function BodyCell({ children, mono = false }) {
   );
 }
 
-function StateLine({ text, tone = 'muted' }) {
+function StateLine({ text, tone = 'muted', testId = undefined }) {
+  const color = tone === 'danger'
+    ? 'var(--danger-fg)'
+    : tone === 'success'
+      ? 'var(--success-fg)'
+      : 'var(--text-tertiary)';
   return (
-    <div style={{
+    <div data-testid={testId} style={{
       padding: 18,
       fontSize: 12.5,
-      color: tone === 'danger' ? 'var(--danger-fg)' : 'var(--text-tertiary)',
+      color,
     }}>
       {text}
     </div>
@@ -148,11 +349,67 @@ function toStats(messages) {
   };
 }
 
+function matchesQuery(message, query) {
+  const keyword = query.trim().toLowerCase();
+  if (!keyword) {
+    return true;
+  }
+  return [
+    message.order_id,
+    message.recipient_name,
+    message.recipient_phone,
+    message.message_type,
+    message.content,
+    message.error_message,
+  ].some((value) => String(value || '').toLowerCase().includes(keyword));
+}
+
+function matchesType(message, typeFilter) {
+  return typeFilter === 'all' || message.message_type === typeFilter;
+}
+
+function matchesStatus(message, statusFilter) {
+  return statusFilter === 'all' || message.status === statusFilter;
+}
+
+function matchesDate(message, start, end) {
+  if (!start && !end) {
+    return true;
+  }
+  const value = toDateValue(message.sent_at || message.created_at);
+  if (!value) {
+    return false;
+  }
+  const range = normalizeDateRange(start, end);
+  if (range.start && value < range.start) {
+    return false;
+  }
+  if (range.end && value > range.end) {
+    return false;
+  }
+  return true;
+}
+
+function normalizeDateRange(start, end) {
+  if (start && end && start > end) {
+    return { start: end, end: start };
+  }
+  return { start, end };
+}
+
+function toDateValue(value) {
+  if (!value) {
+    return '';
+  }
+  const date = new Date(value);
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+}
+
 function messageTypeLabel(type) {
   if (type === 'customer_schedule_confirmed') return '일정확정 안내';
   if (type === 'customer_day_before') return '전날 안내';
   if (type === 'partner_assignment') return '협력사 배정';
-  if (type === 'customer_photo_ready') return '사진 링크';
+  if (type === 'customer_photo_ready') return '사진 전달';
   return type;
 }
 
@@ -160,6 +417,13 @@ function messageStatusLabel(status) {
   if (status === 'sent') return '성공';
   if (status === 'failed') return '실패';
   return status || '-';
+}
+
+function channelLabel(channel) {
+  if (channel === 'sms') return 'SMS';
+  if (channel === 'lms') return 'LMS';
+  if (channel === 'alimtalk') return '알림톡';
+  return String(channel || '-').toUpperCase();
 }
 
 function formatDateTime(value) {
@@ -180,3 +444,30 @@ function maskPhone(phone) {
   }
   return `${digits.slice(0, 3)}-${digits.slice(3, 5)}**-${digits.slice(-4)}`;
 }
+
+function shortOrderId(orderId) {
+  return String(orderId || '').slice(0, 8);
+}
+
+function toActionErrorMessage(error) {
+  const detail = error?.detail || error?.message || '';
+  const map = {
+    order_not_found: '주문을 찾지 못했습니다.',
+    partner_not_assigned: '협력사 배정 후 재발송할 수 있습니다.',
+    partner_not_found: '배정된 협력사를 찾지 못했습니다.',
+    no_customer_visible_photos: '고객 공개 승인된 사진이 있어야 재발송할 수 있습니다.',
+    invalid_recipient_type: '수신자 유형이 올바르지 않습니다.',
+  };
+  return map[detail] || '재발송을 처리하지 못했습니다.';
+}
+
+const linkButtonStyle = {
+  padding: 0,
+  border: 'none',
+  background: 'transparent',
+  color: 'var(--brand)',
+  fontSize: 12,
+  fontWeight: 700,
+  cursor: 'pointer',
+  fontFamily: 'var(--font-mono)',
+};

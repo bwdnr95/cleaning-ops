@@ -225,7 +225,11 @@ export function App() {
                       )}
                       {page === 'products' && <ProductsPage />}
                       {page === 'partners' && <PartnersPage />}
-                      {page === 'sends' && <MessagesPage />}
+                      {page === 'sends' && (
+                        <MessagesPage
+                          onOpenOrder={(orderId) => setDetailOrderId(orderId)}
+                        />
+                      )}
                       {!['dashboard', 'orders', 'calendar', 'photos', 'products', 'partners', 'sends'].includes(page) && (
                         <ComingSoon page={page} />
                       )}
