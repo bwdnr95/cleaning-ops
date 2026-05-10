@@ -24,8 +24,9 @@ from app.db.seed import (
 from app.db.session import SessionLocal, engine
 from app.domain.constants import OrderStatus, TimelineEventType, UserRole
 from app.domain.payment_status import PaymentStatus
+from app.domain.partner_category import DEFAULT_PARTNER_CATEGORIES, infer_partner_category_id
 from app.domain.phone import normalize_phone
-from app.models import Base, Order, OrderTimeline, Partner, User
+from app.models import Base, Order, OrderTimeline, Partner, PartnerCategory, User
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -75,6 +76,7 @@ def main() -> None:
     Base.metadata.create_all(bind=engine)
     with SessionLocal() as db:
         ensure_dev_admin(db)
+        ensure_default_partner_categories(db)
         created = 0
         updated = 0
         partners_created = 0
@@ -219,16 +221,36 @@ def ensure_dev_admin(db) -> None:
     )
 
 
+def ensure_default_partner_categories(db) -> None:
+    for default_category in DEFAULT_PARTNER_CATEGORIES:
+        category = db.get(PartnerCategory, default_category.id)
+        if category is None:
+            db.add(
+                PartnerCategory(
+                    id=default_category.id,
+                    name=default_category.name,
+                    description=default_category.description,
+                    is_active=True,
+                    sort_order=default_category.sort_order,
+                )
+            )
+
+
 def ensure_partner(db, row: dict[str, Any], *, partner_cache: set[str]) -> tuple[str | None, bool]:
     name = row["company_name"] or row["team_name"]
     if not name:
         return None, False
 
     partner_id = f"cleanjob-partner-{stable_hash(name, 12)}"
+    partner_category_id = infer_partner_category_id(row["service_name"])
     if partner_id in partner_cache:
         return partner_id, False
     existing = db.get(Partner, partner_id)
     if existing is not None:
+        if not existing.partner_category_id:
+            existing.partner_category_id = partner_category_id
+        if not existing.available_services:
+            existing.available_services = row["service_name"]
         partner_cache.add(partner_id)
         return partner_id, False
 
@@ -236,6 +258,7 @@ def ensure_partner(db, row: dict[str, Any], *, partner_cache: set[str]) -> tuple
     db.add(
         Partner(
             id=partner_id,
+            partner_category_id=partner_category_id,
             name=name,
             manager_name=None,
             phone="0000000000",

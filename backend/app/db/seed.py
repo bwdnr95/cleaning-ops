@@ -5,6 +5,10 @@ from sqlalchemy.orm import Session
 
 from app.core.security import hash_password
 from app.domain.constants import OrderStatus, TimelineEventType, UserRole
+from app.domain.partner_category import (
+    DEFAULT_PARTNER_CATEGORIES,
+    RESIDENTIAL_PARTNER_CATEGORY_ID,
+)
 from app.domain.phone import normalize_phone
 from app.models.order import Order
 from app.models.partner import Partner, PartnerCategory
@@ -20,7 +24,7 @@ DEV_PARTNER_PASSWORD = "PartnerPass123!"
 
 DEV_ADMIN_ID = "seed-admin-user"
 DEV_PARTNER_ID = "seed-partner-01"
-DEV_PARTNER_CATEGORY_ID = "seed-partner-category-residential"
+DEV_PARTNER_CATEGORY_ID = RESIDENTIAL_PARTNER_CATEGORY_ID
 DEV_PARTNER_USER_ID = "seed-partner-user"
 DEV_ORDER_ID = "seed-order-2450"
 DEV_ORDER_TIMELINE_ID = "seed-order-2450-created"
@@ -64,19 +68,24 @@ def seed_dev_data(db: Session) -> SeedSummary:
 
 
 def ensure_partner_category(db: Session) -> PartnerCategory:
-    category = db.get(PartnerCategory, DEV_PARTNER_CATEGORY_ID)
-    if category is not None:
-        return category
+    residential_category: PartnerCategory | None = None
+    for default_category in DEFAULT_PARTNER_CATEGORIES:
+        category = db.get(PartnerCategory, default_category.id)
+        if category is None:
+            category = PartnerCategory(
+                id=default_category.id,
+                name=default_category.name,
+                description=default_category.description,
+                is_active=True,
+                sort_order=default_category.sort_order,
+            )
+            db.add(category)
+        if default_category.id == DEV_PARTNER_CATEGORY_ID:
+            residential_category = category
 
-    category = PartnerCategory(
-        id=DEV_PARTNER_CATEGORY_ID,
-        name="주거 청소",
-        description="입주/이사/정기 청소 협력사",
-        is_active=True,
-        sort_order=10,
-    )
-    db.add(category)
-    return category
+    if residential_category is None:
+        raise RuntimeError("Default residential partner category was not configured.")
+    return residential_category
 
 
 def ensure_partner(db: Session) -> Partner:
