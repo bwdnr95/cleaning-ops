@@ -12,11 +12,12 @@ from app.core.middleware import SecurityHeadersMiddleware
 
 def create_app() -> FastAPI:
     app = FastAPI(title=settings.app_name, version=settings.app_version)
-    app.mount(
-        settings.storage_public_base_path,
-        StaticFiles(directory=settings.storage_root, check_dir=False),
-        name="uploads",
-    )
+    if settings.storage_provider.strip().lower() == "local":
+        app.mount(
+            settings.storage_public_base_path,
+            StaticFiles(directory=settings.storage_root, check_dir=False),
+            name="uploads",
+        )
 
     app.add_middleware(SecurityHeadersMiddleware)
 

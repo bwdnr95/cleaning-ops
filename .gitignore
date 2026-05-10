@@ -23,6 +23,7 @@ frontend/test-results/
 .env
 .env.*
 !.env.example
+!.env.production.example
 
 # Operator workspace (not for repo)
 .claude/
