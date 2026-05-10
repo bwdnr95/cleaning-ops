@@ -9,6 +9,10 @@ const PARTNER_PHONE = '01012345678';
 const PARTNER_PASSWORD = 'PartnerPass123!';
 const SEED_PARTNER_ID = 'seed-partner-01';
 const SEED_SERVICE_ITEM_ID = 'seed-service-item-move-in';
+const ONE_PIXEL_PNG = Buffer.from(
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=',
+  'base64',
+);
 
 test('partner uploads job photos and customer sees only admin-approved photos', async ({ browser, request }) => {
   const flow = await createAssignedOrder(request);
@@ -21,25 +25,55 @@ test('partner uploads job photos and customer sees only admin-approved photos', 
 
   await expect(partnerPage.getByText('partner_payment_amount')).toHaveCount(0);
   await expect(partnerPage.getByText('Internal payment memo')).toHaveCount(0);
+  await expect(partnerPage.getByText('010-8899-7766')).toBeVisible();
 
   await partnerPage.getByTestId('partner-start-job').click();
   await expect(partnerPage.getByText('작업 중')).toBeVisible();
-  await partnerPage.getByTestId('partner-before-photo-input').setInputFiles({
-    name: 'before-partner-r1.jpg',
-    mimeType: 'image/jpeg',
-    buffer: Buffer.from('fake-before-jpeg-bytes'),
-  });
-  await expect(partnerPage.getByText('B-1')).toBeVisible();
+  await partnerPage.getByTestId('partner-before-photo-input').setInputFiles([
+    {
+      name: 'before-partner-r2.png',
+      mimeType: 'image/png',
+      buffer: ONE_PIXEL_PNG,
+    },
+    {
+      name: 'before-extra-partner-r2.png',
+      mimeType: 'image/png',
+      buffer: ONE_PIXEL_PNG,
+    },
+  ]);
+  await expect(partnerPage.getByText('비포 사진 2장이 업로드되었습니다.')).toBeVisible();
+  await expect(partnerPage.getByRole('img', { name: 'before-partner-r2.png' })).toBeVisible();
+  await expect(partnerPage.getByRole('img', { name: 'before-extra-partner-r2.png' })).toBeVisible();
   await partnerPage.getByTestId('partner-after-photo-input').setInputFiles({
-    name: 'after-partner-r1.jpg',
-    mimeType: 'image/jpeg',
-    buffer: Buffer.from('fake-after-jpeg-bytes'),
+    name: 'after-partner-r2.png',
+    mimeType: 'image/png',
+    buffer: ONE_PIXEL_PNG,
   });
-  await expect(partnerPage.getByText('A-1')).toBeVisible();
-  await partnerPage.getByTestId('partner-complete-job').click();
+  await expect(partnerPage.getByRole('img', { name: 'after-partner-r2.png' })).toBeVisible();
+  await expect(partnerPage.getByTestId('partner-status-locked')).toContainText('작업 완료 처리됨');
+  await expect(partnerPage.getByTestId('partner-start-job')).toHaveCount(0);
+  await expect(partnerPage.getByTestId('partner-complete-job')).toHaveCount(0);
+
+  await partnerPage.reload();
+  await partnerPage.getByTestId('app-mode-partner').click();
+  await expect(partnerPage.getByTestId('partner-jobs-page')).toBeVisible();
+  await partnerPage.getByTestId(`partner-job-row-${flow.orderId}`).click();
+  await expect(partnerPage.getByRole('img', { name: 'before-partner-r2.png' })).toBeVisible();
+  await expect(partnerPage.getByRole('img', { name: 'after-partner-r2.png' })).toBeVisible();
+
+  await partnerPage.getByTestId('partner-etc-photo-input').setInputFiles({
+    name: 'field-note.txt',
+    mimeType: 'text/plain',
+    buffer: Buffer.from('not an image'),
+  });
+  await expect(partnerPage.getByText('JPG/PNG/WebP만 업로드 가능합니다.')).toBeVisible();
+  await expect(partnerPage.getByTestId('partner-status-locked')).toContainText('작업 완료 처리됨');
+  await expect(partnerPage.getByTestId('partner-start-job')).toHaveCount(0);
+  await expect(partnerPage.getByTestId('partner-complete-job')).toHaveCount(0);
 
   const beforeApproval = await customerVerifyInNewContext(browser, flow.customerToken, flow.phoneSuffix);
   await expect(beforeApproval.page.getByTestId('customer-order-page')).toBeVisible();
+  await expect(beforeApproval.page.getByTestId('customer-visible-phone')).toHaveText('010-8899-7766');
   await expect(beforeApproval.page.getByTestId('customer-photo-pending')).toBeVisible();
   await expect(beforeApproval.page.getByText('Internal payment memo')).toHaveCount(0);
   await expect(beforeApproval.page.getByText('partner_payment_amount')).toHaveCount(0);
@@ -53,6 +87,7 @@ test('partner uploads job photos and customer sees only admin-approved photos', 
   await expect(adminPage.getByText(flow.orderId).first()).toBeVisible();
   await adminPage.getByTestId('photo-filter-review').click();
   await adminPage.getByTestId(`photo-review-item-${flow.orderId}`).click();
+  await expect(adminPage.getByRole('img', { name: 'after-partner-r2.png' }).first()).toBeVisible();
   await expect(adminPage.getByTestId('photo-send-customer-link')).toBeDisabled();
 
   await adminPage.getByTestId('photo-approve-selected').click();
@@ -80,8 +115,10 @@ test('partner uploads job photos and customer sees only admin-approved photos', 
   const afterApproval = await customerVerifyInNewContext(browser, flow.customerToken, flow.phoneSuffix);
   await expect(afterApproval.page.getByTestId('customer-order-page')).toBeVisible();
   await expect(afterApproval.page.getByTestId('customer-photo-pending')).toHaveCount(0);
-  await expect(afterApproval.page.getByText('after-partner-r1.jpg')).toBeVisible();
-  await expect(afterApproval.page.getByText('before-partner-r1.jpg')).toHaveCount(0);
+  await expect(afterApproval.page.getByRole('img', { name: 'after-partner-r2.png' })).toBeVisible();
+  await expect(afterApproval.page.getByText('after-partner-r2.png')).toBeVisible();
+  await expect(afterApproval.page.getByText('before-partner-r2.png')).toHaveCount(0);
+  await expect(afterApproval.page.getByText('before-extra-partner-r2.png')).toHaveCount(0);
   await expect(afterApproval.page.getByText('Internal payment memo')).toHaveCount(0);
   await expect(afterApproval.page.getByText('partner_payment_amount')).toHaveCount(0);
   await afterApproval.context.close();
@@ -121,6 +158,7 @@ async function createAssignedOrder(request) {
   const created = await checkedJson(await request.post(`${backendUrl}/api/admin/orders`, {
     headers: authHeaders(adminSession.access_token),
     data: {
+      status: '일정확정',
       received_date: '2026-05-05',
       scheduled_date: '2026-05-14',
       requested_time: '09:30',

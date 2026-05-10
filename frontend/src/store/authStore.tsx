@@ -9,33 +9,76 @@ import {
 } from '../api/auth';
 import { setApiAuthHandlers } from '../api/client';
 
-const STORAGE_KEY = 'cleaning_ops_auth_session';
+const STORAGE_KEY = 'cleaning_ops_auth_sessions_v2';
+const LEGACY_STORAGE_KEY = 'cleaning_ops_auth_session';
+const ROLES = ['admin', 'partner'];
+const EMPTY_SESSION = { user: null, accessToken: null, refreshToken: null };
 const AuthContext = React.createContext(null);
 
 const initialState = readStoredState();
 
 export function AuthProvider({ children }) {
   const [state, setState] = React.useState(initialState);
+  const stateRef = React.useRef(state);
+  stateRef.current = state;
 
   const replaceSession = React.useCallback((session) => {
-    const nextState = toState(session);
-    setState(nextState);
-    writeStoredState(nextState);
+    const role = session?.user?.role;
+    if (!ROLES.includes(role)) {
+      return;
+    }
+
+    setState((current) => {
+      const nextState = {
+        activeRole: role,
+        sessions: {
+          ...current.sessions,
+          [role]: toSessionState(session),
+        },
+      };
+      writeStoredState(nextState);
+      return nextState;
+    });
   }, []);
 
-  const clearAuth = React.useCallback(() => {
-    setState({ user: null, accessToken: null, refreshToken: null });
-    localStorage.removeItem(STORAGE_KEY);
+  const clearAuth = React.useCallback((role = undefined) => {
+    setState((current) => {
+      const targetRole = ROLES.includes(role) ? role : current.activeRole;
+      const nextState = {
+        ...current,
+        sessions: {
+          ...current.sessions,
+          [targetRole]: EMPTY_SESSION,
+        },
+      };
+      writeStoredState(nextState);
+      return nextState;
+    });
+  }, []);
+
+  const setActiveRole = React.useCallback((role) => {
+    if (!ROLES.includes(role)) {
+      return;
+    }
+
+    setState((current) => {
+      if (current.activeRole === role) {
+        return current;
+      }
+      const nextState = { ...current, activeRole: role };
+      writeStoredState(nextState);
+      return nextState;
+    });
   }, []);
 
   React.useEffect(() => {
     setApiAuthHandlers({
-      getAccessToken: () => state.accessToken,
-      getRefreshToken: () => state.refreshToken,
+      getAccessToken: () => getActiveSession(stateRef.current).accessToken,
+      getRefreshToken: () => getActiveSession(stateRef.current).refreshToken,
       onRefresh: (session) => replaceSession(session),
-      onUnauthorized: clearAuth,
+      onUnauthorized: () => clearAuth(stateRef.current.activeRole),
     });
-  }, [clearAuth, replaceSession, state.accessToken, state.refreshToken]);
+  }, [clearAuth, replaceSession]);
 
   const login = React.useCallback(
     async (role, identifier, password) => {
@@ -46,43 +89,58 @@ export function AuthProvider({ children }) {
     [replaceSession],
   );
 
-  const logout = React.useCallback(async () => {
-    const token = state.refreshToken;
-    clearAuth();
+  const logout = React.useCallback(
+    async (role = undefined) => {
+      const targetRole = ROLES.includes(role) ? role : state.activeRole;
+      const token = getSession(state, targetRole).refreshToken;
+      clearAuth(targetRole);
 
-    if (token) {
-      try {
-        await requestLogout(token);
-      } catch {
-        // The local session is already cleared; server-side revoke can be retried by logging in again.
+      if (token) {
+        try {
+          await requestLogout(token);
+        } catch {
+          // The local session is already cleared; server-side revoke can be retried by logging in again.
+        }
       }
-    }
-  }, [clearAuth, state.refreshToken]);
+    },
+    [clearAuth, state],
+  );
 
   const changePassword = React.useCallback(
     async (currentPassword, newPassword) => {
-      if (!state.user) {
+      const activeSession = getActiveSession(state);
+      if (!activeSession.user) {
         throw new Error('not_authenticated');
       }
 
-      const request = state.user.role === 'admin' ? adminChangePassword : partnerChangePassword;
+      const request = activeSession.user.role === 'admin' ? adminChangePassword : partnerChangePassword;
       const session = await request({ currentPassword, newPassword });
       replaceSession(session);
     },
-    [replaceSession, state.user],
+    [replaceSession, state],
   );
+
+  const activeSession = getActiveSession(state);
 
   const value = React.useMemo(
     () => ({
-      ...state,
-      isAuthenticated: Boolean(state.user && state.accessToken && state.refreshToken),
+      ...activeSession,
+      activeRole: state.activeRole,
+      sessions: state.sessions,
+      isAuthenticated: Boolean(activeSession.user && activeSession.accessToken && activeSession.refreshToken),
+      isRoleAuthenticated: (role) => {
+        const session = getSession(state, role);
+        return Boolean(session.user && session.accessToken && session.refreshToken);
+      },
+      getSession: (role) => getSession(state, role),
       login,
       logout,
       changePassword,
       clearAuth,
       replaceSession,
+      setActiveRole,
     }),
-    [changePassword, clearAuth, login, logout, replaceSession, state],
+    [activeSession, changePassword, clearAuth, login, logout, replaceSession, setActiveRole, state],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
@@ -96,7 +154,7 @@ export function useAuth() {
   return value;
 }
 
-function toState(session) {
+function toSessionState(session) {
   return {
     user: session.user,
     accessToken: session.access_token,
@@ -104,22 +162,70 @@ function toState(session) {
   };
 }
 
+function getActiveSession(state) {
+  return getSession(state, state.activeRole);
+}
+
+function getSession(state, role) {
+  return state.sessions?.[role] || EMPTY_SESSION;
+}
+
 function readStoredState() {
+  const emptyState = {
+    activeRole: 'admin',
+    sessions: {
+      admin: EMPTY_SESSION,
+      partner: EMPTY_SESSION,
+    },
+  };
+
   try {
     const stored = localStorage.getItem(STORAGE_KEY);
-    if (!stored) {
-      return { user: null, accessToken: null, refreshToken: null };
+    if (stored) {
+      const parsed = JSON.parse(stored);
+      const activeRole = ROLES.includes(parsed.activeRole) ? parsed.activeRole : 'admin';
+      return {
+        activeRole,
+        sessions: {
+          admin: normalizeStoredSession(parsed.sessions?.admin),
+          partner: normalizeStoredSession(parsed.sessions?.partner),
+        },
+      };
     }
 
-    const parsed = JSON.parse(stored);
-    if (!parsed.user || !parsed.accessToken || !parsed.refreshToken) {
-      return { user: null, accessToken: null, refreshToken: null };
+    const legacyStored = localStorage.getItem(LEGACY_STORAGE_KEY);
+    if (!legacyStored) {
+      return emptyState;
     }
 
-    return parsed;
+    const legacy = normalizeStoredSession(JSON.parse(legacyStored));
+    const role = legacy.user?.role;
+    if (!ROLES.includes(role)) {
+      return emptyState;
+    }
+
+    return {
+      activeRole: role,
+      sessions: {
+        ...emptyState.sessions,
+        [role]: legacy,
+      },
+    };
   } catch {
-    return { user: null, accessToken: null, refreshToken: null };
+    return emptyState;
   }
+}
+
+function normalizeStoredSession(session) {
+  if (!session?.user || !session.accessToken || !session.refreshToken) {
+    return EMPTY_SESSION;
+  }
+
+  return {
+    user: session.user,
+    accessToken: session.accessToken,
+    refreshToken: session.refreshToken,
+  };
 }
 
 function writeStoredState(state) {

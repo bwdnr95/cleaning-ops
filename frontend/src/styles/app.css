@@ -69,12 +69,29 @@ body {
   font-size: 12px;
   font-weight: 600;
   cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
 }
 
 .app-tab.is-active {
   background: var(--brand);
   border-color: var(--brand);
   color: #fff;
+}
+
+.app-tab-status {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--success-fg);
+  box-shadow: 0 0 0 2px var(--success-bg);
+  flex-shrink: 0;
+}
+
+.app-tab.is-active .app-tab-status {
+  background: #fff;
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.24);
 }
 
 .app-preview {

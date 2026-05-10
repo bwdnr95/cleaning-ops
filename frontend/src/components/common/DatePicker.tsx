@@ -1,5 +1,6 @@
 import React from 'react';
 
+import { formatDateValue, getAppTodayDate, parseDateValue } from '../../domain/time';
 import { Icon } from './ui';
 
 const WEEKDAYS = ['일', '월', '화', '수', '목', '금', '토'];
@@ -7,11 +8,11 @@ const WEEKDAYS = ['일', '월', '화', '수', '목', '금', '토'];
 export function DatePicker({ value, onChange, placeholder = '날짜 선택', testId, ariaLabel = '날짜 선택', compact = false, style = undefined }) {
   const rootRef = React.useRef(null);
   const [isOpen, setIsOpen] = React.useState(false);
-  const [viewDate, setViewDate] = React.useState(() => parseDateValue(value) || new Date());
+  const [viewDate, setViewDate] = React.useState(() => parseDateValue(value) || getAppTodayDate());
 
   React.useEffect(() => {
     if (isOpen) {
-      setViewDate(parseDateValue(value) || new Date());
+      setViewDate(parseDateValue(value) || getAppTodayDate());
     }
   }, [isOpen, value]);
 
@@ -31,7 +32,7 @@ export function DatePicker({ value, onChange, placeholder = '날짜 선택', tes
   }, [isOpen]);
 
   const selectedDate = parseDateValue(value);
-  const todayValue = formatDateValue(new Date());
+  const todayValue = formatDateValue(getAppTodayDate());
   const cells = buildMonthCells(viewDate);
   const monthLabel = `${viewDate.getFullYear()}년 ${viewDate.getMonth() + 1}월`;
 
@@ -50,7 +51,7 @@ export function DatePicker({ value, onChange, placeholder = '날짜 선택', tes
   };
 
   const selectToday = () => {
-    const today = new Date();
+    const today = getAppTodayDate();
     onChange(formatDateValue(today));
     setViewDate(today);
     setIsOpen(false);
@@ -189,19 +190,6 @@ function buildMonthCells(viewDate) {
       isCurrentMonth: date.getMonth() === month,
     };
   });
-}
-
-function parseDateValue(value) {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(value || '')) {
-    return null;
-  }
-
-  const [year, month, day] = value.split('-').map(Number);
-  return new Date(year, month - 1, day);
-}
-
-function formatDateValue(date) {
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
 }
 
 function formatDisplayDate(value) {

@@ -56,26 +56,38 @@ const ADMIN_PAGE_META = {
   },
 };
 
+const DEFAULT_ORDERS_VIEW = { tab: 'all', datePreset: 'today' };
+
 export function App() {
   const auth = useAuth();
   const isStandaloneCustomerLink = isCustomerLinkRoute();
-  const [mode, setMode] = React.useState('admin');
+  const [mode, setMode] = React.useState(() => auth.activeRole || 'admin');
   const [theme, setTheme] = React.useState('light');
   const [detailOrderId, setDetailOrderId] = React.useState(null);
   const [orderForm, setOrderForm] = React.useState(null);
-  const [ordersTab, setOrdersTab] = React.useState('all');
+  const [ordersView, setOrdersView] = React.useState(DEFAULT_ORDERS_VIEW);
+  const adminSession = auth.getSession('admin');
+  const partnerSession = auth.getSession('partner');
+  const activeModeSession = ['admin', 'partner'].includes(mode) ? auth.getSession(mode) : null;
   const adminSummaryLoader = React.useCallback(() => {
-    if (auth.user?.role !== 'admin') {
+    if (mode !== 'admin' || adminSession.user?.role !== 'admin') {
       return Promise.resolve(null);
     }
     return getDashboardSummary();
-  }, [auth.user?.role]);
-  const adminSummary = useApiResource(adminSummaryLoader, auth.user?.role || 'guest');
+  }, [adminSession.user?.role, mode]);
+  const adminSummary = useApiResource(adminSummaryLoader, `${mode}:${adminSession.accessToken || 'guest'}`);
   const navBadges = toAdminNavBadges(adminSummary.data);
 
   React.useEffect(() => {
     document.documentElement.dataset.theme = theme;
   }, [theme]);
+
+  const handleModeChange = (nextMode) => {
+    setMode(nextMode);
+    if (nextMode === 'admin' || nextMode === 'partner') {
+      auth.setActiveRole(nextMode);
+    }
+  };
 
   if (isStandaloneCustomerLink) {
     return (
@@ -89,14 +101,14 @@ export function App() {
     <div className="app-root">
       <div className="app-toolbar">
         <div>
-          <div className="app-eyebrow">Cleaning Ops Control Center</div>
+          <div className="app-eyebrow">클린잡 · 운영 시스템</div>
           <h1>운영 컨트롤 센터</h1>
         </div>
         <div className="app-toolbar-actions">
-          {auth.isAuthenticated && (
+          {activeModeSession?.user && (
             <div className="app-session">
-              <span>{auth.user?.name}</span>
-              <button className="app-tab" onClick={() => void auth.logout()}>
+              <span>{activeModeSession.user.name}</span>
+              <button className="app-tab" onClick={() => void auth.logout(mode)}>
                 로그아웃
               </button>
             </div>
@@ -110,9 +122,12 @@ export function App() {
               key={key}
               data-testid={`app-mode-${key}`}
               className={mode === key ? 'app-tab is-active' : 'app-tab'}
-              onClick={() => setMode(key)}
+              onClick={() => handleModeChange(key)}
             >
               {label}
+              {key !== 'customer' && auth.isRoleAuthenticated(key) && (
+                <span className="app-tab-status" aria-label={`${label} 로그인됨`} />
+              )}
             </button>
           ))}
           <button
@@ -127,13 +142,13 @@ export function App() {
       <main className="app-preview">
         {mode === 'admin' && (
           <DesktopFrame>
-            {auth.user?.role === 'admin' ? (
+            {adminSession.user?.role === 'admin' ? (
               <AdminShell
                 initialPage="dashboard"
                 onNav={() => {
                   setDetailOrderId(null);
                   setOrderForm(null);
-                  setOrdersTab('all');
+                  setOrdersView(DEFAULT_ORDERS_VIEW);
                 }}
                 navBadges={navBadges}
               >
@@ -188,11 +203,10 @@ export function App() {
                         <Dashboard
                           onCreateOrder={() => setOrderForm({ mode: 'create', orderId: null })}
                           onNav={(nextPage, options = {}) => {
-                            const nextOrdersTab = 'ordersTab' in options ? options.ordersTab : null;
                             setDetailOrderId(null);
                             setOrderForm(null);
-                            if (typeof nextOrdersTab === 'string') {
-                              setOrdersTab(nextOrdersTab);
+                            if (nextPage === 'orders') {
+                              setOrdersView(toOrdersView(options));
                             }
                             setPage(nextPage);
                           }}
@@ -201,7 +215,8 @@ export function App() {
                       )}
                       {page === 'orders' && (
                         <OrdersPage
-                          initialTab={ordersTab}
+                          initialTab={ordersView.tab}
+                          initialDatePreset={ordersView.datePreset}
                           onOpenOrder={(orderId) => setDetailOrderId(orderId)}
                           onEditOrder={(orderId) => setOrderForm({ mode: 'edit', orderId })}
                           onCreateOrder={() => setOrderForm({ mode: 'create', orderId: null })}
@@ -245,7 +260,7 @@ export function App() {
 
         {mode === 'partner' && (
           <PhoneFrame>
-            {auth.user?.role === 'partner' ? <PartnerJobDetail /> : <PartnerLoginPage />}
+            {partnerSession.user?.role === 'partner' ? <PartnerJobDetail /> : <PartnerLoginPage />}
           </PhoneFrame>
         )}
 
@@ -269,6 +284,28 @@ function ComingSoon({ page }) {
       </div>
     </div>
   );
+}
+
+function toOrdersView(options) {
+  const tab = typeof options.ordersTab === 'string' ? options.ordersTab : DEFAULT_ORDERS_VIEW.tab;
+  const datePreset = typeof options.datePreset === 'string'
+    ? options.datePreset
+    : getDefaultOrdersDatePreset(tab);
+
+  return { tab, datePreset };
+}
+
+function getDefaultOrdersDatePreset(tab) {
+  if (tab === 'today') {
+    return 'today';
+  }
+  if (tab === 'tomorrow_notice') {
+    return 'tomorrow';
+  }
+  if (['payment_check', 'photo_review', 'deliver', 'partner_pending', 'monthly_done', 'monthly_revenue'].includes(tab)) {
+    return tab.startsWith('monthly_') ? 'month' : 'all';
+  }
+  return DEFAULT_ORDERS_VIEW.datePreset;
 }
 
 function toAdminNavBadges(summary) {

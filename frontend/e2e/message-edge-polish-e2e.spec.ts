@@ -26,6 +26,29 @@ test('admin sees blocked message actions clearly on orders without partner or ap
   await expect(page.getByTestId('admin-action-error')).toBeVisible();
 });
 
+test('admin previews message channel readiness before sending', async ({ page }) => {
+  await loginAsAdmin(page);
+  await page.getByTestId('admin-nav-orders').click();
+  await page.getByTestId('orders-date-clear').click();
+  await page.getByTestId('admin-order-row-seed-order-2450').click();
+  await expect(page.getByTestId('admin-order-detail-page')).toBeVisible();
+
+  await page.getByTestId('send-customer-day-before').click();
+  await expect(page.getByTestId('message-preview-modal')).toBeVisible();
+  await expect(page.getByTestId('message-preview-channel-sms')).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByTestId('message-preview-content')).toContainText('/c/seed-customer-token-2450');
+
+  await page.getByTestId('message-preview-channel-alimtalk').click();
+  await expect(page.getByTestId('message-preview-channel-alimtalk')).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByTestId('message-preview-template-id')).toBeVisible();
+  await expect(page.getByTestId('message-preview-content')).toContainText('/c/seed-customer-token-2450');
+
+  await page.getByTestId('message-preview-channel-sms').click();
+  await page.getByTestId('message-preview-send').click();
+  await expect(page.getByTestId('message-preview-modal')).toHaveCount(0);
+  await expect(page.getByTestId('admin-action-notice')).toContainText('SMS');
+});
+
 test('customer wrong phone suffix stays behind verification gate', async ({ page }) => {
   await page.goto('/c/seed-customer-token-2450');
   await expect(page.getByTestId('customer-verify-form')).toBeVisible();

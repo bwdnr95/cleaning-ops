@@ -1,17 +1,17 @@
 // Sample order data — mixed B2C / B2B cleaning
 export const ORDERS = [
-  { id: 'CO-2451', status: '협력사확인중', received: '04-30 14:22', visit: '05-04', timeWindow: '오전 9-12', team: '미배정', product: '입주청소 (32평)', address: '서울 강남구 도산대로 123 래미안아파트 2304호', customer: '김지원', phone: '010-2*** -4521', amount: 480000, paid: 'partial', photo: 'none', delivered: 'pending' },
-  { id: 'CO-2450', status: '사진검수대기', received: '04-29 11:08', visit: '05-02', timeWindow: '오후 2-5', team: '클린파트너스', product: '에어컨 분해세척 4대', address: '서울 마포구 와우산로 88 합정스카이뷰 1102호', customer: '이서연', phone: '010-7*** -1129', amount: 320000, paid: 'paid', photo: 'wait', delivered: 'pending' },
-  { id: 'CO-2449', status: '고객전달필요', received: '04-29 09:14', visit: '05-01', timeWindow: '오전 10-1', team: '하우스케어', product: '이사청소 (24평)', address: '경기 성남시 분당구 정자일로 45 정자센트럴 803호', customer: '박민호', phone: '010-3*** -8821', amount: 290000, paid: 'paid', photo: 'approved', delivered: 'pending' },
-  { id: 'CO-2448', status: '작업진행', received: '04-28 16:55', visit: '05-02', timeWindow: '오전 9-12', team: '청소플러스', product: '사무실 정기청소 80평', address: '서울 강서구 마곡중앙로 12 마곡테크노타워 18F', customer: '㈜노바테크', phone: '02-***-7700', amount: 1280000, paid: 'paid', photo: 'partial', delivered: 'pending' },
-  { id: 'CO-2447', status: '전날안내필요', received: '04-28 13:32', visit: '05-03', timeWindow: '오후 1-4', team: '클린파트너스', product: '입주청소 (45평)', address: '서울 송파구 잠실로 209 잠실리센츠 1812호', customer: '최유진', phone: '010-9*** -3401', amount: 620000, paid: 'partial', photo: 'none', delivered: 'pending' },
-  { id: 'CO-2446', status: '서비스완료', received: '04-27 10:10', visit: '04-30', timeWindow: '오전 10-1', team: '하우스케어', product: '준공청소 상가 60평', address: '서울 용산구 한강대로 405 1F', customer: '주식회사 메르시', phone: '02-***-2240', amount: 880000, paid: 'paid', photo: 'approved', delivered: 'done' },
-  { id: 'CO-2445', status: '일정확정', received: '04-27 09:45', visit: '05-05', timeWindow: '오전 9-12', team: '청소플러스', product: '에어컨 분해세척 2대', address: '인천 연수구 송도과학로 32 더샵센트럴파크 4012호', customer: '강도윤', phone: '010-4*** -7782', amount: 180000, paid: 'pending', photo: 'none', delivered: 'pending' },
-  { id: 'CO-2444', status: '신규접수', received: '04-30 17:48', visit: '미정', timeWindow: '-', team: '미배정', product: '입주청소 문의', address: '서울 서초구 반포대로 217', customer: '윤하늘', phone: '010-8*** -2003', amount: 0, paid: 'pending', photo: 'none', delivered: 'pending' },
-  { id: 'CO-2443', status: '상담중', received: '04-30 11:20', visit: '미정', timeWindow: '-', team: '미배정', product: '사무실 정기 견적 요청', address: '서울 영등포구 여의대로 24', customer: '㈜한빛소프트', phone: '02-***-9210', amount: 0, paid: 'pending', photo: 'none', delivered: 'pending' },
-  { id: 'CO-2442', status: '취소', received: '04-26 15:32', visit: '04-29', timeWindow: '오후 2-5', team: '하우스케어', product: '이사청소 (28평)', address: '경기 고양시 일산서구 주엽로 12', customer: '오세영', phone: '010-2*** -6611', amount: 270000, paid: 'refund', photo: 'none', delivered: 'cancelled' },
-  { id: 'CO-2441', status: '서비스완료', received: '04-26 09:00', visit: '04-29', timeWindow: '오전 10-1', team: '클린파트너스', product: '입주청소 (38평)', address: '서울 성동구 왕십리로 83 센트라스 2105호', customer: '한서윤', phone: '010-6*** -4408', amount: 540000, paid: 'paid', photo: 'approved', delivered: 'done' },
-  { id: 'CO-2440', status: '작업예정', received: '04-25 14:00', visit: '05-02', timeWindow: '오전 9-12', team: '청소플러스', product: '준공청소 (54평)', address: '서울 동작구 사당로 110 푸르지오써밋 3201호', customer: '정태욱', phone: '010-5*** -9912', amount: 720000, paid: 'paid', photo: 'none', delivered: 'pending' },
+  { id: 'CO-2451', status: '협력사확인중', received: '04-30 14:22', visit: '05-04', timeWindow: '오전 9-12', team: '미배정', product: '입주청소 (32평)', address: '서울 강남구 도산대로 123 래미안아파트 2304호', customer: '김지원', phone: '010-2345-4521', amount: 480000, paid: 'partial', photo: 'none', delivered: 'pending' },
+  { id: 'CO-2450', status: '사진검수대기', received: '04-29 11:08', visit: '05-02', timeWindow: '오후 2-5', team: '클린파트너스', product: '에어컨 분해세척 4대', address: '서울 마포구 와우산로 88 합정스카이뷰 1102호', customer: '이서연', phone: '010-7345-1129', amount: 320000, paid: 'paid', photo: 'wait', delivered: 'pending' },
+  { id: 'CO-2449', status: '고객전달필요', received: '04-29 09:14', visit: '05-01', timeWindow: '오전 10-1', team: '하우스케어', product: '이사청소 (24평)', address: '경기 성남시 분당구 정자일로 45 정자센트럴 803호', customer: '박민호', phone: '010-3456-8821', amount: 290000, paid: 'paid', photo: 'approved', delivered: 'pending' },
+  { id: 'CO-2448', status: '작업진행', received: '04-28 16:55', visit: '05-02', timeWindow: '오전 9-12', team: '청소플러스', product: '사무실 정기청소 80평', address: '서울 강서구 마곡중앙로 12 마곡테크노타워 18F', customer: '㈜노바테크', phone: '02-4567-7700', amount: 1280000, paid: 'paid', photo: 'partial', delivered: 'pending' },
+  { id: 'CO-2447', status: '전날안내필요', received: '04-28 13:32', visit: '05-03', timeWindow: '오후 1-4', team: '클린파트너스', product: '입주청소 (45평)', address: '서울 송파구 잠실로 209 잠실리센츠 1812호', customer: '최유진', phone: '010-9567-3401', amount: 620000, paid: 'partial', photo: 'none', delivered: 'pending' },
+  { id: 'CO-2446', status: '서비스완료', received: '04-27 10:10', visit: '04-30', timeWindow: '오전 10-1', team: '하우스케어', product: '준공청소 상가 60평', address: '서울 용산구 한강대로 405 1F', customer: '주식회사 메르시', phone: '02-4567-2240', amount: 880000, paid: 'paid', photo: 'approved', delivered: 'done' },
+  { id: 'CO-2445', status: '일정확정', received: '04-27 09:45', visit: '05-05', timeWindow: '오전 9-12', team: '청소플러스', product: '에어컨 분해세척 2대', address: '인천 연수구 송도과학로 32 더샵센트럴파크 4012호', customer: '강도윤', phone: '010-4567-7782', amount: 180000, paid: 'pending', photo: 'none', delivered: 'pending' },
+  { id: 'CO-2444', status: '신규접수', received: '04-30 17:48', visit: '미정', timeWindow: '-', team: '미배정', product: '입주청소 문의', address: '서울 서초구 반포대로 217', customer: '윤하늘', phone: '010-8123-2003', amount: 0, paid: 'pending', photo: 'none', delivered: 'pending' },
+  { id: 'CO-2443', status: '상담중', received: '04-30 11:20', visit: '미정', timeWindow: '-', team: '미배정', product: '사무실 정기 견적 요청', address: '서울 영등포구 여의대로 24', customer: '㈜한빛소프트', phone: '02-3456-9210', amount: 0, paid: 'pending', photo: 'none', delivered: 'pending' },
+  { id: 'CO-2442', status: '취소', received: '04-26 15:32', visit: '04-29', timeWindow: '오후 2-5', team: '하우스케어', product: '이사청소 (28평)', address: '경기 고양시 일산서구 주엽로 12', customer: '오세영', phone: '010-2456-6611', amount: 270000, paid: 'refund', photo: 'none', delivered: 'cancelled' },
+  { id: 'CO-2441', status: '서비스완료', received: '04-26 09:00', visit: '04-29', timeWindow: '오전 10-1', team: '클린파트너스', product: '입주청소 (38평)', address: '서울 성동구 왕십리로 83 센트라스 2105호', customer: '한서윤', phone: '010-6345-4408', amount: 540000, paid: 'paid', photo: 'approved', delivered: 'done' },
+  { id: 'CO-2440', status: '작업예정', received: '04-25 14:00', visit: '05-02', timeWindow: '오전 9-12', team: '청소플러스', product: '준공청소 (54평)', address: '서울 동작구 사당로 110 푸르지오써밋 3201호', customer: '정태욱', phone: '010-5123-9912', amount: 720000, paid: 'paid', photo: 'none', delivered: 'pending' },
 ];
 
 export const TIMELINE_2450 = [
@@ -67,10 +67,9 @@ export const RECENT_PHOTOS = [
 ];
 
 export const RECENT_SENDS = [
-  { time: '14:22', kind: '일정확정', target: '김지원 010-2***-4521', via: '알림톡', state: 'delivered' },
-  { time: '13:08', kind: '전날안내', target: '한서윤 010-6***-4408', via: '알림톡', state: 'delivered' },
+  { time: '14:22', kind: '일정확정', target: '김지원 010-2345-4521', via: '알림톡', state: 'delivered' },
+  { time: '13:08', kind: '전날안내', target: '한서윤 010-6345-4408', via: '알림톡', state: 'delivered' },
   { time: '11:55', kind: '협력사배정', target: '클린파트너스 박정훈', via: 'SMS', state: 'delivered' },
   { time: '10:33', kind: '완료사진', target: '주식회사 메르시', via: '알림톡', state: 'read' },
-  { time: '09:21', kind: '잔금안내', target: '강도윤 010-4***-7782', via: '알림톡', state: 'failed' },
+  { time: '09:21', kind: '잔금안내', target: '강도윤 010-4567-7782', via: '알림톡', state: 'failed' },
 ];
-

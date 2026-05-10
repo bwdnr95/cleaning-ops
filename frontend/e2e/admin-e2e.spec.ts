@@ -9,6 +9,10 @@ const PARTNER_PHONE = '01012345678';
 const PARTNER_PASSWORD = 'PartnerPass123!';
 const SEED_PARTNER_ID = 'seed-partner-01';
 const SEED_SERVICE_ITEM_ID = 'seed-service-item-move-in';
+const ONE_PIXEL_PNG = Buffer.from(
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=',
+  'base64',
+);
 
 test('admin can log in, navigate operational pages, and open order creation from the dashboard', async ({ page }) => {
   await loginAsAdmin(page);
@@ -25,6 +29,9 @@ test('admin can log in, navigate operational pages, and open order creation from
   for (const [navKey, pageTestId] of pages) {
     await page.getByTestId(`admin-nav-${navKey}`).click();
     await expect(page.getByTestId(pageTestId)).toBeVisible();
+    if (navKey === 'photos') {
+      await expect(page.getByTestId('photo-empty-title')).toContainText('검수 대기 사진이 없습니다');
+    }
   }
 
   await page.getByTestId('admin-nav-dashboard').click();
@@ -33,23 +40,75 @@ test('admin can log in, navigate operational pages, and open order creation from
   await expect(page.getByTestId('admin-order-form')).toBeVisible();
 });
 
+test('admin and partner sessions stay active across app mode tabs', async ({ page }) => {
+  await loginAsAdmin(page);
+
+  await page.getByTestId('app-mode-partner').click();
+  await expect(page.getByTestId('partner-login-form')).toBeVisible();
+  await page.getByTestId('partner-login-identifier').fill(PARTNER_PHONE);
+  await page.getByTestId('partner-login-password').fill(PARTNER_PASSWORD);
+  await page.getByTestId('partner-login-submit').click();
+  await expect(page.getByTestId('partner-jobs-page')).toBeVisible();
+
+  await page.getByTestId('app-mode-admin').click();
+  await expect(page.getByTestId('admin-dashboard-page')).toBeVisible();
+  await expect(page.getByTestId('admin-login-form')).toHaveCount(0);
+
+  await page.getByTestId('app-mode-partner').click();
+  await expect(page.getByTestId('partner-jobs-page')).toBeVisible();
+  await expect(page.getByTestId('partner-login-form')).toHaveCount(0);
+});
+
 test('dashboard KPI cards open the matching operational filters', async ({ page }) => {
   await loginAsAdmin(page);
 
   for (const item of [
-    ['dashboard-kpi-today_jobs', 'orders-tab-today'],
-    ['dashboard-kpi-tomorrow_notice', 'orders-tab-tomorrow_notice'],
-    ['dashboard-kpi-payment_check', 'orders-tab-payment_check'],
+    ['dashboard-kpi-today_jobs', 'orders-tab-today', 'orders-date-preset-today'],
+    ['dashboard-kpi-tomorrow_notice', 'orders-tab-tomorrow_notice', 'orders-date-preset-tomorrow'],
+    ['dashboard-kpi-photo_review', 'orders-tab-photo_review', 'orders-date-preset-all'],
+    ['dashboard-kpi-customer_delivery', 'orders-tab-deliver', 'orders-date-preset-all'],
+    ['dashboard-kpi-payment_check', 'orders-tab-payment_check', 'orders-date-preset-all'],
+    ['dashboard-kpi-monthly_done', 'orders-tab-monthly_done', 'orders-date-preset-month'],
+    ['dashboard-kpi-monthly_revenue', 'orders-tab-monthly_revenue', 'orders-date-preset-month'],
   ]) {
     await page.getByTestId(item[0]).click();
     await expect(page.getByTestId('admin-orders-page')).toBeVisible();
     await expect(page.getByTestId(item[1])).toHaveAttribute('aria-pressed', 'true');
+    await expect(page.getByTestId(item[2])).toHaveAttribute('aria-pressed', 'true');
     await page.getByTestId('admin-nav-dashboard').click();
     await expect(page.getByTestId('admin-dashboard-page')).toBeVisible();
   }
+});
 
-  await page.getByTestId('dashboard-kpi-photo_review').click();
-  await expect(page.getByTestId('admin-photo-review-page')).toBeVisible();
+test('dashboard today and tomorrow work lists open matching order queues', async ({ page }) => {
+  await loginAsAdmin(page);
+
+  await page.getByRole('button', { name: '큐 보기' }).first().click();
+  await expect(page.getByTestId('admin-orders-page')).toBeVisible();
+  await expect(page.getByTestId('orders-tab-today')).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByTestId('orders-date-preset-today')).toHaveAttribute('aria-pressed', 'true');
+
+  await page.getByTestId('admin-nav-dashboard').click();
+  await expect(page.getByTestId('admin-dashboard-page')).toBeVisible();
+  await page.getByRole('button', { name: '큐 보기' }).nth(1).click();
+  await expect(page.getByTestId('admin-orders-page')).toBeVisible();
+  await expect(page.getByTestId('orders-tab-tomorrow_notice')).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByTestId('orders-date-preset-tomorrow')).toHaveAttribute('aria-pressed', 'true');
+});
+
+test('dashboard recent photo thumbnails load from backend assets', async ({ page, request }) => {
+  const flow = await createPhotoReviewJob(request);
+
+  await loginAsAdmin(page);
+  const thumb = page.getByTestId(`dashboard-recent-photo-thumb-${flow.photoId}`);
+
+  await expect(thumb).toBeVisible();
+  const src = await thumb.getAttribute('src');
+  expect(src?.startsWith(`${backendUrl}/uploads/photos/`)).toBe(true);
+  await expect.poll(async () => thumb.evaluate((node) => ({
+    complete: node.complete,
+    width: node.naturalWidth,
+  }))).toEqual({ complete: true, width: 1 });
 });
 
 test('calendar more link opens the selected day order list', async ({ page, request }) => {
@@ -100,6 +159,7 @@ test('admin can run selected order bulk operations from the order list', async (
   await loginAsAdmin(page);
   await page.getByTestId('admin-nav-orders').click();
   await expect(page.getByTestId('admin-orders-page')).toBeVisible();
+  await page.getByTestId('orders-date-clear').click();
 
   await selectOrderRows(page, orders);
   await page.getByTestId('orders-bulk-status-open').click();
@@ -132,6 +192,7 @@ test('admin can adjust schedule from order detail and jump to related ops pages'
   await loginAsAdmin(page);
   await page.getByTestId('admin-nav-orders').click();
   await expect(page.getByTestId('admin-orders-page')).toBeVisible();
+  await page.getByTestId('orders-date-clear').click();
   await page.getByTestId(`admin-order-row-${order.id}`).click();
   await expect(page.getByTestId('admin-order-detail-page')).toBeVisible();
 
@@ -221,6 +282,7 @@ test('admin can add a catalog item in product ops and use it in an order', async
 
 test('admin can edit and delete an unused partner explicitly', async ({ page }) => {
   const suffix = String(Date.now()).slice(-6);
+  const categoryName = `E2E Category ${suffix}`;
   const partnerName = `E2E Partner ${suffix}`;
   const updatedPartnerName = `${partnerName} Updated`;
   const phone = `010-77${suffix.slice(0, 2)}-${suffix.slice(2)}`;
@@ -229,10 +291,22 @@ test('admin can edit and delete an unused partner explicitly', async ({ page }) 
   await page.getByTestId('admin-nav-partners').click();
   await expect(page.getByTestId('admin-partners-page')).toBeVisible();
 
+  await page.getByTestId('partner-category-create').click();
+  await page.getByTestId('partner-category-name').fill(categoryName);
+  await page.getByTestId('partner-category-save').click();
+  await expect(page.getByRole('button', { name: new RegExp(categoryName) }).first()).toBeVisible();
+
   await page.getByTestId('partner-create-name').fill(partnerName);
+  await page.getByTestId('partner-create-category').selectOption({ label: categoryName });
   await page.getByTestId('partner-create-phone').fill(phone);
   await page.getByTestId('partner-create-submit').click();
   await expect(page.getByRole('button', { name: `${partnerName} 수정` })).toBeVisible();
+
+  await page.getByTestId('partner-category-filter-unclassified').click();
+  await expect(page.getByRole('button', { name: `${partnerName} 수정` })).toHaveCount(0);
+  await page.getByRole('button', { name: new RegExp(categoryName) }).first().click();
+  await expect(page.getByRole('button', { name: `${partnerName} 수정` })).toBeVisible();
+
   await page.getByRole('button', { name: `${partnerName} 수정` }).click();
   await expect(page.getByTestId('partner-detail-name')).toHaveValue(partnerName);
 
@@ -240,15 +314,26 @@ test('admin can edit and delete an unused partner explicitly', async ({ page }) 
   await page.getByTestId('partner-save').click();
   await expect(page.getByRole('button', { name: `${updatedPartnerName} 수정` })).toBeVisible();
 
+  await page.getByTestId('partner-detail-category').selectOption('');
+  await page.getByTestId('partner-save').click();
+  await page.getByTestId('partner-category-filter-unclassified').click();
+  await expect(page.getByRole('button', { name: `${updatedPartnerName} 수정` })).toBeVisible();
+
   page.once('dialog', async (dialog) => {
     await dialog.accept();
   });
   await page.getByTestId('partner-delete').click();
   await expect(page.getByRole('button', { name: `${updatedPartnerName} 수정` })).toHaveCount(0);
+
+  page.once('dialog', async (dialog) => {
+    await dialog.accept();
+  });
+  await page.getByTestId('partner-category-delete').click();
+  await expect(page.getByRole('button', { name: new RegExp(categoryName) })).toHaveCount(0);
 });
 
 test('admin photo review keeps customer send disabled until a photo is approved', async ({ page, request }) => {
-  const orderId = await createPhotoReviewJob(request);
+  const { orderId } = await createPhotoReviewJob(request);
 
   await loginAsAdmin(page);
   await page.getByTestId('admin-nav-photos').click();
@@ -258,10 +343,13 @@ test('admin photo review keeps customer send disabled until a photo is approved'
   await expect(page.getByTestId('photo-filter-review')).toHaveAttribute('aria-pressed', 'false');
   await page.getByTestId('photo-filter-review').click();
   await expect(page.getByTestId(`photo-review-item-${orderId}`)).toBeVisible();
+  await page.getByTestId(`photo-review-item-${orderId}`).click();
   await page.getByTestId('photo-open-order').click();
   await expect(page.getByTestId('admin-order-detail-page')).toBeVisible();
   await page.getByTestId('admin-nav-photos').click();
   await expect(page.getByTestId('admin-photo-review-page')).toBeVisible();
+  await expect(page.getByTestId(`photo-review-item-${orderId}`)).toBeVisible();
+  await page.getByTestId(`photo-review-item-${orderId}`).click();
   await expect(page.getByTestId('photo-send-customer-link')).toBeDisabled();
 
   await page.getByTestId('photo-approve-selected').click();
@@ -313,6 +401,7 @@ async function createPhotoReviewJob(request) {
   const created = await checkedJson(await request.post(`${backendUrl}/api/admin/orders`, {
     headers: adminHeaders,
     data: {
+      status: '일정확정',
       received_date: '2026-05-05',
       scheduled_date: '2026-05-13',
       requested_time: '15:00',
@@ -332,22 +421,18 @@ async function createPhotoReviewJob(request) {
   await checkedJson(await request.post(`${backendUrl}/api/partner/jobs/${created.id}/start`, {
     headers: partnerHeaders,
   }));
-  await checkedJson(await request.post(`${backendUrl}/api/partner/jobs/${created.id}/photos`, {
+  const uploaded = await checkedJson(await request.post(`${backendUrl}/api/partner/jobs/${created.id}/photos`, {
     headers: partnerHeaders,
     multipart: {
       photo_type: 'after',
       file: {
-        name: 'e2e-after.jpg',
-        mimeType: 'image/jpeg',
-        buffer: Buffer.from('fake-jpeg-bytes'),
+        name: 'e2e-after.png',
+        mimeType: 'image/png',
+        buffer: ONE_PIXEL_PNG,
       },
     },
   }));
-  await checkedJson(await request.post(`${backendUrl}/api/partner/jobs/${created.id}/complete`, {
-    headers: partnerHeaders,
-  }));
-
-  return created.id;
+  return { orderId: created.id, photoId: uploaded.id };
 }
 
 async function createCalendarDayOrders(request) {

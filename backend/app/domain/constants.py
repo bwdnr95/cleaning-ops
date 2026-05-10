@@ -45,6 +45,8 @@ class MessageStatus(StrEnum):
     PENDING = "pending"
     SENT = "sent"
     FAILED = "failed"
+    DELIVERED = "delivered"
+    DELIVERY_FAILED = "delivery_failed"
 
 
 class RecipientType(StrEnum):

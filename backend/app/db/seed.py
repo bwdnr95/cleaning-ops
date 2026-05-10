@@ -7,7 +7,7 @@ from app.core.security import hash_password
 from app.domain.constants import OrderStatus, TimelineEventType, UserRole
 from app.domain.phone import normalize_phone
 from app.models.order import Order
-from app.models.partner import Partner
+from app.models.partner import Partner, PartnerCategory
 from app.models.service_item import ServiceCategory, ServiceItem
 from app.models.timeline import OrderTimeline
 from app.models.user import User
@@ -20,6 +20,7 @@ DEV_PARTNER_PASSWORD = "PartnerPass123!"
 
 DEV_ADMIN_ID = "seed-admin-user"
 DEV_PARTNER_ID = "seed-partner-01"
+DEV_PARTNER_CATEGORY_ID = "seed-partner-category-residential"
 DEV_PARTNER_USER_ID = "seed-partner-user"
 DEV_ORDER_ID = "seed-order-2450"
 DEV_ORDER_TIMELINE_ID = "seed-order-2450-created"
@@ -41,6 +42,7 @@ class SeedSummary:
 
 
 def seed_dev_data(db: Session) -> SeedSummary:
+    ensure_partner_category(db)
     ensure_partner(db)
     ensure_admin_user(db)
     ensure_partner_user(db)
@@ -61,13 +63,32 @@ def seed_dev_data(db: Session) -> SeedSummary:
     )
 
 
+def ensure_partner_category(db: Session) -> PartnerCategory:
+    category = db.get(PartnerCategory, DEV_PARTNER_CATEGORY_ID)
+    if category is not None:
+        return category
+
+    category = PartnerCategory(
+        id=DEV_PARTNER_CATEGORY_ID,
+        name="주거 청소",
+        description="입주/이사/정기 청소 협력사",
+        is_active=True,
+        sort_order=10,
+    )
+    db.add(category)
+    return category
+
+
 def ensure_partner(db: Session) -> Partner:
     partner = db.get(Partner, DEV_PARTNER_ID)
     if partner is not None:
+        if not partner.partner_category_id:
+            partner.partner_category_id = DEV_PARTNER_CATEGORY_ID
         return partner
 
     partner = Partner(
         id=DEV_PARTNER_ID,
+        partner_category_id=DEV_PARTNER_CATEGORY_ID,
         name="클린파트너 강남",
         manager_name="김현장",
         phone=normalize_phone(DEV_PARTNER_PHONE),

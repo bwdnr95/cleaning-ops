@@ -23,6 +23,23 @@ export function setApiAuthHandlers(handlers) {
   authHandlers = handlers;
 }
 
+export function toApiAssetUrl(path) {
+  if (!path || /^(https?:|data:|blob:)/.test(path)) {
+    return path;
+  }
+
+  if (!path.startsWith('/')) {
+    return path;
+  }
+
+  try {
+    const apiUrl = new URL(API_BASE_URL, window.location.origin);
+    return new URL(path, apiUrl.origin).toString();
+  } catch {
+    return path;
+  }
+}
+
 export async function apiRequest(path, requestOptions = undefined) {
   const options = requestOptions ?? {};
   const response = await request(path, options);
@@ -33,15 +50,20 @@ export async function apiRequest(path, requestOptions = undefined) {
     options.retryOnUnauthorized !== false &&
     authHandlers?.getRefreshToken()
   ) {
+    let session;
     try {
-      const session = await refreshWithRotation(authHandlers.getRefreshToken() ?? '');
-      authHandlers.onRefresh(session);
-      const retryResponse = await request(path, options);
-      return parseResponse(retryResponse);
+      session = await refreshWithRotation(authHandlers.getRefreshToken() ?? '');
     } catch (error) {
       authHandlers.onUnauthorized();
       throw error;
     }
+
+    authHandlers.onRefresh(session);
+    const retryResponse = await request(path, options);
+    if (retryResponse.status === 401) {
+      authHandlers.onUnauthorized();
+    }
+    return parseResponse(retryResponse);
   }
 
   return parseResponse(response);

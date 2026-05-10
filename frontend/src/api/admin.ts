@@ -85,6 +85,35 @@ export function resetAdminPartnerPassword(partnerId, input = {}) {
   });
 }
 
+export function listPartnerCategories({ includeInactive = true } = {}) {
+  const params = new URLSearchParams();
+  if (includeInactive) {
+    params.set('include_inactive', 'true');
+  }
+  const query = params.toString();
+  return apiRequest(`/admin/partners/categories${query ? `?${query}` : ''}`);
+}
+
+export function createPartnerCategory(input) {
+  return apiRequest('/admin/partners/categories', {
+    method: 'POST',
+    body: input,
+  });
+}
+
+export function updatePartnerCategory(categoryId, input) {
+  return apiRequest(`/admin/partners/categories/${encodeURIComponent(categoryId)}`, {
+    method: 'PATCH',
+    body: input,
+  });
+}
+
+export function deletePartnerCategory(categoryId) {
+  return apiRequest(`/admin/partners/categories/${encodeURIComponent(categoryId)}`, {
+    method: 'DELETE',
+  });
+}
+
 export function listServiceCatalog({ includeInactive = false } = {}) {
   const params = new URLSearchParams();
   if (includeInactive) {

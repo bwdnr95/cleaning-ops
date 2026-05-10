@@ -30,16 +30,14 @@ export function AdminShell({ initialPage = 'dashboard', children, onNav = undefi
         background: 'var(--surface)',
         display: 'flex', flexDirection: 'column',
       }}>
-        <div style={{ height: 52, padding: '0 16px', display: 'flex', alignItems: 'center', gap: 8, borderBottom: '1px solid var(--border)' }}>
-          <div style={{
-            width: 26, height: 26, borderRadius: 6,
-            background: 'linear-gradient(135deg, var(--brand) 0%, #818cf8 100%)',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            color: '#fff', fontWeight: 700, fontSize: 13, letterSpacing: '-0.04em',
-          }}>C</div>
-          <div>
-            <div style={{ fontSize: 13, fontWeight: 600, letterSpacing: '-0.01em' }}>Cleaning Ops</div>
-            <div style={{ fontSize: 10.5, color: 'var(--text-tertiary)', marginTop: -2 }}>Control Center</div>
+        <div style={{ height: 52, padding: '0 14px', display: 'flex', alignItems: 'center', gap: 10, borderBottom: '1px solid var(--border)' }}>
+          <img
+            src="/cleanjob-logo.png"
+            alt="클린잡"
+            style={{ height: 30, width: 'auto', display: 'block' }}
+          />
+          <div style={{ marginLeft: 'auto', fontSize: 10, color: 'var(--text-tertiary)', fontWeight: 700, letterSpacing: '0.04em' }}>
+            운영 시스템
           </div>
         </div>
 

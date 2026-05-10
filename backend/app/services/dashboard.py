@@ -3,6 +3,7 @@ from datetime import date, timedelta
 from sqlalchemy import extract, func, select
 from sqlalchemy.orm import Session
 
+from app.core.time import business_today
 from app.domain.constants import OrderStatus
 from app.domain.payment_status import PAYMENT_CHECK_STATUSES
 from app.models.message import MessageLog
@@ -16,7 +17,7 @@ class DashboardService:
         self.db = db
 
     def summary(self, *, today: date | None = None) -> DashboardSummary:
-        current = today or date.today()
+        current = today or business_today()
         tomorrow = current + timedelta(days=1)
         month_filter = (
             extract("year", Order.scheduled_date) == current.year,

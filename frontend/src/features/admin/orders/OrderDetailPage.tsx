@@ -2,10 +2,8 @@ import React from 'react';
 
 import { getAdminOrder, listPartners, updateAdminOrder } from '../../../api/admin';
 import {
-  sendCustomerDayBefore,
-  sendCustomerPhotoReady,
-  sendCustomerScheduleConfirmed,
-  sendPartnerAssignment,
+  previewAdminMessage,
+  sendAdminMessage,
 } from '../../../api/messages';
 import { DatePicker } from '../../../components/common/DatePicker';
 import { Avatar, Badge, Icon, StatusBadge } from '../../../components/common/ui';
@@ -16,7 +14,36 @@ import {
   partnerPaymentStatusLabel,
   paymentStatusLabel,
 } from '../../../domain/paymentStatus';
+import { formatPhone } from '../../../domain/phone';
+import { formatAppDateTime } from '../../../domain/time';
 import { useApiResource } from '../../../api/useApiResource';
+
+const MESSAGE_ACTIONS = {
+  customerScheduleConfirmed: {
+    messageType: 'customer_schedule_confirmed',
+    recipientType: 'customer',
+    title: '일정확정 안내',
+    successText: '고객 일정확정 안내를 발송했습니다.',
+  },
+  customerDayBefore: {
+    messageType: 'customer_day_before',
+    recipientType: 'customer',
+    title: '전날 안내',
+    successText: '고객 전날 안내를 발송했습니다.',
+  },
+  partnerAssignment: {
+    messageType: 'partner_assignment',
+    recipientType: 'partner',
+    title: '협력사 배정 안내',
+    successText: '협력사 배정 안내를 발송했습니다.',
+  },
+  customerPhotoReady: {
+    messageType: 'customer_photo_ready',
+    recipientType: 'customer',
+    title: '사진 링크 발송',
+    successText: '고객 사진 확인 링크를 발송했습니다.',
+  },
+};
 
 export function OrderDetailPage({ orderId, onBack, onEdit, onNav }) {
   const loadOrder = React.useCallback(() => getAdminOrder(orderId), [orderId]);
@@ -32,6 +59,11 @@ export function OrderDetailPage({ orderId, onBack, onEdit, onNav }) {
   const [isSaving, setIsSaving] = React.useState(false);
   const [notice, setNotice] = React.useState(null);
   const [error, setError] = React.useState(null);
+  const [messageDraft, setMessageDraft] = React.useState(null);
+  const [messagePreviewChannel, setMessagePreviewChannel] = React.useState('sms');
+  const [messagePreviewData, setMessagePreviewData] = React.useState(null);
+  const [messagePreviewError, setMessagePreviewError] = React.useState(null);
+  const [isPreviewLoading, setIsPreviewLoading] = React.useState(false);
 
   React.useEffect(() => {
     if (order) {
@@ -86,34 +118,75 @@ export function OrderDetailPage({ orderId, onBack, onEdit, onNav }) {
     });
   };
 
-  const handleSendCustomerScheduleConfirmed = async () => {
-    await runAction(async () => {
-      await sendCustomerScheduleConfirmed(order.id);
-      setNotice('고객 일정확정 안내를 발송했습니다.');
-      orderResource.reload();
-    });
+  const fetchMessagePreview = async (draft, channel) => {
+    setIsPreviewLoading(true);
+    setMessagePreviewError(null);
+    try {
+      const preview = await previewAdminMessage(order.id, draft.messageType, draft.recipientType, channel);
+      setMessagePreviewData(preview);
+      return preview;
+    } catch (requestError) {
+      const actionError = toActionErrorMessage(requestError);
+      setMessagePreviewData(null);
+      setMessagePreviewError(actionError);
+      throw requestError;
+    } finally {
+      setIsPreviewLoading(false);
+    }
   };
 
-  const handleSendCustomerDayBefore = async () => {
-    await runAction(async () => {
-      await sendCustomerDayBefore(order.id);
-      setNotice('고객 전날 안내를 발송했습니다.');
-      orderResource.reload();
-    });
+  const openMessagePreview = async (draft) => {
+    setError(null);
+    setNotice(null);
+    setMessageDraft(draft);
+    setMessagePreviewChannel('sms');
+    setMessagePreviewData(null);
+    setMessagePreviewError(null);
+    try {
+      await fetchMessagePreview(draft, 'sms');
+    } catch (requestError) {
+      setMessageDraft(null);
+      setError(toActionErrorMessage(requestError));
+    }
   };
 
-  const handleSendPartnerAssignment = async () => {
-    await runAction(async () => {
-      await sendPartnerAssignment(order.id);
-      setNotice('협력사 배정 안내를 발송했습니다.');
-      orderResource.reload();
-    });
+  const handlePreviewChannelChange = async (channel) => {
+    if (!messageDraft || channel === messagePreviewChannel) {
+      return;
+    }
+    setMessagePreviewChannel(channel);
+    try {
+      await fetchMessagePreview(messageDraft, channel);
+    } catch {
+      // The modal keeps the inline preview error so the operator can switch channels.
+    }
   };
 
-  const handleSendCustomerPhotoReady = async () => {
+  const closeMessagePreview = () => {
+    setMessageDraft(null);
+    setMessagePreviewData(null);
+    setMessagePreviewError(null);
+    setMessagePreviewChannel('sms');
+  };
+
+  const handleConfirmMessageSend = async () => {
+    if (!messageDraft) {
+      return;
+    }
     await runAction(async () => {
-      await sendCustomerPhotoReady(order.id);
-      setNotice('고객 사진 확인 링크를 발송했습니다.');
+      const sent = await sendAdminMessage(
+        order.id,
+        messageDraft.messageType,
+        messageDraft.recipientType,
+        messagePreviewChannel,
+      );
+      closeMessagePreview();
+      const channelLabel = messageChannelLabel(sent.channel || messagePreviewChannel);
+      if (isMessageFailure(sent.status)) {
+        setError(`${messageDraft.title} 발송 결과: ${messageStatusLabel(sent.status)} (${channelLabel}) - ${messageProviderErrorText(sent)}`);
+      } else {
+        setNotice(`${messageDraft.successText} (${channelLabel})`);
+      }
       orderResource.reload();
     });
   };
@@ -259,10 +332,19 @@ export function OrderDetailPage({ orderId, onBack, onEdit, onNav }) {
               ) : (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                   {messageLogs.map((log) => (
-                    <div key={log.id} style={{ display: 'grid', gridTemplateColumns: '120px 1fr 70px', gap: 10, alignItems: 'center', fontSize: 12, padding: '8px 0', borderBottom: '1px solid var(--divider)' }}>
+                    <div key={log.id} style={{ display: 'grid', gridTemplateColumns: '120px 1fr 96px', gap: 10, alignItems: 'center', fontSize: 12, padding: '8px 0', borderBottom: '1px solid var(--divider)' }}>
                       <span className="mono" style={{ color: 'var(--text-tertiary)', fontSize: 10.5 }}>{formatDateTime(log.sent_at || log.created_at)}</span>
-                      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{messageTypeLabel(log.message_type)} · {log.recipient_name}</span>
-                      <Badge tone={log.status === 'sent' ? 'success' : 'danger'}>{messageStatusLabel(log.status)}</Badge>
+                      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {messageTypeLabel(log.message_type)} · {log.recipient_name} · {messageProviderLabel(log)}
+                      </span>
+                      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 3, minWidth: 0 }}>
+                        <Badge tone={messageStatusTone(log.status)}>{messageStatusLabel(log.status)}</Badge>
+                        {isMessageFailure(log.status) && (
+                          <span title={log.error_message || log.provider_error_code || ''} style={{ maxWidth: '100%', color: 'var(--danger-fg)', fontSize: 10, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            {messageProviderErrorText(log)}
+                          </span>
+                        )}
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -364,13 +446,13 @@ export function OrderDetailPage({ orderId, onBack, onEdit, onNav }) {
             <div className="card" style={{ padding: 14 }}>
               <PanelTitle>안내 발송</PanelTitle>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                <button data-testid="send-customer-schedule-confirmed" className="btn btn--secondary btn--block" disabled={isSaving} onClick={() => void handleSendCustomerScheduleConfirmed()}>
+                <button data-testid="send-customer-schedule-confirmed" className="btn btn--secondary btn--block" disabled={isSaving || isPreviewLoading} onClick={() => void openMessagePreview(MESSAGE_ACTIONS.customerScheduleConfirmed)}>
                   <Icon name="send" size={13}/> 일정확정 안내
                 </button>
-                <button data-testid="send-customer-day-before" className="btn btn--secondary btn--block" disabled={isSaving} onClick={() => void handleSendCustomerDayBefore()}>
+                <button data-testid="send-customer-day-before" className="btn btn--secondary btn--block" disabled={isSaving || isPreviewLoading} onClick={() => void openMessagePreview(MESSAGE_ACTIONS.customerDayBefore)}>
                   <Icon name="send" size={13}/> 전날 안내
                 </button>
-                <button data-testid="send-partner-assignment" className="btn btn--secondary btn--block" disabled={isSaving || !order.partner_id} onClick={() => void handleSendPartnerAssignment()}>
+                <button data-testid="send-partner-assignment" className="btn btn--secondary btn--block" disabled={isSaving || isPreviewLoading || !order.partner_id} onClick={() => void openMessagePreview(MESSAGE_ACTIONS.partnerAssignment)}>
                   <Icon name="truck" size={13}/> 협력사 배정 안내
                 </button>
               </div>
@@ -396,7 +478,7 @@ export function OrderDetailPage({ orderId, onBack, onEdit, onNav }) {
               <div className="mono" style={{ padding: '7px 9px', background: 'var(--bg-subtle)', border: '1px solid var(--border)', borderRadius: 6, fontSize: 10.5, color: 'var(--text-tertiary)', marginBottom: 8, overflow: 'hidden', textOverflow: 'ellipsis' }}>
                 /c/{order.customer_token}
               </div>
-              <button data-testid="send-customer-photo-ready" className="btn btn--secondary btn--block" disabled={isSaving} onClick={() => void handleSendCustomerPhotoReady()}>
+              <button data-testid="send-customer-photo-ready" className="btn btn--secondary btn--block" disabled={isSaving || isPreviewLoading} onClick={() => void openMessagePreview(MESSAGE_ACTIONS.customerPhotoReady)}>
                 <Icon name="send" size={13}/> 사진 링크 발송
               </button>
             </div>
@@ -433,6 +515,202 @@ export function OrderDetailPage({ orderId, onBack, onEdit, onNav }) {
               )}
             </div>
           </aside>
+        </div>
+      </div>
+      <MessagePreviewModal
+        draft={messageDraft}
+        channel={messagePreviewChannel}
+        preview={messagePreviewData}
+        previewError={messagePreviewError}
+        isLoading={isPreviewLoading}
+        isSaving={isSaving}
+        onChannelChange={handlePreviewChannelChange}
+        onClose={closeMessagePreview}
+        onConfirm={handleConfirmMessageSend}
+      />
+    </div>
+  );
+}
+
+function MessagePreviewModal({
+  draft,
+  channel,
+  preview,
+  previewError,
+  isLoading,
+  isSaving,
+  onChannelChange,
+  onClose,
+  onConfirm,
+}) {
+  if (!draft) {
+    return null;
+  }
+
+  const warnings = preview?.warnings || [];
+  const variables = preview?.kakao_variables ? Object.entries(preview.kakao_variables) : [];
+  const isAlimtalk = channel === 'alimtalk';
+  const canSend = Boolean(preview && preview.can_send !== false && !previewError && !isLoading && !isSaving);
+
+  return (
+    <div
+      data-testid="message-preview-modal"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="message-preview-title"
+      style={{
+        position: 'fixed',
+        inset: 0,
+        zIndex: 50,
+        background: 'rgba(15, 23, 42, 0.38)',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: 20,
+      }}
+    >
+      <div
+        className="card"
+        style={{
+          width: 'min(640px, 100%)',
+          maxHeight: 'min(760px, calc(100vh - 40px))',
+          overflow: 'hidden',
+          display: 'flex',
+          flexDirection: 'column',
+        }}
+      >
+        <div style={{ padding: '14px 16px', borderBottom: '1px solid var(--divider)', display: 'flex', alignItems: 'center', gap: 10 }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div id="message-preview-title" style={{ fontSize: 14, fontWeight: 700 }}>{draft.title}</div>
+            <div style={{ marginTop: 3, fontSize: 11.5, color: 'var(--text-tertiary)' }}>
+              {preview ? `${preview.recipient_name} · ${formatPhone(preview.recipient_phone)}` : '발송 정보를 확인하는 중입니다.'}
+            </div>
+          </div>
+          <button className="btn btn--ghost btn--sm" onClick={onClose} aria-label="닫기" style={{ padding: '0 6px' }}>
+            <Icon name="x" size={14}/>
+          </button>
+        </div>
+
+        <div className="scroll" style={{ padding: 16, overflow: 'auto', display: 'flex', flexDirection: 'column', gap: 14 }}>
+          <div>
+            <div style={{ fontSize: 11, color: 'var(--text-tertiary)', fontWeight: 600, marginBottom: 8 }}>발송 채널</div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
+              <button
+                data-testid="message-preview-channel-sms"
+                className={`btn ${channel === 'sms' ? 'btn--primary' : 'btn--secondary'}`}
+                disabled={isLoading || isSaving}
+                aria-pressed={channel === 'sms'}
+                onClick={() => void onChannelChange('sms')}
+              >
+                SMS
+              </button>
+              <button
+                data-testid="message-preview-channel-alimtalk"
+                className={`btn ${channel === 'alimtalk' ? 'btn--primary' : 'btn--secondary'}`}
+                disabled={isLoading || isSaving}
+                aria-pressed={channel === 'alimtalk'}
+                onClick={() => void onChannelChange('alimtalk')}
+              >
+                알림톡
+              </button>
+            </div>
+          </div>
+
+          {previewError && (
+            <div
+              data-testid="message-preview-error"
+              style={{ padding: 10, borderRadius: 6, background: 'var(--danger-bg)', color: 'var(--danger-fg)', fontSize: 12 }}
+            >
+              {previewError}
+            </div>
+          )}
+
+          {isLoading ? (
+            <div style={{ padding: 12, border: '1px solid var(--border)', borderRadius: 8, color: 'var(--text-tertiary)', fontSize: 12 }}>
+              미리보기를 불러오는 중입니다.
+            </div>
+          ) : (
+            preview && (
+              <>
+                {isAlimtalk && (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                    <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                      <Badge tone={preview.kakao_pf_id_configured ? 'success' : 'warn'}>
+                        PF ID {preview.kakao_pf_id_configured ? '설정됨' : '미설정'}
+                      </Badge>
+                      <Badge tone={preview.kakao_template_configured ? 'success' : 'warn'}>
+                        템플릿 {preview.kakao_template_configured ? '설정됨' : '미설정'}
+                      </Badge>
+                      <Badge tone={preview.fallback_sms_enabled ? 'info' : 'neutral'}>
+                        SMS fallback {preview.fallback_sms_enabled ? 'ON' : 'OFF'}
+                      </Badge>
+                    </div>
+                    <div style={{ display: 'grid', gridTemplateColumns: '120px 1fr', gap: 8, fontSize: 12 }}>
+                      <span style={{ color: 'var(--text-tertiary)' }}>템플릿 ID</span>
+                      <span data-testid="message-preview-template-id" className="mono" style={{ color: 'var(--text)' }}>
+                        {preview.kakao_template_id || '미설정'}
+                      </span>
+                    </div>
+                    {variables.length > 0 && (
+                      <div style={{ border: '1px solid var(--border)', borderRadius: 8, overflow: 'hidden' }}>
+                        {variables.map(([key, value]) => (
+                          <div key={key} style={{ display: 'grid', gridTemplateColumns: '150px 1fr', gap: 8, padding: '8px 10px', borderBottom: '1px solid var(--divider)', fontSize: 11.5 }}>
+                            <span className="mono" style={{ color: 'var(--text-tertiary)', minWidth: 0 }}>{key}</span>
+                            <span style={{ minWidth: 0, wordBreak: 'break-word' }}>{String(value)}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {warnings.length > 0 && (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    {warnings.map((warning) => (
+                      <div
+                        key={warning}
+                        data-testid="message-preview-warning"
+                        style={{ padding: 10, borderRadius: 6, background: 'var(--warn-bg)', color: 'var(--warn-fg)', fontSize: 12 }}
+                      >
+                        {messagePreviewWarningLabel(warning)}
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                <div>
+                  <div style={{ fontSize: 11, color: 'var(--text-tertiary)', fontWeight: 600, marginBottom: 8 }}>
+                    {isAlimtalk ? 'SMS fallback 문구' : '발송 문구'}
+                  </div>
+                  <pre
+                    data-testid="message-preview-content"
+                    style={{
+                      margin: 0,
+                      padding: 12,
+                      border: '1px solid var(--border)',
+                      borderRadius: 8,
+                      background: 'var(--bg-subtle)',
+                      color: 'var(--text)',
+                      fontFamily: 'var(--font-mono)',
+                      fontSize: 11.5,
+                      lineHeight: 1.55,
+                      whiteSpace: 'pre-wrap',
+                      wordBreak: 'break-word',
+                    }}
+                  >
+                    {isAlimtalk ? preview.fallback_sms_content || preview.content : preview.content}
+                  </pre>
+                </div>
+              </>
+            )
+          )}
+        </div>
+
+        <div style={{ padding: 14, borderTop: '1px solid var(--divider)', display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+          <button className="btn btn--ghost" onClick={onClose} disabled={isSaving}>취소</button>
+          <button data-testid="message-preview-send" className="btn btn--primary" onClick={() => void onConfirm()} disabled={!canSend}>
+            <Icon name="send" size={13}/> 발송
+          </button>
         </div>
       </div>
     </div>
@@ -513,23 +791,8 @@ function formatWon(value) {
   return amount ? `₩${amount.toLocaleString()}` : '-';
 }
 
-function formatPhone(value) {
-  if (!value) {
-    return '-';
-  }
-  const digits = value.replace(/\D/g, '');
-  if (digits.length === 11) {
-    return `${digits.slice(0, 3)}-${digits.slice(3, 7)}-${digits.slice(7)}`;
-  }
-  return value;
-}
-
 function formatDateTime(value) {
-  if (!value) {
-    return '-';
-  }
-  const date = new Date(value);
-  return `${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')} ${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
+  return formatAppDateTime(value);
 }
 
 function photoTypeLabel(type) {
@@ -547,9 +810,65 @@ function messageTypeLabel(type) {
 }
 
 function messageStatusLabel(status) {
-  if (status === 'sent') return '성공';
-  if (status === 'failed') return '실패';
+  if (status === 'sent') return '요청성공';
+  if (status === 'failed') return '요청실패';
+  if (status === 'delivered') return '배송완료';
+  if (status === 'delivery_failed') return '배송실패';
   return status || '-';
+}
+
+function messageStatusTone(status) {
+  if (status === 'delivered') return 'success';
+  if (status === 'sent') return 'info';
+  if (isMessageFailure(status)) return 'danger';
+  return 'neutral';
+}
+
+function isMessageFailure(status) {
+  return status === 'failed' || status === 'delivery_failed';
+}
+
+function messageProviderLabel(log) {
+  if (log.provider === 'mock') return 'Mock';
+  if (log.provider === 'solapi') {
+    return log.provider_group_id || log.provider_message_id
+      ? `SOL API ${log.provider_group_id || log.provider_message_id}`
+      : 'SOL API';
+  }
+  if (log.provider === 'configuration_error') return 'Config';
+  return log.provider || 'Provider 미기록';
+}
+
+function messageProviderErrorText(log) {
+  const map = {
+    missing_recipient: '수신번호 없음',
+    solapi_missing_credentials: 'SOL API 인증 설정 누락',
+    solapi_missing_sender_number: 'SOL API 발신번호 누락',
+    solapi_missing_kakao_pf_id: 'SOL API 카카오 채널 ID 누락',
+    solapi_missing_kakao_template_id: '알림톡 승인 템플릿 ID 누락',
+    solapi_http_error: 'SOL API HTTP 오류',
+    solapi_request_failed: 'SOL API 요청 실패',
+    solapi_invalid_response: 'SOL API 응답 오류',
+    solapi_provider_failed: 'SOL API 발송 실패',
+    unsupported_message_provider: 'Provider 설정 오류',
+  };
+  return map[log.provider_error_code] || log.provider_status_message || log.error_message || '실패 사유 미상';
+}
+
+function messageChannelLabel(channel) {
+  if (channel === 'sms') return 'SMS';
+  if (channel === 'lms') return 'LMS';
+  if (channel === 'alimtalk') return '알림톡';
+  return channel || '-';
+}
+
+function messagePreviewWarningLabel(warning) {
+  const map = {
+    solapi_missing_kakao_pf_id: 'SOL API 카카오 채널 ID가 아직 설정되지 않았습니다.',
+    solapi_missing_kakao_template_id: '이 메시지 타입의 승인 템플릿 ID가 아직 설정되지 않았습니다.',
+    alimtalk_fallback_sms_enabled: '알림톡 설정이 준비되지 않으면 같은 문구를 SMS로 fallback 발송합니다.',
+  };
+  return map[warning] || warning;
 }
 
 function timelineEventLabel(type) {

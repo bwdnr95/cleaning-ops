@@ -7,6 +7,15 @@ import { sendAdminMessage } from '../../../api/messages';
 import { useApiResource } from '../../../api/useApiResource';
 import { ORDER_STATUSES } from '../../../domain/orderStatus';
 import { isPaymentCheckNeeded } from '../../../domain/paymentStatus';
+import { formatPhone } from '../../../domain/phone';
+import {
+  addDays,
+  formatDateValue,
+  getAppTodayDate,
+  isRelativeAppDateValue,
+  parseDateValue,
+  startOfWeek,
+} from '../../../domain/time';
 
 // Orders list v3 — modern Linear/Attio style: airy, typographic, low-chrome
 
@@ -93,6 +102,7 @@ function SimplePill({ kind, value }) {
 
 const TODAY_JOB_STATUSES = ['작업예정', '작업진행', '사진검수대기'];
 const TOMORROW_NOTICE_STATUSES = ['일정확정', '전날안내필요'];
+const REVENUE_RECOGNIZED_STATUSES = ['고객전달완료', '서비스완료'];
 const BULK_MESSAGE_OPTIONS = [
   { value: 'customer_schedule_confirmed', label: '고객 일정확정 안내', recipient: 'customer' },
   { value: 'customer_day_before', label: '고객 전날 안내', recipient: 'customer' },
@@ -100,7 +110,7 @@ const BULK_MESSAGE_OPTIONS = [
   { value: 'customer_photo_ready', label: '고객 사진 확인 안내', recipient: 'customer' },
 ];
 
-export function OrdersPage({ onOpenOrder, onCreateOrder, onEditOrder, initialTab = 'all' }) {
+export function OrdersPage({ onOpenOrder, onCreateOrder, onEditOrder, initialTab = 'all', initialDatePreset = undefined }) {
   const ordersResource = useApiResource(listAdminOrders);
   const partnersResource = useApiResource(listPartners);
   const orders = ordersResource.data ? ordersResource.data.map(toOrderRow) : ORDERS;
@@ -109,7 +119,7 @@ export function OrdersPage({ onOpenOrder, onCreateOrder, onEditOrder, initialTab
   const [hoverRow, setHoverRow] = React.useState(null);
   const [sortBy, setSortBy] = React.useState('visit');
   const [query, setQuery] = React.useState('');
-  const [dateFilter, setDateFilter] = React.useState(() => createInitialDateFilter(initialTab));
+  const [dateFilter, setDateFilter] = React.useState(() => createInitialDateFilter(initialTab, initialDatePreset));
   const [actionError, setActionError] = React.useState('');
   const [actionNotice, setActionNotice] = React.useState(null);
   const [isSavingAction, setIsSavingAction] = React.useState(false);
@@ -123,8 +133,8 @@ export function OrdersPage({ onOpenOrder, onCreateOrder, onEditOrder, initialTab
 
   React.useEffect(() => {
     setTab(initialTab);
-    setDateFilter(createInitialDateFilter(initialTab));
-  }, [initialTab]);
+    setDateFilter(createInitialDateFilter(initialTab, initialDatePreset));
+  }, [initialDatePreset, initialTab]);
 
   const toggleRow = (id) => {
     const next = new Set(selected);
@@ -219,10 +229,13 @@ export function OrdersPage({ onOpenOrder, onCreateOrder, onEditOrder, initialTab
         if (tab === 'today') return isTodayDate(o.scheduledDate) && TODAY_JOB_STATUSES.includes(o.status);
         if (tab === 'tomorrow_notice') return isTomorrowDate(o.scheduledDate) && TOMORROW_NOTICE_STATUSES.includes(o.status);
         if (tab === 'partner_pending') return o.status === '협력사확인중';
+        if (tab === 'photo_review') return o.status === '사진검수대기';
         if (tab === 'pending') return ['신규접수', '상담중', '협력사확인중'].includes(o.status);
         if (tab === 'work') return ['일정확정', '전날안내필요', '전날안내완료', '작업예정', '작업진행', '사진검수대기'].includes(o.status);
         if (tab === 'deliver') return ['고객전달필요'].includes(o.status);
         if (tab === 'payment_check') return isPaymentCheckNeeded(o.paymentStatus);
+        if (tab === 'monthly_done') return o.status === '서비스완료';
+        if (tab === 'monthly_revenue') return REVENUE_RECOGNIZED_STATUSES.includes(o.status);
         if (tab === 'done') return ['고객전달완료', '서비스완료'].includes(o.status);
         if (tab === 'cancel') return o.status === '취소';
         return true;
@@ -321,6 +334,7 @@ export function OrdersPage({ onOpenOrder, onCreateOrder, onEditOrder, initialTab
             ['today', '오늘'],
             ['tomorrow', '내일'],
             ['week', '이번주'],
+            ['month', '이번달'],
           ].map(([key, label]) => (
             <button
               key={key}
@@ -701,10 +715,13 @@ function getStatusTabs(orders) {
     { key: 'today', label: '오늘 작업', count: orders.filter((o) => isTodayDate(o.scheduledDate) && TODAY_JOB_STATUSES.includes(o.status)).length },
     { key: 'tomorrow_notice', label: '내일 안내', count: orders.filter((o) => isTomorrowDate(o.scheduledDate) && TOMORROW_NOTICE_STATUSES.includes(o.status)).length },
     { key: 'partner_pending', label: '협력사 확인', count: orders.filter((o) => o.status === '협력사확인중').length },
+    { key: 'photo_review', label: '사진 검수', count: orders.filter((o) => o.status === '사진검수대기').length },
     { key: 'pending', label: '확인 대기', count: orders.filter((o) => ['신규접수', '상담중', '협력사확인중'].includes(o.status)).length },
     { key: 'work', label: '작업/검수', count: orders.filter((o) => ['일정확정', '전날안내필요', '전날안내완료', '작업예정', '작업진행', '사진검수대기'].includes(o.status)).length },
     { key: 'deliver', label: '고객 전달', count: orders.filter((o) => ['고객전달필요'].includes(o.status)).length },
     { key: 'payment_check', label: '결제 확인', count: orders.filter((o) => isPaymentCheckNeeded(o.paymentStatus)).length },
+    { key: 'monthly_done', label: '이번달 완료', count: orders.filter((o) => o.status === '서비스완료' && isCurrentMonthDate(o.scheduledDate)).length },
+    { key: 'monthly_revenue', label: '이번달 계약', count: orders.filter((o) => REVENUE_RECOGNIZED_STATUSES.includes(o.status) && isCurrentMonthDate(o.scheduledDate)).length },
     { key: 'done', label: '완료', count: orders.filter((o) => ['고객전달완료', '서비스완료'].includes(o.status)).length },
     { key: 'cancel', label: '취소', count: orders.filter((o) => o.status === '취소').length },
   ];
@@ -783,7 +800,7 @@ function toOrderRow(order) {
     product: order.size_or_quantity ? `${order.service_name} (${order.size_or_quantity})` : order.service_name,
     address: order.customer_address,
     customer: order.customer_name,
-    phone: maskPhone(order.customer_phone),
+    phone: formatPhone(order.customer_phone),
     amount: Number(order.total_amount || 0),
     paymentStatus: order.payment_status,
     paid: toPaidState(order.payment_status),
@@ -793,31 +810,46 @@ function toOrderRow(order) {
 }
 
 function createDateFilter(preset) {
-  const today = new Date();
+  const today = getAppTodayDate();
   if (preset === 'today') {
-    const value = toDateString(today);
+    const value = formatDateValue(today);
     return { preset, start: value, end: value };
   }
   if (preset === 'tomorrow') {
-    const value = toDateString(addDays(today, 1));
+    const value = formatDateValue(addDays(today, 1));
     return { preset, start: value, end: value };
   }
   if (preset === 'week') {
     return {
       preset,
-      start: toDateString(startOfWeek(today)),
-      end: toDateString(addDays(startOfWeek(today), 6)),
+      start: formatDateValue(startOfWeek(today)),
+      end: formatDateValue(addDays(startOfWeek(today), 6)),
+    };
+  }
+  if (preset === 'month') {
+    const firstDay = new Date(today.getFullYear(), today.getMonth(), 1);
+    const lastDay = new Date(today.getFullYear(), today.getMonth() + 1, 0);
+    return {
+      preset,
+      start: formatDateValue(firstDay),
+      end: formatDateValue(lastDay),
     };
   }
   return { preset: 'all', start: '', end: '' };
 }
 
-function createInitialDateFilter(initialTab) {
+function createInitialDateFilter(initialTab, initialDatePreset) {
+  if (initialDatePreset) {
+    return createDateFilter(initialDatePreset);
+  }
   if (initialTab === 'tomorrow_notice') {
     return createDateFilter('tomorrow');
   }
-  if (initialTab === 'payment_check') {
+  if (['payment_check', 'photo_review', 'deliver', 'partner_pending'].includes(initialTab)) {
     return createDateFilter('all');
+  }
+  if (['monthly_done', 'monthly_revenue'].includes(initialTab)) {
+    return createDateFilter('month');
   }
   return createDateFilter('today');
 }
@@ -847,39 +879,21 @@ function formatDateFilterSummary(dateFilter) {
   return `${formatFullDate(end)} 이전`;
 }
 
-function toDateString(date) {
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
-}
-
-function addDays(date, days) {
-  return new Date(date.getFullYear(), date.getMonth(), date.getDate() + days);
-}
-
-function startOfWeek(date) {
-  const day = date.getDay();
-  const mondayOffset = day === 0 ? -6 : 1 - day;
-  return addDays(date, mondayOffset);
-}
-
 function isTodayDate(value) {
-  return isRelativeDate(value, 0);
+  return isRelativeAppDateValue(value, 0);
 }
 
 function isTomorrowDate(value) {
-  return isRelativeDate(value, 1);
+  return isRelativeAppDateValue(value, 1);
 }
 
-function isRelativeDate(value, offsetDays) {
-  if (!value) {
+function isCurrentMonthDate(value) {
+  const date = parseDateValue(value);
+  if (!date) {
     return false;
   }
-  const target = new Date();
-  target.setHours(0, 0, 0, 0);
-  target.setDate(target.getDate() + offsetDays);
-  const date = new Date(`${value}T00:00:00`);
-  return date.getFullYear() === target.getFullYear()
-    && date.getMonth() === target.getMonth()
-    && date.getDate() === target.getDate();
+  const today = getAppTodayDate();
+  return date.getFullYear() === today.getFullYear() && date.getMonth() === today.getMonth();
 }
 
 function formatDate(value) {
@@ -887,7 +901,10 @@ function formatDate(value) {
     return '';
   }
 
-  const date = new Date(`${value}T00:00:00`);
+  const date = parseDateValue(value);
+  if (!date) {
+    return value;
+  }
   return `${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
 }
 
@@ -898,17 +915,6 @@ function formatFullDate(value) {
 
   const [year, month, day] = value.split('-');
   return `${year}.${month}.${day}`;
-}
-
-function maskPhone(phone) {
-  if (!phone) {
-    return '';
-  }
-  const digits = phone.replace(/\D/g, '');
-  if (digits.length < 8) {
-    return phone;
-  }
-  return `${digits.slice(0, 3)}-${digits.slice(3, 4)}***-${digits.slice(-4)}`;
 }
 
 function toPaidState(status) {

@@ -1,7 +1,10 @@
 import { Badge, Icon, Sparkline, StatusBadge } from '../../../components/common/ui';
 import { KPI, QUEUES, RECENT_PHOTOS, RECENT_SENDS, TODAY_JOBS, TOMORROW_JOBS } from '../../../mocks/cleaningOpsData';
 import { getDashboardRecentActivity, getDashboardSummary, listAdminOrders } from '../../../api/admin';
+import { toApiAssetUrl } from '../../../api/client';
 import { useApiResource } from '../../../api/useApiResource';
+import { formatPhone } from '../../../domain/phone';
+import { addDays, formatAppTime, getAppNowDate, getAppTodayDate, isSameDateValue } from '../../../domain/time';
 
 // Admin Dashboard — KPI grid + work queues + today/tomorrow + recent
 
@@ -24,7 +27,7 @@ export function Dashboard({ onOpenOrder, onNav, onCreateOrder }) {
         {/* Greeting */}
         <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', marginBottom: 14 }}>
           <div>
-            <div style={{ fontSize: 11.5, color: 'var(--text-tertiary)', marginBottom: 2 }}>{formatDashboardDate(new Date())}</div>
+            <div style={{ fontSize: 11.5, color: 'var(--text-tertiary)', marginBottom: 2 }}>{formatDashboardDate(getAppNowDate())}</div>
             <h2 style={{ margin: 0, fontSize: 18, fontWeight: 600, letterSpacing: '-0.02em' }}>
               안녕하세요 전소영님 <span style={{ color: 'var(--text-tertiary)', fontWeight: 400 }}>— 지금 처리할 일 {summary.isLoading ? '-' : workCount}건이 있습니다</span>
             </h2>
@@ -51,7 +54,10 @@ export function Dashboard({ onOpenOrder, onNav, onCreateOrder }) {
               data-testid={`dashboard-kpi-${k.key || i}`}
               type="button"
               className="card"
-              onClick={() => onNav && onNav(k.targetPage || 'orders', { ordersTab: k.ordersTab || 'all' })}
+              onClick={() => onNav && onNav(k.targetPage || 'orders', {
+                ordersTab: k.ordersTab || 'all',
+                datePreset: k.datePreset,
+              })}
               style={{
                 padding: 12,
                 position: 'relative',
@@ -95,7 +101,10 @@ export function Dashboard({ onOpenOrder, onNav, onCreateOrder }) {
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: 10 }}>
             {queues.map((q) => (
-              <button key={q.key} onClick={() => onNav && onNav(q.targetPage || 'orders', { ordersTab: q.ordersTab || 'all' })}
+              <button key={q.key} onClick={() => onNav && onNav(q.targetPage || 'orders', {
+                ordersTab: q.ordersTab || 'all',
+                datePreset: q.datePreset,
+              })}
                 className="card"
                 style={{
                   padding: 12, textAlign: 'left', cursor: 'pointer',
@@ -138,7 +147,7 @@ export function Dashboard({ onOpenOrder, onNav, onCreateOrder }) {
               subtitle={`오늘 · ${summary.isLoading ? '-' : todayJobs.length}건`}
               jobs={todayJobs}
               onOpen={onOpenOrder}
-              onCalendar={() => onNav && onNav('calendar')}
+              onQueue={() => onNav && onNav('orders', { ordersTab: 'today', datePreset: 'today' })}
               accent="info"
               isLoading={orders.isLoading}
               error={orders.error}
@@ -149,7 +158,7 @@ export function Dashboard({ onOpenOrder, onNav, onCreateOrder }) {
               subtitle={`내일 · ${summary.isLoading ? '-' : tomorrowJobs.length}건`}
               jobs={tomorrowJobs}
               onOpen={onOpenOrder}
-              onCalendar={() => onNav && onNav('calendar')}
+              onQueue={() => onNav && onNav('orders', { ordersTab: 'tomorrow_notice', datePreset: 'tomorrow' })}
               accent="warn"
               muted
               isLoading={orders.isLoading}
@@ -183,7 +192,7 @@ export function Dashboard({ onOpenOrder, onNav, onCreateOrder }) {
                     cursor: 'pointer',
                   }}>
                     {p.fileUrl ? (
-                      <img src={p.fileUrl} alt={p.label} style={{ width: 36, height: 36, borderRadius: 6, objectFit: 'cover', flexShrink: 0, background: 'var(--bg-muted)' }} />
+                      <img data-testid={`dashboard-recent-photo-thumb-${p.photoId || i}`} src={p.fileUrl} alt={p.label} style={{ width: 36, height: 36, borderRadius: 6, objectFit: 'cover', flexShrink: 0, background: 'var(--bg-muted)' }} />
                     ) : (
                       <div className="placeholder-img" style={{ width: 36, height: 36, fontSize: 9, flexShrink: 0 }}>IMG</div>
                     )}
@@ -230,6 +239,7 @@ export function Dashboard({ onOpenOrder, onNav, onCreateOrder }) {
                     <span style={{ minWidth: 64, fontSize: 11, color: 'var(--text-secondary)' }}>{s.kind}</span>
                     <span style={{ flex: 1, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis' }}>{s.target}</span>
                     <span style={{ fontSize: 10.5, color: 'var(--text-tertiary)' }}>{s.via}</span>
+                    {s.state === 'sent' && <Badge tone="info">요청</Badge>}
                     {s.state === 'delivered' && <Badge tone="success">전송</Badge>}
                     {s.state === 'read' && <Badge tone="info">읽음</Badge>}
                     {s.state === 'failed' && <Badge tone="danger">실패</Badge>}
@@ -244,7 +254,7 @@ export function Dashboard({ onOpenOrder, onNav, onCreateOrder }) {
   );
 }
 
-function DashList({ title, subtitle, jobs, onOpen, onCalendar, accent, muted = false, isLoading = false, error = null }) {
+function DashList({ title, subtitle, jobs, onOpen, onQueue, accent, muted = false, isLoading = false, error = null }) {
   return (
     <div>
       <div style={{ padding: '10px 14px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid var(--divider)' }}>
@@ -253,7 +263,7 @@ function DashList({ title, subtitle, jobs, onOpen, onCalendar, accent, muted = f
           <span style={{ fontSize: 12.5, fontWeight: 600 }}>{title}</span>
           <span style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>{subtitle}</span>
         </div>
-        <button className="btn btn--ghost btn--sm" style={{ height: 22, padding: '0 6px', fontSize: 11 }} onClick={onCalendar}>일정표</button>
+        <button className="btn btn--ghost btn--sm" style={{ height: 22, padding: '0 6px', fontSize: 11 }} onClick={onQueue}>큐 보기</button>
       </div>
       <div>
         {isLoading && <DashMessage text="작업을 불러오는 중입니다." />}
@@ -313,13 +323,13 @@ function toKpis(summary) {
 }
 
 const KPI_NAVIGATION = [
-  { key: 'today_jobs', targetPage: 'orders', ordersTab: 'today' },
-  { key: 'tomorrow_notice', targetPage: 'orders', ordersTab: 'tomorrow_notice' },
-  { key: 'photo_review', targetPage: 'photos', ordersTab: null },
-  { key: 'customer_delivery', targetPage: 'photos', ordersTab: null },
-  { key: 'payment_check', targetPage: 'orders', ordersTab: 'payment_check' },
-  { key: 'monthly_done', targetPage: 'orders', ordersTab: 'done' },
-  { key: 'monthly_revenue', targetPage: 'orders', ordersTab: 'all' },
+  { key: 'today_jobs', targetPage: 'orders', ordersTab: 'today', datePreset: 'today' },
+  { key: 'tomorrow_notice', targetPage: 'orders', ordersTab: 'tomorrow_notice', datePreset: 'tomorrow' },
+  { key: 'photo_review', targetPage: 'orders', ordersTab: 'photo_review', datePreset: 'all' },
+  { key: 'customer_delivery', targetPage: 'orders', ordersTab: 'deliver', datePreset: 'all' },
+  { key: 'payment_check', targetPage: 'orders', ordersTab: 'payment_check', datePreset: 'all' },
+  { key: 'monthly_done', targetPage: 'orders', ordersTab: 'monthly_done', datePreset: 'month' },
+  { key: 'monthly_revenue', targetPage: 'orders', ordersTab: 'monthly_revenue', datePreset: 'month' },
 ];
 
 function withKpiNavigation(items) {
@@ -331,24 +341,21 @@ function withKpiNavigation(items) {
 
 function toQueues(summary) {
   return [
-    { key: 'partner_pending', title: '협력사 확인 필요', count: summary.partner_pending, tone: 'warn', icon: 'clock', desc: '배정 후 확인 대기', targetPage: 'orders', ordersTab: 'partner_pending' },
-    { key: 'tomorrow_notify', title: '내일 안내 발송 필요', count: summary.tomorrow_notice_targets, tone: 'warn', icon: 'send', desc: '내일 작업 예정', targetPage: 'orders', ordersTab: 'tomorrow_notice' },
-    { key: 'today_work', title: '오늘 작업 예정', count: summary.today_jobs, tone: 'info', icon: 'truck', desc: '진행/예정 작업', targetPage: 'orders', ordersTab: 'today' },
-    { key: 'photo_review', title: '사진 검수 대기', count: summary.photo_review_pending, tone: 'purple', icon: 'image', desc: '관리자 승인 필요', targetPage: 'photos' },
-    { key: 'customer_deliver', title: '고객 전달 필요', count: summary.customer_delivery_needed, tone: 'warn', icon: 'sparkles', desc: '검수 완료 후 전달', targetPage: 'photos' },
-    { key: 'payment_check', title: '결제 확인 필요', count: summary.payment_check_needed, tone: 'danger', icon: 'creditCard', desc: '잔금/미수 확인', targetPage: 'orders', ordersTab: 'payment_check' },
+    { key: 'partner_pending', title: '협력사 확인 필요', count: summary.partner_pending, tone: 'warn', icon: 'clock', desc: '배정 후 확인 대기', targetPage: 'orders', ordersTab: 'partner_pending', datePreset: 'all' },
+    { key: 'tomorrow_notify', title: '내일 안내 발송 필요', count: summary.tomorrow_notice_targets, tone: 'warn', icon: 'send', desc: '내일 작업 예정', targetPage: 'orders', ordersTab: 'tomorrow_notice', datePreset: 'tomorrow' },
+    { key: 'today_work', title: '오늘 작업 예정', count: summary.today_jobs, tone: 'info', icon: 'truck', desc: '진행/예정 작업', targetPage: 'orders', ordersTab: 'today', datePreset: 'today' },
+    { key: 'photo_review', title: '사진 검수 대기', count: summary.photo_review_pending, tone: 'purple', icon: 'image', desc: '관리자 승인 필요', targetPage: 'orders', ordersTab: 'photo_review', datePreset: 'all' },
+    { key: 'customer_deliver', title: '고객 전달 필요', count: summary.customer_delivery_needed, tone: 'warn', icon: 'sparkles', desc: '검수 완료 후 전달', targetPage: 'orders', ordersTab: 'deliver', datePreset: 'all' },
+    { key: 'payment_check', title: '결제 확인 필요', count: summary.payment_check_needed, tone: 'danger', icon: 'creditCard', desc: '잔금/미수 확인', targetPage: 'orders', ordersTab: 'payment_check', datePreset: 'all' },
   ];
 }
 
 function toDashJobs(orders, target) {
-  const today = startOfLocalDay(new Date());
-  const wanted = new Date(today);
-  if (target === 'tomorrow') {
-    wanted.setDate(wanted.getDate() + 1);
-  }
+  const today = getAppTodayDate();
+  const wanted = target === 'tomorrow' ? addDays(today, 1) : today;
 
   return orders
-    .filter((order) => isSameDate(order.scheduled_date, wanted))
+    .filter((order) => isSameDateValue(order.scheduled_date, wanted))
     .filter((order) => (
       target === 'tomorrow'
         ? ['일정확정', '전날안내필요'].includes(order.status)
@@ -373,7 +380,7 @@ function toRecentPhotos(photos) {
     count: `${photoTypeLabel(photo.photo_type)} · ${photo.customer_name}${photo.team_name ? ` · ${photo.team_name}` : ''}`,
     time: formatRelativeTime(photo.uploaded_at),
     tone: photo.is_customer_visible ? 'approved' : 'wait',
-    fileUrl: photo.file_url,
+    fileUrl: toApiAssetUrl(photo.file_url),
   }));
 }
 
@@ -381,26 +388,16 @@ function toRecentSends(messages) {
   return messages.map((message) => ({
     id: message.id,
     orderId: message.order_id,
-    time: formatShortTime(message.sent_at || message.created_at),
+    time: formatAppTime(message.sent_at || message.created_at),
     kind: messageTypeLabel(message.message_type),
-    target: `${message.recipient_name} ${maskPhone(message.recipient_phone)}`,
+    target: `${message.recipient_name} ${formatPhone(message.recipient_phone)}`,
     via: String(message.channel || '').toUpperCase(),
-    state: message.status === 'failed' ? 'failed' : 'delivered',
+    state: message.status === 'delivered'
+      ? 'delivered'
+      : ['failed', 'delivery_failed'].includes(message.status)
+        ? 'failed'
+        : 'sent',
   }));
-}
-
-function isSameDate(value, target) {
-  if (!value) {
-    return false;
-  }
-  const date = new Date(`${value}T00:00:00`);
-  return date.getFullYear() === target.getFullYear()
-    && date.getMonth() === target.getMonth()
-    && date.getDate() === target.getDate();
-}
-
-function startOfLocalDay(value) {
-  return new Date(value.getFullYear(), value.getMonth(), value.getDate());
 }
 
 function formatWon(value) {
@@ -423,14 +420,6 @@ function messageTypeLabel(type) {
   return labels[type] || type;
 }
 
-function formatShortTime(value) {
-  if (!value) {
-    return '-';
-  }
-  const date = new Date(value);
-  return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
-}
-
 function formatRelativeTime(value) {
   if (!value) {
     return '-';
@@ -444,18 +433,8 @@ function formatRelativeTime(value) {
   return `${Math.floor(hours / 24)}일 전`;
 }
 
-function maskPhone(phone) {
-  if (!phone) {
-    return '';
-  }
-  const digits = phone.replace(/\D/g, '');
-  if (digits.length < 8) {
-    return phone;
-  }
-  return `${digits.slice(0, 3)}-${digits.slice(3, 4)}***-${digits.slice(-4)}`;
-}
-
 function formatDashboardDate(value) {
   const weekdays = ['일요일', '월요일', '화요일', '수요일', '목요일', '금요일', '토요일'];
-  return `${value.getFullYear()}년 ${value.getMonth() + 1}월 ${value.getDate()}일 ${weekdays[value.getDay()]} · ${formatShortTime(value.toISOString())}`;
+  const time = `${String(value.getHours()).padStart(2, '0')}:${String(value.getMinutes()).padStart(2, '0')}`;
+  return `${value.getFullYear()}년 ${value.getMonth() + 1}월 ${value.getDate()}일 ${weekdays[value.getDay()]} · ${time}`;
 }

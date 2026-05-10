@@ -19,9 +19,20 @@ from app.schemas.order import (
     OrderUpdate,
     PartnerJobRead,
 )
-from app.schemas.photo import PhotoRead
+from app.schemas.photo import PartnerPhotoRead, PhotoRead
 from app.services.service_catalog import ServiceCatalogService
 from app.services.timeline import TimelineService
+
+PARTNER_JOB_STARTABLE_STATUSES = {
+    OrderStatus.SCHEDULE_CONFIRMED.value,
+    OrderStatus.DAY_BEFORE_NOTICE_NEEDED.value,
+    OrderStatus.DAY_BEFORE_NOTICE_DONE.value,
+    OrderStatus.SCHEDULED.value,
+}
+
+PARTNER_JOB_COMPLETABLE_STATUSES = {
+    OrderStatus.IN_PROGRESS.value,
+}
 
 
 class OrderService:
@@ -144,6 +155,9 @@ class OrderService:
         partner_id: str,
     ) -> Order:
         order = self.get_for_partner(order_id, partner_id=partner_id)
+        if order.status not in PARTNER_JOB_STARTABLE_STATUSES:
+            raise ValueError("invalid_status_transition")
+
         self._change_status(
             order,
             OrderStatus.IN_PROGRESS,
@@ -162,6 +176,9 @@ class OrderService:
         partner_id: str,
     ) -> Order:
         order = self.get_for_partner(order_id, partner_id=partner_id)
+        if order.status not in PARTNER_JOB_COMPLETABLE_STATUSES:
+            raise ValueError("invalid_status_transition")
+
         self._change_status(
             order,
             OrderStatus.PHOTO_REVIEW_PENDING,
@@ -263,7 +280,7 @@ def to_admin_photo_dto(photo: OrderPhoto) -> PhotoRead:
     )
 
 
-def to_partner_job_dto(order: Order) -> PartnerJobRead:
+def to_partner_job_dto(order: Order, *, photos: list[OrderPhoto] | None = None) -> PartnerJobRead:
     return PartnerJobRead(
         id=order.id,
         status=order.status,
@@ -276,6 +293,20 @@ def to_partner_job_dto(order: Order) -> PartnerJobRead:
         customer_name=order.customer_name,
         customer_phone=order.customer_phone,
         customer_address=order.customer_address,
+        photos=[to_partner_photo_dto(photo) for photo in photos or []],
+    )
+
+
+def to_partner_photo_dto(photo: OrderPhoto) -> PartnerPhotoRead:
+    return PartnerPhotoRead(
+        id=photo.id,
+        order_id=photo.order_id,
+        photo_type=photo.photo_type,
+        file_url=photo.file_url,
+        file_name=photo.file_name,
+        file_size=photo.file_size,
+        content_type=photo.content_type,
+        is_customer_visible=photo.is_customer_visible,
     )
 
 
@@ -290,6 +321,7 @@ def to_customer_order_dto(order: Order, *, photos: list[OrderPhoto] | None = Non
         service_detail=order.service_detail,
         special_request=order.special_request,
         customer_name=order.customer_name,
+        customer_phone=order.customer_phone,
         customer_address=order.customer_address,
         total_amount=order.total_amount if order.customer_visible_payment else None,
         deposit_amount=order.deposit_amount if order.customer_visible_payment else None,

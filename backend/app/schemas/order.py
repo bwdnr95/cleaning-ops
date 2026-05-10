@@ -5,7 +5,7 @@ from pydantic import Field
 from app.domain.constants import OrderStatus, PhotoType
 from app.schemas.common import ApiModel, TimelineEventRead
 from app.schemas.message import MessageLogRead
-from app.schemas.photo import PhotoRead
+from app.schemas.photo import PartnerPhotoRead, PhotoRead
 
 
 class OrderBase(ApiModel):
@@ -110,6 +110,7 @@ class PartnerJobRead(ApiModel):
     customer_name: str
     customer_phone: str
     customer_address: str
+    photos: list[PartnerPhotoRead] = Field(default_factory=list)
 
 
 class CustomerPhotoRead(ApiModel):
@@ -129,6 +130,7 @@ class CustomerOrderRead(ApiModel):
     service_detail: str | None = None
     special_request: str | None = None
     customer_name: str
+    customer_phone: str
     customer_address: str
     total_amount: float | None = None
     deposit_amount: float | None = None

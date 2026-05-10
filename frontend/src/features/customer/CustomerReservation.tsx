@@ -1,9 +1,11 @@
 ﻿import React from 'react';
 
 import { verifyCustomerOrder } from '../../api/customer';
-import { ApiError } from '../../api/client';
+import { ApiError, toApiAssetUrl } from '../../api/client';
 import { Badge, Icon } from '../../components/common/ui';
 import { paymentStatusLabel } from '../../domain/paymentStatus';
+import { formatPhone } from '../../domain/phone';
+import { parseDateValue } from '../../domain/time';
 
 const CUSTOMER_TOKEN_STORAGE_KEY = 'cleaning_ops_customer_token';
 
@@ -56,10 +58,13 @@ export function CustomerReservation() {
 function CustomerHeader() {
   return (
     <header style={headerStyle}>
-      <div style={brandMarkStyle}>C</div>
-      <div>
-        <div style={{ fontSize: 14, fontWeight: 800, letterSpacing: '-0.01em' }}>Cleaning Ops</div>
-        <div style={{ fontSize: 11, color: '#64748b', marginTop: 1 }}>예약 확인센터 · 1588-2480</div>
+      <img
+        src="/cleanjob-logo.png"
+        alt="클린잡"
+        style={{ height: 38, width: 'auto', display: 'block' }}
+      />
+      <div style={{ marginLeft: 'auto', fontSize: 10.5, color: '#94a3b8', fontWeight: 600, letterSpacing: '0.04em' }}>
+        예약 확인센터
       </div>
     </header>
   );
@@ -176,6 +181,9 @@ function ReservationContent({ order, onReset }) {
 
           <CustomerRow icon="mapPin" label="방문지">
             {order.customer_address}
+          </CustomerRow>
+          <CustomerRow icon="phone" label="예약 연락처">
+            <span className="mono" data-testid="customer-visible-phone">{formatPhone(order.customer_phone)}</span>
           </CustomerRow>
           <CustomerRow icon="package" label="서비스">
             {order.service_name}
@@ -297,7 +305,7 @@ function CustomerPhotos({ photos }) {
                   <figure key={photo.id} style={{ margin: 0 }}>
                     <img
                       data-testid={`customer-photo-${photo.id}`}
-                      src={photo.file_url}
+                      src={toApiAssetUrl(photo.file_url)}
                       alt={photo.file_name || `${group.title} 사진`}
                       loading="lazy"
                       style={photoImageStyle}
@@ -340,7 +348,7 @@ function TrustFooter() {
         {[
           { icon: 'shield', label: '보안 확인', sub: '링크 인증' },
           { icon: 'star', label: '검수 사진', sub: '승인 후 공개' },
-          { icon: 'sparkles', label: '고객센터', sub: '1588-2480' },
+          { icon: 'sparkles', label: '고객센터', sub: '1688-9512' },
         ].map((item) => (
           <div key={item.label} style={{ textAlign: 'center' }}>
             <div style={{ display: 'inline-flex', color: '#475569', marginBottom: 4 }}>
@@ -352,8 +360,8 @@ function TrustFooter() {
         ))}
       </div>
 
-      <a href="tel:15882480" style={callButtonStyle}>
-        <Icon name="phone" size={14} /> 1588-2480
+      <a href="tel:16889512" style={callButtonStyle}>
+        <Icon name="phone" size={14} /> 1688-9512
       </a>
 
       <div style={{ textAlign: 'center', fontSize: 10.5, color: '#94a3b8', marginTop: 16, lineHeight: 1.5 }}>
@@ -463,7 +471,10 @@ function formatKoreanDate(value) {
   if (!value) {
     return '일정 확인 중';
   }
-  const date = new Date(`${value}T00:00:00`);
+  const date = parseDateValue(value);
+  if (!date) {
+    return value;
+  }
   const weekday = ['일', '월', '화', '수', '목', '금', '토'][date.getDay()];
   return `${date.getFullYear()}년 ${date.getMonth() + 1}월 ${date.getDate()}일 ${weekday}요일`;
 }
@@ -495,20 +506,6 @@ const headerStyle = css({
   alignItems: 'center',
   gap: 9,
   flexShrink: 0,
-});
-
-const brandMarkStyle = css({
-  width: 30,
-  height: 30,
-  borderRadius: 7,
-  background: '#0f172a',
-  color: '#fff',
-  display: 'flex',
-  alignItems: 'center',
-  justifyContent: 'center',
-  fontSize: 13,
-  fontWeight: 800,
-  letterSpacing: '-0.04em',
 });
 
 const gateCardStyle = css({

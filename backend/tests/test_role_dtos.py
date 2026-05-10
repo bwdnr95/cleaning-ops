@@ -55,11 +55,11 @@ def test_customer_order_dto_hides_internal_fields_and_payment_by_default() -> No
     payload = dto.model_dump()
 
     assert payload["customer_name"] == "이서연"
+    assert payload["customer_phone"] == "01012345678"
     assert payload["total_amount"] is None
     assert payload["deposit_amount"] is None
     assert payload["balance_amount"] is None
     assert payload["payment_status"] is None
-    assert "customer_phone" not in payload
     assert "source_channel" not in payload
     assert "payment_memo" not in payload
     assert "evidence_memo" not in payload

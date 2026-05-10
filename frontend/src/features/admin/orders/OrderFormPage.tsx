@@ -5,6 +5,7 @@ import { DatePicker } from '../../../components/common/DatePicker';
 import { Icon } from '../../../components/common/ui';
 import { ORDER_STATUSES } from '../../../domain/orderStatus';
 import { PARTNER_PAYMENT_STATUSES, PAYMENT_STATUSES } from '../../../domain/paymentStatus';
+import { getAppTodayValue } from '../../../domain/time';
 import { useApiResource } from '../../../api/useApiResource';
 
 export function OrderFormPage({ mode = 'create', orderId = null, onCancel, onSaved }) {
@@ -445,8 +446,7 @@ function toPayload(form) {
 }
 
 function todayString() {
-  const date = new Date();
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+  return getAppTodayValue();
 }
 
 function emptyToNull(value) {

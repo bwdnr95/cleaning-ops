@@ -3,12 +3,13 @@ import React from 'react';
 import { listAdminCalendarOrders, listPartners } from '../../../api/admin';
 import { Icon } from '../../../components/common/ui';
 import { useApiResource } from '../../../api/useApiResource';
+import { getAppTodayDate } from '../../../domain/time';
 
 export function CalendarPage({ onOpenOrder, onCreateOrder }) {
   const [siteOpen, setSiteOpen] = React.useState(true);
   const [selectedPartnerId, setSelectedPartnerId] = React.useState('');
   const [partnerQuery, setPartnerQuery] = React.useState('');
-  const [currentMonth, setCurrentMonth] = React.useState(() => startOfMonth(new Date()));
+  const [currentMonth, setCurrentMonth] = React.useState(() => startOfMonth(getAppTodayDate()));
   const [selectedDay, setSelectedDay] = React.useState(null);
   const year = currentMonth.getFullYear();
   const month = currentMonth.getMonth() + 1;
@@ -26,7 +27,7 @@ export function CalendarPage({ onOpenOrder, onCreateOrder }) {
   const daysInMonth = new Date(year, month, 0).getDate();
   const firstDayOfWeek = new Date(year, month - 1, 1).getDay();
   const totalCells = Math.ceil((daysInMonth + firstDayOfWeek) / 7) * 7;
-  const today = new Date();
+  const today = getAppTodayDate();
   const isCurrentRealMonth = today.getFullYear() === year && today.getMonth() + 1 === month;
   const eventsByDay = groupOrdersByDay(orders);
   const selectedDayNumber = Math.min(selectedDay || (isCurrentRealMonth ? today.getDate() : 1), daysInMonth);
@@ -50,7 +51,7 @@ export function CalendarPage({ onOpenOrder, onCreateOrder }) {
   };
 
   const handleToday = () => {
-    const now = new Date();
+    const now = getAppTodayDate();
     setCurrentMonth(startOfMonth(now));
     setSelectedDay(now.getDate());
   };
@@ -60,7 +61,7 @@ export function CalendarPage({ onOpenOrder, onCreateOrder }) {
   };
 
   return (
-    <div data-testid="admin-calendar-page" style={{ flex: 1, display: 'flex', minHeight: 0, background: 'var(--bg)' }}>
+    <div data-testid="admin-calendar-page" style={{ flex: 1, display: 'flex', minHeight: 0, overflow: 'hidden', background: 'var(--bg)' }}>
       {siteOpen && (
         <aside style={{
           width: 220,
@@ -69,6 +70,7 @@ export function CalendarPage({ onOpenOrder, onCreateOrder }) {
           borderRight: '1px solid var(--border)',
           display: 'flex',
           flexDirection: 'column',
+          minHeight: 0,
         }}>
           <div style={{ padding: '10px 14px', borderBottom: '1px solid var(--divider)', display: 'flex', alignItems: 'center' }}>
             <span style={{ fontSize: 12, fontWeight: 600 }}>협력사 선택</span>
@@ -137,7 +139,7 @@ export function CalendarPage({ onOpenOrder, onCreateOrder }) {
         </aside>
       )}
 
-      <main style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+      <main style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, minHeight: 0, overflow: 'hidden' }}>
         <div style={{
           padding: '10px 20px',
           background: 'var(--surface)',
@@ -145,6 +147,7 @@ export function CalendarPage({ onOpenOrder, onCreateOrder }) {
           display: 'flex',
           alignItems: 'center',
           gap: 10,
+          flexShrink: 0,
         }}>
           {!siteOpen && (
             <button onClick={() => setSiteOpen(true)} className="btn btn--ghost btn--sm" style={{ padding: '0 6px' }}>
@@ -171,18 +174,30 @@ export function CalendarPage({ onOpenOrder, onCreateOrder }) {
           </button>
         </div>
 
-        <div style={{ flex: 1, display: 'flex', minHeight: 0, background: 'var(--bg)' }}>
+        <div style={{ flex: 1, display: 'flex', minHeight: 0, overflow: 'hidden', background: 'var(--bg)' }}>
           {calendar.isLoading && <CalendarState text="일정을 불러오는 중입니다." />}
           {!calendar.isLoading && calendar.error && <CalendarState text="일정을 불러오지 못했습니다." tone="danger" />}
           {!calendar.isLoading && !calendar.error && (
             <>
-              <div className="scroll" style={{ flex: 1, overflow: 'auto', minWidth: 0 }}>
-                <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 600 }}>
+              <div style={{ flex: '1 1 0', minWidth: 0, minHeight: 0, overflow: 'hidden', padding: 12, display: 'flex' }}>
+                <div data-testid="calendar-grid-shell" style={{
+                  flex: 1,
+                  display: 'flex',
+                  flexDirection: 'column',
+                  minWidth: 0,
+                  minHeight: 0,
+                  height: '100%',
+                  border: '1px solid var(--border)',
+                  borderRadius: 8,
+                  overflow: 'hidden',
+                  background: 'var(--surface)',
+                }}>
                   <div style={{
                     display: 'grid',
                     gridTemplateColumns: 'repeat(7, 1fr)',
                     borderBottom: '1px solid var(--border)',
                     background: 'var(--surface)',
+                    flexShrink: 0,
                   }}>
                     {['일', '월', '화', '수', '목', '금', '토'].map((day, index) => (
                       <div key={day} style={{
@@ -200,7 +215,7 @@ export function CalendarPage({ onOpenOrder, onCreateOrder }) {
                     flex: 1,
                     display: 'grid',
                     gridTemplateColumns: 'repeat(7, 1fr)',
-                    gridAutoRows: '1fr',
+                    gridTemplateRows: `repeat(${Math.ceil(totalCells / 7)}, minmax(0, 1fr))`,
                     minHeight: 0,
                   }}>
                     {cells.map((cell, index) => {
@@ -228,7 +243,7 @@ export function CalendarPage({ onOpenOrder, onCreateOrder }) {
                             }
                           }}
                           style={{
-                            minHeight: 110,
+                            minHeight: 0,
                             padding: 6,
                             background: isSelected ? 'var(--brand-bg)' : 'var(--surface)',
                             borderRight: index % 7 < 6 ? '1px solid var(--divider)' : 'none',
@@ -237,6 +252,7 @@ export function CalendarPage({ onOpenOrder, onCreateOrder }) {
                             display: 'flex',
                             flexDirection: 'column',
                             gap: 2,
+                            overflow: 'hidden',
                             cursor: 'pointer',
                             outline: 'none',
                           }}
@@ -343,6 +359,7 @@ function CalendarState({ text, tone = 'muted' }) {
   return (
     <div style={{
       padding: 20,
+      flex: 1,
       color: tone === 'danger' ? 'var(--danger-fg)' : 'var(--text-tertiary)',
       fontSize: 12.5,
     }}>
@@ -368,15 +385,18 @@ function DaySchedulePanel({ year, month, day, events, siteName, onOpenOrder }) {
       data-testid="calendar-day-panel"
       style={{
         width: 340,
+        flex: '0 0 340px',
         flexShrink: 0,
         borderLeft: '1px solid var(--border)',
         background: 'var(--surface)',
         display: 'flex',
         flexDirection: 'column',
         minHeight: 0,
+        height: '100%',
+        overflow: 'hidden',
       }}
     >
-      <div style={{ padding: '14px 16px 12px', borderBottom: '1px solid var(--divider)' }}>
+      <div style={{ padding: '14px 16px 12px', borderBottom: '1px solid var(--divider)', flexShrink: 0 }}>
         <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
           <h3 style={{ margin: 0, fontSize: 15, fontWeight: 700 }}>{dateText}</h3>
           <span style={{ fontSize: 11.5, color: 'var(--text-tertiary)' }}>{events.length}건</span>
@@ -384,7 +404,7 @@ function DaySchedulePanel({ year, month, day, events, siteName, onOpenOrder }) {
         <div style={{ marginTop: 4, fontSize: 11.5, color: 'var(--text-tertiary)' }}>{siteName}</div>
       </div>
 
-      <div className="scroll" style={{ flex: 1, overflow: 'auto' }}>
+      <div className="scroll" style={{ flex: 1, minHeight: 0, overflow: 'auto' }}>
         {events.length === 0 ? (
           <div style={{ padding: 16, fontSize: 12.5, color: 'var(--text-tertiary)', lineHeight: 1.55 }}>
             선택한 날짜에 표시할 주문이 없습니다.
