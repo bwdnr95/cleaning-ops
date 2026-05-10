@@ -24,6 +24,17 @@ class PhotoRead(ApiModel):
     is_customer_visible: bool
 
 
+class PartnerPhotoRead(ApiModel):
+    id: str
+    order_id: str
+    photo_type: PhotoType
+    file_url: str
+    file_name: str | None = None
+    file_size: int | None = None
+    content_type: str | None = None
+    is_customer_visible: bool
+
+
 class PhotoApprove(ApiModel):
     is_customer_visible: bool = True
 

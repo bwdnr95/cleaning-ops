@@ -2,18 +2,32 @@ import React from 'react';
 import { Avatar, Badge, Icon } from '../../components/common/ui';
 import { completePartnerJob, getPartnerJob, listPartnerJobs, startPartnerJob } from '../../api/partner';
 import { uploadPartnerJobPhoto } from '../../api/photos';
+import { ApiError, toApiAssetUrl } from '../../api/client';
 import { useApiResource } from '../../api/useApiResource';
+import { digitsOnly, formatPhone } from '../../domain/phone';
+import { parseDateValue } from '../../domain/time';
+
+const PHOTO_UPLOAD_ERROR_MESSAGES = {
+  unsupported_photo_type: 'JPG/PNG/WebP만 업로드 가능합니다.',
+  photo_too_large: '파일 용량이 초과되었습니다.',
+  order_not_found: '배정된 작업을 찾을 수 없습니다.',
+};
+
+const STARTABLE_JOB_STATUSES = ['일정확정', '전날안내필요', '전날안내완료', '작업예정'];
+const COMPLETABLE_JOB_STATUSES = ['작업진행'];
 
 export function PartnerJobDetail() {
   const [selectedJobId, setSelectedJobId] = React.useState(null);
-  const [beforePhotos, setBeforePhotos] = React.useState([]);
-  const [afterPhotos, setAfterPhotos] = React.useState([]);
   const [uploadError, setUploadError] = React.useState(null);
+  const [uploadNotice, setUploadNotice] = React.useState(null);
+  const [uploadingPhotoType, setUploadingPhotoType] = React.useState(null);
+  const [uploadingCount, setUploadingCount] = React.useState(0);
   const [statusError, setStatusError] = React.useState(null);
   const [isUploading, setIsUploading] = React.useState(false);
   const [isSavingStatus, setIsSavingStatus] = React.useState(false);
   const beforeInputRef = React.useRef<HTMLInputElement | null>(null);
   const afterInputRef = React.useRef<HTMLInputElement | null>(null);
+  const etcInputRef = React.useRef<HTMLInputElement | null>(null);
 
   const jobs = useApiResource(listPartnerJobs);
   const detailLoader = React.useCallback(() => {
@@ -25,11 +39,13 @@ export function PartnerJobDetail() {
   const detail = useApiResource(detailLoader, selectedJobId || 'none');
   const selectedFromList = jobs.data?.find((item) => item.id === selectedJobId);
   const job = detail.data || selectedFromList;
+  const photoGroups = React.useMemo(() => groupJobPhotos(job?.photos || []), [job?.photos]);
 
   React.useEffect(() => {
-    setBeforePhotos([]);
-    setAfterPhotos([]);
     setUploadError(null);
+    setUploadNotice(null);
+    setUploadingPhotoType(null);
+    setUploadingCount(0);
     setStatusError(null);
   }, [selectedJobId]);
 
@@ -39,26 +55,56 @@ export function PartnerJobDetail() {
   };
 
   const handlePhotoSelected = async (photoType, event) => {
-    const file = event.target.files?.[0];
+    const files = [];
+    const fileList = event.target.files;
+    for (let index = 0; index < (fileList?.length || 0); index += 1) {
+      const file = fileList.item(index);
+      if (file) {
+        files.push(file);
+      }
+    }
     event.target.value = '';
-    if (!file || !job) {
+    if (files.length === 0 || !job) {
       return;
     }
 
     setUploadError(null);
+    setUploadNotice(null);
+    setUploadingPhotoType(photoType);
+    setUploadingCount(files.length);
     setIsUploading(true);
-    try {
-      const uploaded = await uploadPartnerJobPhoto(job.id, { photoType, file });
-      if (photoType === 'before') {
-        setBeforePhotos((current) => [...current, uploaded]);
-      } else {
-        setAfterPhotos((current) => [...current, uploaded]);
+    let uploadedCount = 0;
+    const failedUploads = [];
+    for (const file of files) {
+      try {
+        await uploadPartnerJobPhoto(job.id, { photoType, file });
+        uploadedCount += 1;
+      } catch (requestError) {
+        failedUploads.push({
+          fileName: file.name || '이름 없는 파일',
+          message: toPhotoUploadErrorMessage(requestError),
+        });
       }
+    }
+
+    try {
       refreshFlow();
-    } catch {
-      setUploadError('사진 업로드를 처리하지 못했습니다.');
+      if (uploadedCount > 0) {
+        setUploadNotice(`${photoTypeLabel(photoType)} 사진 ${uploadedCount}장이 업로드되었습니다.`);
+      }
+      if (failedUploads.length > 0) {
+        const failedNames = failedUploads.map((item) => item.fileName).slice(0, 3).join(', ');
+        const moreCount = failedUploads.length > 3 ? ` 외 ${failedUploads.length - 3}개` : '';
+        const firstReason = failedUploads[0].message;
+        setUploadError(`${failedUploads.length}장 업로드 실패: ${failedNames}${moreCount}. ${firstReason}`);
+      }
+      if (uploadedCount === 0 && failedUploads.length === 0) {
+        setUploadError('사진 업로드를 처리하지 못했습니다.');
+      }
     } finally {
       setIsUploading(false);
+      setUploadingPhotoType(null);
+      setUploadingCount(0);
     }
   };
 
@@ -103,7 +149,9 @@ export function PartnerJobDetail() {
     return <PartnerState text="작업 상세를 불러오지 못했습니다." tone="danger" />;
   }
 
-  const canStart = job.status !== '작업진행' && job.status !== '사진검수대기';
+  const canStart = STARTABLE_JOB_STATUSES.includes(job.status);
+  const canComplete = COMPLETABLE_JOB_STATUSES.includes(job.status);
+  const statusLock = getPartnerStatusLock(job.status);
 
   return (
     <div data-testid="partner-job-detail-page" style={{ height: '100%', display: 'flex', flexDirection: 'column', background: '#f4f6f8', overflow: 'hidden' }}>
@@ -148,7 +196,7 @@ export function PartnerJobDetail() {
             <Avatar name={job.customer_name} size={28} tone="brand"/>
             <div>
               <div style={{ fontSize: 13.5, fontWeight: 600 }}>{job.customer_name} 님</div>
-              <div className="mono" style={{ fontSize: 11.5, color: 'var(--text-tertiary)' }}>{maskPhone(job.customer_phone)}</div>
+              <div className="mono" style={{ fontSize: 11.5, color: 'var(--text-tertiary)' }}>{formatPhone(job.customer_phone)}</div>
             </div>
           </div>
           <SectionLabel>특별 요청</SectionLabel>
@@ -160,36 +208,66 @@ export function PartnerJobDetail() {
         <PhotoPanel
           title="비포 사진"
           tone="neutral"
-          prefix="B"
-          photos={beforePhotos}
+          photos={photoGroups.before}
           onAdd={() => beforeInputRef.current?.click()}
           disabled={isUploading}
         />
-        <input ref={beforeInputRef} data-testid="partner-before-photo-input" type="file" accept="image/jpeg,image/png,image/webp" capture="environment" style={{ display: 'none' }} onChange={(event) => void handlePhotoSelected('before', event)} />
+        <input ref={beforeInputRef} data-testid="partner-before-photo-input" type="file" accept="image/jpeg,image/png,image/webp" capture="environment" multiple style={{ display: 'none' }} onChange={(event) => void handlePhotoSelected('before', event)} />
 
         <PhotoPanel
           title="애프터 사진"
           tone="success"
-          prefix="A"
-          photos={afterPhotos}
+          photos={photoGroups.after}
           onAdd={() => afterInputRef.current?.click()}
           disabled={isUploading}
         />
-        <input ref={afterInputRef} data-testid="partner-after-photo-input" type="file" accept="image/jpeg,image/png,image/webp" capture="environment" style={{ display: 'none' }} onChange={(event) => void handlePhotoSelected('after', event)} />
+        <input ref={afterInputRef} data-testid="partner-after-photo-input" type="file" accept="image/jpeg,image/png,image/webp" capture="environment" multiple style={{ display: 'none' }} onChange={(event) => void handlePhotoSelected('after', event)} />
+        <PhotoPanel
+          title="기타 사진"
+          tone="brand"
+          photos={photoGroups.etc}
+          onAdd={() => etcInputRef.current?.click()}
+          disabled={isUploading}
+        />
+        <input ref={etcInputRef} data-testid="partner-etc-photo-input" type="file" accept="image/jpeg,image/png,image/webp" capture="environment" multiple style={{ display: 'none' }} onChange={(event) => void handlePhotoSelected('etc', event)} />
+        {isUploading && (
+          <div data-testid="partner-photo-upload-status" style={{ margin: '-2px 2px 10px', color: 'var(--brand)', fontSize: 11.5, fontWeight: 700 }}>
+            {photoTypeLabel(uploadingPhotoType)} 사진 {uploadingCount}장 업로드 중입니다.
+          </div>
+        )}
+        {!isUploading && uploadNotice && (
+          <div data-testid="partner-photo-upload-status" style={{ margin: '-2px 2px 10px', color: 'var(--success-fg)', fontSize: 11.5, fontWeight: 700 }}>
+            {uploadNotice}
+          </div>
+        )}
         {uploadError && <div style={{ margin: '-2px 2px 10px', color: 'var(--danger-fg)', fontSize: 11.5 }}>{uploadError}</div>}
       </div>
 
       <div style={{ padding: '10px 14px 12px', background: '#fff', borderTop: '1px solid var(--border)', boxShadow: '0 -4px 12px rgba(15,23,42,0.04)' }}>
-        <div style={{ display: 'grid', gridTemplateColumns: canStart ? '1fr 1fr' : '1fr', gap: 8 }}>
-          {canStart && (
-            <button data-testid="partner-start-job" disabled={isSavingStatus} onClick={() => void handleStatusAction('start')} style={secondaryCtaStyle(isSavingStatus)}>
-              <Icon name="clock" size={16}/> 작업 시작
-            </button>
-          )}
-          <button data-testid="partner-complete-job" disabled={isSavingStatus} onClick={() => void handleStatusAction('complete')} style={primaryCtaStyle(isSavingStatus)}>
-            <Icon name="check" size={16}/> 작업 완료
-          </button>
-        </div>
+        {canStart || canComplete ? (
+          <div style={{ display: 'grid', gridTemplateColumns: canStart && canComplete ? '1fr 1fr' : '1fr', gap: 8 }}>
+            {canStart && (
+              <button data-testid="partner-start-job" disabled={isSavingStatus} onClick={() => void handleStatusAction('start')} style={secondaryCtaStyle(isSavingStatus)}>
+                <Icon name="clock" size={16}/> 작업 시작
+              </button>
+            )}
+            {canComplete && (
+              <button data-testid="partner-complete-job" disabled={isSavingStatus} onClick={() => void handleStatusAction('complete')} style={primaryCtaStyle(isSavingStatus)}>
+                <Icon name="check" size={16}/> 작업 완료
+              </button>
+            )}
+          </div>
+        ) : (
+          <div data-testid="partner-status-locked" style={{ minHeight: 48, border: '1px solid var(--border)', borderRadius: 10, background: statusLock.tone === 'danger' ? 'var(--danger-bg)' : 'var(--bg-subtle)', color: statusLock.tone === 'danger' ? 'var(--danger-fg)' : 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: 10, padding: '8px 10px' }}>
+            <span style={{ width: 30, height: 30, borderRadius: 8, background: statusLock.tone === 'success' ? 'var(--success-bg)' : statusLock.tone === 'danger' ? 'var(--danger-bg)' : 'var(--warn-bg)', color: statusLock.tone === 'success' ? 'var(--success-fg)' : statusLock.tone === 'danger' ? 'var(--danger-fg)' : 'var(--warn-fg)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+              <Icon name={statusLock.icon} size={15}/>
+            </span>
+            <span style={{ minWidth: 0 }}>
+              <span style={{ display: 'block', fontSize: 12.5, fontWeight: 800, color: 'var(--text)' }}>{statusLock.title}</span>
+              <span style={{ display: 'block', fontSize: 11, color: 'var(--text-tertiary)', marginTop: 1 }}>{statusLock.description}</span>
+            </span>
+          </div>
+        )}
         {statusError && <div style={{ textAlign: 'center', fontSize: 11, color: 'var(--danger-fg)', marginTop: 6 }}>{statusError}</div>}
         <div style={{ textAlign: 'center', fontSize: 10.5, color: 'var(--text-tertiary)', marginTop: 6 }}>
           사진 업로드와 완료 처리는 운영팀 확인 단계로 넘어갑니다
@@ -229,7 +307,7 @@ function PartnerJobList({ jobs, onSelect }) {
   );
 }
 
-function PhotoPanel({ title, tone, prefix, photos, onAdd, disabled }) {
+function PhotoPanel({ title, tone, photos, onAdd, disabled }) {
   return (
     <Panel>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
@@ -242,9 +320,17 @@ function PhotoPanel({ title, tone, prefix, photos, onAdd, disabled }) {
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 6 }}>
         {photos.map((photo, index) => (
-          <div key={photo.id || index} className="placeholder-img" style={{ aspectRatio: '1', fontSize: 9 }}>
-            {prefix}-{index + 1}
-          </div>
+          <figure key={photo.id || index} data-testid={`partner-photo-thumb-${photo.id}`} style={{ margin: 0, position: 'relative', aspectRatio: '1', overflow: 'hidden', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--bg-muted)' }}>
+            <img
+              src={toApiAssetUrl(photo.file_url)}
+              alt={photo.file_name || `${title} ${index + 1}`}
+              loading="lazy"
+              style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
+            />
+            <span style={{ position: 'absolute', left: 4, bottom: 4, maxWidth: 'calc(100% - 8px)', height: 16, padding: '0 4px', borderRadius: 4, background: 'rgba(15,23,42,0.78)', color: '#fff', fontSize: 9, fontWeight: 700, display: 'inline-flex', alignItems: 'center' }}>
+              {index + 1}
+            </span>
+          </figure>
         ))}
         <button onClick={onAdd} disabled={disabled} style={{ aspectRatio: '1', border: '1.5px dashed var(--border-strong)', borderRadius: 6, background: 'var(--bg-subtle)', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: disabled ? 'default' : 'pointer', flexDirection: 'column', gap: 2, color: 'var(--text-tertiary)' }}>
           <Icon name="camera" size={16}/>
@@ -318,25 +404,64 @@ function PartnerState({ text, tone = 'muted' }) {
   );
 }
 
+function groupJobPhotos(photos) {
+  const groups = {
+    before: [],
+    after: [],
+    etc: [],
+  };
+
+  for (const photo of photos) {
+    if (photo.photo_type === 'before') {
+      groups.before.push(photo);
+    } else if (photo.photo_type === 'after') {
+      groups.after.push(photo);
+    } else {
+      groups.etc.push(photo);
+    }
+  }
+
+  return groups;
+}
+
+function toPhotoUploadErrorMessage(error) {
+  if (error instanceof ApiError) {
+    const detail = typeof error.detail === 'string' ? error.detail : '';
+    if (PHOTO_UPLOAD_ERROR_MESSAGES[detail]) {
+      return PHOTO_UPLOAD_ERROR_MESSAGES[detail];
+    }
+    if (error.status === 413) {
+      return PHOTO_UPLOAD_ERROR_MESSAGES.photo_too_large;
+    }
+    if (error.status === 422) {
+      return '사진 유형과 파일을 확인해주세요.';
+    }
+  }
+
+  return '사진 업로드를 처리하지 못했습니다.';
+}
+
+function photoTypeLabel(type) {
+  if (type === 'before') {
+    return '비포';
+  }
+  if (type === 'after') {
+    return '애프터';
+  }
+  return '기타';
+}
+
 function formatKoreanDate(value) {
   if (!value) {
     return '일정 미정';
   }
 
-  const date = new Date(`${value}T00:00:00`);
+  const date = parseDateValue(value);
+  if (!date) {
+    return value;
+  }
   const weekday = ['일', '월', '화', '수', '목', '금', '토'][date.getDay()];
   return `${date.getMonth() + 1}월 ${date.getDate()}일 ${weekday}요일`;
-}
-
-function maskPhone(phone) {
-  if (!phone) {
-    return '';
-  }
-  const digits = phone.replace(/\D/g, '');
-  if (digits.length < 8) {
-    return phone;
-  }
-  return `${digits.slice(0, 3)}-${digits.slice(3, 4)}***-${digits.slice(-4)}`;
 }
 
 function partnerStatusLabel(status) {
@@ -374,8 +499,37 @@ function partnerStatusTone(status) {
   return 'neutral';
 }
 
-function digitsOnly(value) {
-  return String(value || '').replace(/\D/g, '');
+function getPartnerStatusLock(status) {
+  if (status === '취소') {
+    return {
+      icon: 'x',
+      tone: 'danger',
+      title: '취소된 작업입니다',
+      description: '운영팀에서 취소 처리한 작업이라 현장 액션을 사용할 수 없습니다.',
+    };
+  }
+  if (['고객전달완료', '서비스완료'].includes(status)) {
+    return {
+      icon: 'check',
+      tone: 'success',
+      title: '서비스 완료된 작업입니다',
+      description: '고객 전달까지 완료되어 추가 작업 상태 변경이 잠겼습니다.',
+    };
+  }
+  if (['사진검수대기', '고객전달필요'].includes(status)) {
+    return {
+      icon: 'lock',
+      tone: 'warn',
+      title: '작업 완료 처리됨',
+      description: '운영팀의 사진 검수와 고객 전달 단계로 넘어간 작업입니다.',
+    };
+  }
+  return {
+    icon: 'clock',
+    tone: 'neutral',
+    title: '운영팀 확인 중입니다',
+    description: '일정이 확정되면 작업 시작을 사용할 수 있습니다.',
+  };
 }
 
 function primaryCtaStyle(disabled) {

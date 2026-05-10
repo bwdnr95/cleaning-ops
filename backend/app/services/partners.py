@@ -8,13 +8,16 @@ from app.core.security import hash_password
 from app.domain.constants import OrderStatus, UserRole
 from app.domain.phone import normalize_phone
 from app.models.order import Order
-from app.models.partner import Partner
+from app.models.partner import Partner, PartnerCategory
 from app.models.user import User
-from app.repositories.partners import PartnerRepository
+from app.repositories.partners import PartnerCategoryRepository, PartnerRepository
 from app.repositories.refresh_tokens import RefreshTokenRepository
 from app.schemas.partner import (
     PartnerAdminRead,
     PartnerAssignedOrderRead,
+    PartnerCategoryCreate,
+    PartnerCategoryRead,
+    PartnerCategoryUpdate,
     PartnerCreate,
     PartnerDetailRead,
     PartnerPasswordResetRead,
@@ -43,7 +46,46 @@ class PartnerService:
     def __init__(self, db: Session) -> None:
         self.db = db
         self.partners = PartnerRepository(db)
+        self.categories = PartnerCategoryRepository(db)
         self.refresh_tokens = RefreshTokenRepository(db)
+
+    def list_categories(self, *, include_inactive: bool = False) -> list[PartnerCategoryRead]:
+        categories = self.categories.list_categories(include_inactive=include_inactive)
+        return [self.to_category_dto(category) for category in categories]
+
+    def create_category(self, payload: PartnerCategoryCreate) -> PartnerCategoryRead:
+        category = PartnerCategory(id=str(uuid4()), **payload.model_dump())
+        self.categories.add(category)
+        self.db.commit()
+        self.db.refresh(category)
+        return self.to_category_dto(category)
+
+    def update_category(
+        self,
+        category_id: str,
+        payload: PartnerCategoryUpdate,
+    ) -> PartnerCategoryRead:
+        category = self.categories.get(category_id)
+        if category is None:
+            raise ValueError("partner_category_not_found")
+
+        for key, value in payload.model_dump(exclude_unset=True).items():
+            setattr(category, key, value)
+
+        self.db.commit()
+        self.db.refresh(category)
+        return self.to_category_dto(category)
+
+    def delete_category(self, category_id: str) -> None:
+        category = self.categories.get(category_id)
+        if category is None:
+            raise ValueError("partner_category_not_found")
+
+        for partner in self._list_partners_by_category(category_id):
+            partner.partner_category_id = None
+
+        self.db.delete(category)
+        self.db.commit()
 
     def list_partners(self, *, include_inactive: bool = False) -> list[PartnerAdminRead]:
         partners = self.partners.list_all() if include_inactive else self.partners.list_active()
@@ -61,8 +103,10 @@ class PartnerService:
         )
 
     def create(self, payload: PartnerCreate) -> PartnerDetailRead:
+        self._require_category(payload.partner_category_id)
         partner = Partner(
             id=str(uuid4()),
+            partner_category_id=payload.partner_category_id,
             name=payload.name,
             manager_name=payload.manager_name,
             phone=normalize_phone(payload.phone),
@@ -89,6 +133,8 @@ class PartnerService:
             raise ValueError("partner_not_found")
 
         changes = payload.model_dump(exclude_unset=True)
+        if "partner_category_id" in changes:
+            self._require_category(changes["partner_category_id"])
         for key, value in changes.items():
             if key == "phone" and value is not None:
                 value = normalize_phone(value)
@@ -149,9 +195,16 @@ class PartnerService:
 
     def to_admin_dto(self, partner: Partner) -> PartnerAdminRead:
         user = self._first_partner_user(partner.id)
+        category = (
+            self.categories.get(partner.partner_category_id)
+            if partner.partner_category_id
+            else None
+        )
         counts = self._job_counts(partner.id)
         return PartnerAdminRead(
             id=partner.id,
+            partner_category_id=partner.partner_category_id,
+            partner_category_name=category.name if category else None,
             name=partner.name,
             manager_name=partner.manager_name,
             phone=partner.phone,
@@ -168,6 +221,22 @@ class PartnerService:
             login_phone=user.phone if user else None,
             user_is_active=user.is_active if user else None,
             last_login_at=user.last_login_at if user else None,
+        )
+
+    def to_category_dto(self, category: PartnerCategory) -> PartnerCategoryRead:
+        return PartnerCategoryRead(
+            id=category.id,
+            name=category.name,
+            description=category.description,
+            is_active=category.is_active,
+            sort_order=category.sort_order,
+            partner_count=scalar_count(
+                self.db,
+                Partner.partner_category_id == category.id,
+                model=Partner,
+            ),
+            created_at=category.created_at,
+            updated_at=category.updated_at,
         )
 
     def _upsert_partner_user(self, partner: Partner, *, login_phone: str, password: str) -> User:
@@ -191,7 +260,11 @@ class PartnerService:
         return user
 
     def _job_counts(self, partner_id: str) -> dict[str, int]:
-        scheduled = scalar_count(self.db, Order.partner_id == partner_id, Order.status != OrderStatus.CANCELLED)
+        scheduled = scalar_count(
+            self.db,
+            Order.partner_id == partner_id,
+            Order.status != OrderStatus.CANCELLED,
+        )
         active = scalar_count(
             self.db,
             Order.partner_id == partner_id,
@@ -226,9 +299,21 @@ class PartnerService:
         )
         return list(self.db.scalars(stmt))
 
+    def _list_partners_by_category(self, category_id: str) -> list[Partner]:
+        stmt = select(Partner).where(Partner.partner_category_id == category_id)
+        return list(self.db.scalars(stmt))
 
-def scalar_count(db: Session, *conditions) -> int:
-    stmt = select(func.count()).select_from(Order).where(*conditions)
+    def _require_category(self, category_id: str | None) -> PartnerCategory | None:
+        if not category_id:
+            return None
+        category = self.categories.get(category_id)
+        if category is None:
+            raise ValueError("partner_category_not_found")
+        return category
+
+
+def scalar_count(db: Session, *conditions, model=Order) -> int:
+    stmt = select(func.count()).select_from(model).where(*conditions)
     return int(db.scalar(stmt) or 0)
 
 

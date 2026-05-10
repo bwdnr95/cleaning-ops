@@ -2,6 +2,7 @@ import React from 'react';
 
 import { sendCustomerPhotoReady } from '../../../api/messages';
 import { approvePhoto, listPhotoReviewQueue } from '../../../api/photos';
+import { toApiAssetUrl } from '../../../api/client';
 import { useApiResource } from '../../../api/useApiResource';
 import { Badge, Icon } from '../../../components/common/ui';
 
@@ -16,7 +17,9 @@ export function PhotoReviewPage({ onOpenOrder, onNav }) {
   const queue = useApiResource(listPhotoReviewQueue);
   const [filter, setFilter] = React.useState('all');
   const [selectedIdx, setSelectedIdx] = React.useState(0);
+  const [selectedOrderId, setSelectedOrderId] = React.useState(null);
   const [activePhotoId, setActivePhotoId] = React.useState(null);
+  const [approvedPhotoIds, setApprovedPhotoIds] = React.useState(() => new Set());
   const [isApproving, setIsApproving] = React.useState(false);
   const [isSending, setIsSending] = React.useState(false);
   const [sentMessage, setSentMessage] = React.useState(null);
@@ -24,8 +27,11 @@ export function PhotoReviewPage({ onOpenOrder, onNav }) {
 
   const items = queue.data || [];
   const filteredItems = items.filter((item) => filter === 'all' || reviewStage(item).key === filter);
-  const selected = filteredItems[selectedIdx] || filteredItems[0] || null;
-  const photos = selected?.photos || [];
+  const selectedById = selectedOrderId ? items.find((item) => item.order_id === selectedOrderId) : null;
+  const selected = selectedById || filteredItems[selectedIdx] || filteredItems[0] || null;
+  const photos = (selected?.photos || []).map((photo) => (
+    approvedPhotoIds.has(photo.id) ? { ...photo, is_customer_visible: true } : photo
+  ));
   const pendingPhotos = photos.filter((photo) => !photo.is_customer_visible);
   const approvedPhotos = photos.filter((photo) => photo.is_customer_visible);
   const activePhoto = photos.find((photo) => photo.id === activePhotoId) || pendingPhotos[0] || photos[0] || null;
@@ -36,10 +42,16 @@ export function PhotoReviewPage({ onOpenOrder, onNav }) {
     done: items.filter((item) => reviewStage(item).key === 'done').length,
   };
   const selectedStage = selected ? reviewStage(selected) : null;
+  const canSendCustomerLink = Boolean(
+    selected
+      && selectedStage?.key !== 'done'
+      && (selected.can_send_customer_link || (approvedPhotos.length > 0 && pendingPhotos.length === 0)),
+  );
 
   React.useEffect(() => {
     setSelectedIdx(0);
     setActivePhotoId(null);
+    setApprovedPhotoIds(new Set());
   }, [queue.data, filter]);
 
   const handleApprove = async (photoId) => {
@@ -48,6 +60,11 @@ export function PhotoReviewPage({ onOpenOrder, onNav }) {
     setIsApproving(true);
     try {
       await approvePhoto(photoId);
+      setApprovedPhotoIds((current) => {
+        const next = new Set(current);
+        next.add(photoId);
+        return next;
+      });
       queue.reload();
     } catch {
       setError('사진 승인 처리에 실패했습니다.');
@@ -60,25 +77,54 @@ export function PhotoReviewPage({ onOpenOrder, onNav }) {
     setError(null);
     setSentMessage(null);
     setIsApproving(true);
+    let approvedCount = 0;
+    const failedApprovals = [];
+    const approvedIds = [];
     try {
       for (const photo of pendingPhotos) {
-        await approvePhoto(photo.id);
+        try {
+          await approvePhoto(photo.id);
+          approvedCount += 1;
+          approvedIds.push(photo.id);
+        } catch {
+          failedApprovals.push(photo.file_name || photo.id);
+        }
+      }
+      if (approvedIds.length > 0) {
+        setApprovedPhotoIds((current) => {
+          const next = new Set(current);
+          approvedIds.forEach((photoId) => next.add(photoId));
+          return next;
+        });
+      }
+      if (approvedCount > 0) {
+        setSentMessage(`${approvedCount}장 공개 승인했습니다.`);
+      }
+      if (failedApprovals.length > 0) {
+        const failedNames = failedApprovals.slice(0, 3).join(', ');
+        const moreCount = failedApprovals.length > 3 ? ` 외 ${failedApprovals.length - 3}개` : '';
+        setError(`${failedApprovals.length}장 승인 실패: ${failedNames}${moreCount}`);
       }
       queue.reload();
-    } catch {
-      setError('일괄 승인 처리에 실패했습니다.');
     } finally {
       setIsApproving(false);
     }
   };
 
   const handleSendCustomerLink = async () => {
+    if (!selected || !canSendCustomerLink) {
+      return;
+    }
     setError(null);
     setSentMessage(null);
     setIsSending(true);
     try {
       const log = await sendCustomerPhotoReady(selected.order_id);
-      setSentMessage(log.status === 'sent' ? '고객 링크를 발송했습니다.' : '발송 실패 기록이 남았습니다.');
+      if (log.status === 'sent') {
+        setSentMessage('고객 링크를 발송했습니다.');
+      } else {
+        setError(`고객 링크 발송 실패 기록이 남았습니다. ${providerErrorText(log)}`);
+      }
       queue.reload();
     } catch {
       setError('고객 링크 발송에 실패했습니다.');
@@ -96,7 +142,7 @@ export function PhotoReviewPage({ onOpenOrder, onNav }) {
   }
 
   if (items.length === 0) {
-    return <ReviewState text="검수하거나 전달할 사진이 없습니다." />;
+    return <PhotoReviewEmptyState onNav={onNav} onRefresh={queue.reload} />;
   }
 
   return (
@@ -150,7 +196,7 @@ export function PhotoReviewPage({ onOpenOrder, onNav }) {
               <button
                 key={item.order_id}
                 data-testid={`photo-review-item-${item.order_id}`}
-                onClick={() => { setSelectedIdx(index); setActivePhotoId(null); setSentMessage(null); setError(null); }}
+                onClick={() => { setSelectedIdx(index); setSelectedOrderId(item.order_id); setActivePhotoId(null); setApprovedPhotoIds(new Set()); setSentMessage(null); setError(null); }}
                 style={{
                   display: 'block',
                   width: '100%',
@@ -209,7 +255,7 @@ export function PhotoReviewPage({ onOpenOrder, onNav }) {
           }}>
             {activePhoto ? (
               <img
-                src={activePhoto.file_url}
+                src={toApiAssetUrl(activePhoto.file_url)}
                 alt={activePhoto.file_name || '검수 사진'}
                 style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain', display: 'block' }}
               />
@@ -240,7 +286,7 @@ export function PhotoReviewPage({ onOpenOrder, onNav }) {
                     overflow: 'hidden',
                   }}
                 >
-                  <img src={photo.file_url} alt={photo.file_name || photo.photo_type}
+                  <img src={toApiAssetUrl(photo.file_url)} alt={photo.file_name || photo.photo_type}
                     style={{ width: '100%', aspectRatio: '1', objectFit: 'cover', display: 'block', background: 'var(--bg-muted)' }} />
                   <span style={{
                     position: 'absolute',
@@ -318,7 +364,7 @@ export function PhotoReviewPage({ onOpenOrder, onNav }) {
           <button data-testid="photo-approve-all" className="btn btn--secondary btn--block" disabled={pendingPhotos.length === 0 || isApproving} onClick={() => void handleApproveAll()}>
             <Icon name="eye" size={13}/> 비공개 사진 모두 승인
           </button>
-          <button data-testid="photo-send-customer-link" className="btn btn--secondary btn--block" disabled={isSending || !selected?.can_send_customer_link} onClick={() => void handleSendCustomerLink()}>
+          <button data-testid="photo-send-customer-link" className="btn btn--secondary btn--block" disabled={isSending || !canSendCustomerLink} onClick={() => void handleSendCustomerLink()}>
             <Icon name="send" size={13}/> 고객 사진 링크 발송
           </button>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6, marginTop: 4 }}>
@@ -339,6 +385,184 @@ function ReviewState({ text, tone = 'muted' }) {
   return (
     <div data-testid="admin-photo-review-page" style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: tone === 'danger' ? 'var(--danger-fg)' : 'var(--text-tertiary)', background: 'var(--bg)' }}>
       {text}
+    </div>
+  );
+}
+
+function PhotoReviewEmptyState({ onNav, onRefresh }) {
+  const metrics = [
+    { label: '검수대기', value: '0장', tone: 'warn', icon: 'camera' },
+    { label: '전달가능', value: '0건', tone: 'brand', icon: 'send' },
+    { label: '전달완료', value: '0건', tone: 'success', icon: 'check' },
+  ];
+
+  return (
+    <div data-testid="admin-photo-review-page" style={{ flex: 1, display: 'grid', gridTemplateColumns: '280px 1fr 330px', minHeight: 0, background: 'var(--bg)' }}>
+      <aside style={{ background: 'var(--surface)', borderRight: '1px solid var(--border)', display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+        <div style={{ padding: '10px 14px', borderBottom: '1px solid var(--divider)', display: 'flex', alignItems: 'center', gap: 6 }}>
+          <span style={{ fontSize: 12.5, fontWeight: 700 }}>사진 검수 게이트</span>
+          <Badge tone="success">0</Badge>
+          <div style={{ flex: 1 }}/>
+          <button className="btn btn--ghost btn--sm" style={{ padding: '0 4px' }} onClick={onRefresh} aria-label="사진검수 새로고침">
+            <Icon name="refresh" size={12}/>
+          </button>
+        </div>
+
+        <div style={{ padding: '8px 10px', borderBottom: '1px solid var(--divider)', display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 6 }}>
+          {FILTERS.map((item) => (
+            <button
+              key={item.key}
+              type="button"
+              data-testid={`photo-filter-${item.key}`}
+              aria-pressed={item.key === 'all'}
+              style={{
+                height: 28,
+                border: 'none',
+                borderRadius: 7,
+                background: item.key === 'all' ? 'var(--brand-bg)' : 'transparent',
+                color: item.key === 'all' ? 'var(--brand)' : 'var(--text-tertiary)',
+                fontSize: 11.5,
+                fontWeight: 700,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: 5,
+              }}
+            >
+              {item.label}
+              <span style={{ color: item.key === 'all' ? 'var(--brand)' : 'var(--text-quaternary)' }}>0</span>
+            </button>
+          ))}
+        </div>
+
+        <div style={{ padding: 14, borderBottom: '1px solid var(--divider)' }}>
+          <div style={{ padding: 10, borderRadius: 8, border: '1px solid var(--success-bg)', background: 'var(--success-bg)', color: 'var(--success-fg)', fontSize: 12, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 7 }}>
+            <Icon name="check" size={14}/>
+            검수 큐 정상
+          </div>
+        </div>
+
+        <div style={{ padding: '10px 14px', display: 'grid', gap: 8 }}>
+          {metrics.map((item) => (
+            <div key={item.label} style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '9px 0', borderBottom: '1px solid var(--divider)' }}>
+              <span style={{ width: 26, height: 26, borderRadius: 7, background: `var(--${item.tone}-bg, var(--brand-bg))`, color: `var(--${item.tone}-fg, var(--brand))`, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                <Icon name={item.icon} size={14}/>
+              </span>
+              <span style={{ flex: 1, fontSize: 12, color: 'var(--text-secondary)', fontWeight: 700 }}>{item.label}</span>
+              <span className="mono" style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>{item.value}</span>
+            </div>
+          ))}
+        </div>
+      </aside>
+
+      <main style={{ display: 'flex', flexDirection: 'column', minHeight: 0, background: 'var(--bg-subtle)' }}>
+        <div style={{ padding: '10px 16px', background: 'var(--surface)', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 10 }}>
+          <span style={{ fontSize: 13, fontWeight: 700 }}>사진 검수</span>
+          <Badge tone="success">대기 없음</Badge>
+          <span style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>오늘 고객 전달을 막고 있는 사진이 없습니다</span>
+          <div style={{ flex: 1 }}/>
+          <button className="btn btn--ghost btn--sm" onClick={onRefresh}>
+            <Icon name="refresh" size={12}/> 새로고침
+          </button>
+        </div>
+
+        <div style={{ padding: '10px 16px', background: 'var(--surface)', borderBottom: '1px solid var(--divider)' }}>
+          <GateSteps stage="review" />
+        </div>
+
+        <div style={{ flex: 1, minHeight: 0, padding: 20, display: 'grid', gridTemplateRows: 'minmax(0, 1fr) auto', gap: 12 }}>
+          <div style={{
+            minHeight: 0,
+            border: '1px solid var(--border)',
+            borderRadius: 8,
+            background: 'var(--surface)',
+            display: 'grid',
+            gridTemplateColumns: 'minmax(240px, 420px) 1fr',
+            overflow: 'hidden',
+          }}>
+            <div style={{ padding: 30, display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 12 }}>
+              <span style={{ width: 42, height: 42, borderRadius: 8, background: 'var(--success-bg)', color: 'var(--success-fg)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
+                <Icon name="inbox" size={22}/>
+              </span>
+              <div>
+                <div data-testid="photo-empty-title" style={{ fontSize: 18, lineHeight: 1.25, fontWeight: 800, marginBottom: 6 }}>검수 대기 사진이 없습니다</div>
+                <div style={{ fontSize: 12.5, lineHeight: 1.6, color: 'var(--text-secondary)' }}>
+                  협력사가 작업 사진을 올리면 주문별로 이 큐에 들어오고, 공개 승인 후 고객 사진 링크를 보낼 수 있습니다.
+                </div>
+              </div>
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 4 }}>
+                <button className="btn btn--primary btn--sm" onClick={() => onNav?.('orders')}>
+                  <Icon name="list" size={13}/> 주문 목록
+                </button>
+                <button className="btn btn--secondary btn--sm" onClick={() => onNav?.('sends')}>
+                  <Icon name="history" size={13}/> 발송 이력
+                </button>
+              </div>
+            </div>
+
+            <div style={{ padding: 24, borderLeft: '1px solid var(--divider)', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(76px, 1fr))', alignContent: 'center', gap: 10 }}>
+              {[0, 1, 2, 3, 4, 5].map((item) => (
+                <div key={item} style={{
+                  aspectRatio: '1',
+                  borderRadius: 7,
+                  border: '1px dashed var(--border)',
+                  background: item % 2 === 0 ? 'var(--bg)' : 'var(--bg-muted)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  color: 'var(--text-quaternary)',
+                }}>
+                  <Icon name="image" size={18}/>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 10 }}>
+            {metrics.map((item) => (
+              <div key={item.label} style={{ height: 56, border: '1px solid var(--border)', borderRadius: 8, background: 'var(--surface)', padding: '9px 11px', display: 'flex', alignItems: 'center', gap: 9 }}>
+                <span style={{ width: 28, height: 28, borderRadius: 7, background: `var(--${item.tone}-bg, var(--brand-bg))`, color: `var(--${item.tone}-fg, var(--brand))`, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                  <Icon name={item.icon} size={14}/>
+                </span>
+                <div style={{ minWidth: 0 }}>
+                  <div className="mono" style={{ fontSize: 15, fontWeight: 800, lineHeight: 1.1 }}>{item.value}</div>
+                  <div style={{ fontSize: 11, color: 'var(--text-tertiary)', marginTop: 3 }}>{item.label}</div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </main>
+
+      <aside style={{ background: 'var(--surface)', borderLeft: '1px solid var(--border)', display: 'flex', flexDirection: 'column', overflow: 'auto' }}>
+        <div style={{ padding: '12px 14px', borderBottom: '1px solid var(--divider)' }}>
+          <PanelTitle>운영 상태</PanelTitle>
+          <KVStack>
+            <KVRow label="검수대기" value="0장"/>
+            <KVRow label="전달가능" value="0건"/>
+            <KVRow label="전달완료" value="0건"/>
+            <KVRow label="공개 대기" value="없음"/>
+          </KVStack>
+        </div>
+
+        <div style={{ padding: '12px 14px', borderBottom: '1px solid var(--divider)' }}>
+          <PanelTitle>고객 공개 원칙</PanelTitle>
+          <div style={{ padding: 10, borderRadius: 8, background: 'var(--bg-subtle)', border: '1px solid var(--border)', fontSize: 12, lineHeight: 1.55, color: 'var(--text-secondary)' }}>
+            협력사 사진은 업로드 직후 비공개이며, 관리자 승인 후에만 고객 링크에 표시됩니다.
+          </div>
+        </div>
+
+        <div style={{ flex: 1 }}/>
+
+        <div style={{ padding: 14, borderTop: '1px solid var(--divider)', display: 'flex', flexDirection: 'column', gap: 6 }}>
+          <button className="btn btn--secondary btn--block" onClick={onRefresh}>
+            <Icon name="refresh" size={13}/> 큐 새로고침
+          </button>
+          <button className="btn btn--ghost btn--block" onClick={() => onNav?.('orders')}>
+            주문 목록
+          </button>
+        </div>
+      </aside>
     </div>
   );
 }
@@ -403,6 +627,23 @@ function photoTypeLabel(type) {
   if (type === 'before') return '비포';
   if (type === 'after') return '애프터';
   return '기타';
+}
+
+function providerErrorText(message) {
+  const code = message.provider_error_code || '';
+  const map = {
+    missing_recipient: '수신번호 없음',
+    solapi_missing_credentials: 'SOL API 인증 설정 누락',
+    solapi_missing_sender_number: 'SOL API 발신번호 누락',
+    solapi_missing_kakao_pf_id: 'SOL API 카카오 채널 ID 누락',
+    solapi_missing_kakao_template_id: '알림톡 승인 템플릿 ID 누락',
+    solapi_http_error: 'SOL API HTTP 오류',
+    solapi_request_failed: 'SOL API 요청 실패',
+    solapi_invalid_response: 'SOL API 응답 오류',
+    solapi_provider_failed: 'SOL API 발송 실패',
+    unsupported_message_provider: 'Provider 설정 오류',
+  };
+  return map[code] || message.provider_status_message || message.error_message || '실패 사유 미상';
 }
 
 function PanelTitle({ children }) {

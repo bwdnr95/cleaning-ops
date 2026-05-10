@@ -9,6 +9,7 @@ from app.schemas.common import ApiModel
 
 class PartnerBase(ApiModel):
     name: str
+    partner_category_id: str | None = None
     manager_name: str | None = None
     phone: str
     service_areas: str | None = None
@@ -24,6 +25,7 @@ class PartnerCreate(PartnerBase):
 
 class PartnerUpdate(ApiModel):
     name: str | None = None
+    partner_category_id: str | None = None
     manager_name: str | None = None
     phone: str | None = None
     service_areas: str | None = None
@@ -34,6 +36,7 @@ class PartnerUpdate(ApiModel):
 
 class PartnerRead(PartnerBase):
     id: str
+    partner_category_name: str | None = None
     created_at: datetime | None = None
     updated_at: datetime | None = None
 
@@ -73,3 +76,28 @@ class PartnerPasswordResetRead(ApiModel):
     user_id: str
     login_phone: str
     temporary_password: str
+
+
+class PartnerCategoryCreate(ApiModel):
+    name: str = Field(min_length=1, max_length=120)
+    description: str | None = None
+    is_active: bool = True
+    sort_order: int = 0
+
+
+class PartnerCategoryUpdate(ApiModel):
+    name: str | None = Field(default=None, min_length=1, max_length=120)
+    description: str | None = None
+    is_active: bool | None = None
+    sort_order: int | None = None
+
+
+class PartnerCategoryRead(ApiModel):
+    id: str
+    name: str
+    description: str | None = None
+    is_active: bool
+    sort_order: int
+    partner_count: int = 0
+    created_at: datetime | None = None
+    updated_at: datetime | None = None

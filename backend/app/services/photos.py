@@ -10,6 +10,13 @@ from app.schemas.photo import PhotoCreate
 from app.services.storage import StoredFile
 from app.services.timeline import TimelineService
 
+PHOTO_CONTENT_TYPE_ALIASES = {
+    "image/jpg": "image/jpeg",
+    "image/jpeg": "image/jpeg",
+    "image/png": "image/png",
+    "image/webp": "image/webp",
+}
+
 
 class PhotoService:
     def __init__(self, db: Session) -> None:
@@ -104,3 +111,29 @@ class PhotoService:
         self.db.commit()
         self.db.refresh(photo)
         return photo
+
+
+def normalize_uploaded_photo_content_type(content_type: str, data: bytes) -> str:
+    normalized_request = content_type.split(";", 1)[0].strip().lower()
+    requested_type = PHOTO_CONTENT_TYPE_ALIASES.get(normalized_request)
+    if content_type and requested_type is None:
+        raise ValueError("unsupported_photo_type")
+
+    detected_type = detect_photo_content_type(data)
+    if detected_type is None:
+        raise ValueError("unsupported_photo_type")
+
+    if requested_type is not None and requested_type != detected_type:
+        raise ValueError("unsupported_photo_type")
+
+    return detected_type
+
+
+def detect_photo_content_type(data: bytes) -> str | None:
+    if data.startswith(b"\xff\xd8\xff"):
+        return "image/jpeg"
+    if data.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "image/png"
+    if len(data) >= 12 and data.startswith(b"RIFF") and data[8:12] == b"WEBP":
+        return "image/webp"
+    return None

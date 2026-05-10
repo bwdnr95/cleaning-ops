@@ -5,10 +5,11 @@ from app.core.config import settings
 from app.api.deps import CurrentUser, ensure_partner_scope, get_session, require_partner
 from app.domain.constants import PhotoType
 from app.repositories.orders import OrderRepository
+from app.repositories.photos import PhotoRepository
 from app.schemas.order import PartnerJobRead
-from app.schemas.photo import PhotoRead
+from app.schemas.photo import PartnerPhotoRead
 from app.services.orders import OrderService, to_partner_job_dto
-from app.services.photos import PhotoService
+from app.services.photos import PhotoService, normalize_uploaded_photo_content_type
 from app.services.storage import get_storage_provider
 
 router = APIRouter()
@@ -20,7 +21,11 @@ def list_my_jobs(
     user: CurrentUser = Depends(require_partner),
 ) -> list[PartnerJobRead]:
     partner_id = ensure_partner_scope(user)
-    return [to_partner_job_dto(order) for order in OrderRepository(db).list_for_partner(partner_id)]
+    photo_repo = PhotoRepository(db)
+    return [
+        to_partner_job_dto(order, photos=photo_repo.list_for_order(order.id))
+        for order in OrderRepository(db).list_for_partner(partner_id)
+    ]
 
 
 @router.get("/{order_id}", response_model=PartnerJobRead)
@@ -34,7 +39,8 @@ def get_my_job(
         order = OrderService(db).get_for_partner(order_id, partner_id=partner_id)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail="order_not_found") from exc
-    return to_partner_job_dto(order)
+    photos = PhotoRepository(db).list_for_order(order.id)
+    return to_partner_job_dto(order, photos=photos)
 
 
 @router.post("/{order_id}/start", response_model=PartnerJobRead)
@@ -51,8 +57,11 @@ def start_my_job(
             partner_id=partner_id,
         )
     except ValueError as exc:
+        if str(exc) == "invalid_status_transition":
+            raise HTTPException(status_code=409, detail="invalid_status_transition") from exc
         raise HTTPException(status_code=404, detail="order_not_found") from exc
-    return to_partner_job_dto(order)
+    photos = PhotoRepository(db).list_for_order(order.id)
+    return to_partner_job_dto(order, photos=photos)
 
 
 @router.post("/{order_id}/complete", response_model=PartnerJobRead)
@@ -69,11 +78,14 @@ def complete_my_job(
             partner_id=partner_id,
         )
     except ValueError as exc:
+        if str(exc) == "invalid_status_transition":
+            raise HTTPException(status_code=409, detail="invalid_status_transition") from exc
         raise HTTPException(status_code=404, detail="order_not_found") from exc
-    return to_partner_job_dto(order)
+    photos = PhotoRepository(db).list_for_order(order.id)
+    return to_partner_job_dto(order, photos=photos)
 
 
-@router.post("/{order_id}/photos", response_model=PhotoRead)
+@router.post("/{order_id}/photos", response_model=PartnerPhotoRead)
 async def upload_photo(
     order_id: str,
     photo_type: PhotoType = Form(...),
@@ -86,23 +98,30 @@ async def upload_photo(
     if order is None or order.partner_id != partner_id:
         raise HTTPException(status_code=404, detail="order_not_found")
 
-    content_type = file.content_type or ""
-    if content_type not in {"image/jpeg", "image/png", "image/webp"}:
-        raise HTTPException(status_code=400, detail="unsupported_photo_type")
-
     data = await file.read()
     if len(data) > settings.photo_max_upload_bytes:
         raise HTTPException(status_code=413, detail="photo_too_large")
 
-    stored_file = get_storage_provider().save(
+    try:
+        content_type = normalize_uploaded_photo_content_type(file.content_type or "", data)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    storage = get_storage_provider()
+    stored_file = storage.save(
         data=data,
         file_name=file.filename or "photo",
         content_type=content_type,
     )
-    return PhotoService(db).upload_stored_for_partner(
-        order_id=order_id,
-        photo_type=photo_type,
-        stored_file=stored_file,
-        user_id=user.id,
-        partner_id=partner_id,
-    )
+    try:
+        return PhotoService(db).upload_stored_for_partner(
+            order_id=order_id,
+            photo_type=photo_type,
+            stored_file=stored_file,
+            user_id=user.id,
+            partner_id=partner_id,
+        )
+    except Exception:
+        db.rollback()
+        storage.delete(stored_file.storage_key)
+        raise
