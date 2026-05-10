@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, String, Text
+from sqlalchemy import JSON, DateTime, ForeignKey, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.domain.constants import MessageChannel, MessageStatus, MessageType, RecipientType
@@ -20,4 +20,14 @@ class MessageLog(CreatedAtMixin, Base):
     content: Mapped[str] = mapped_column(Text)
     status: Mapped[MessageStatus] = mapped_column(String(20), index=True)
     error_message: Mapped[str | None] = mapped_column(Text)
+    provider: Mapped[str | None] = mapped_column(String(40), index=True, default="mock")
+    provider_message_id: Mapped[str | None] = mapped_column(String(160))
+    provider_group_id: Mapped[str | None] = mapped_column(String(160), index=True)
+    provider_error_code: Mapped[str | None] = mapped_column(String(80))
+    provider_status_code: Mapped[str | None] = mapped_column(String(80))
+    provider_status_message: Mapped[str | None] = mapped_column(String(255))
+    provider_response: Mapped[dict[str, object] | None] = mapped_column(JSON)
+    requested_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    provider_reported_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    delivered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

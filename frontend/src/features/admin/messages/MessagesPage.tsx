@@ -1,9 +1,11 @@
 import React from 'react';
 
-import { listAdminMessages, sendAdminMessage } from '../../../api/messages';
+import { getAdminMessageSettings, listAdminMessages, sendAdminMessage } from '../../../api/messages';
 import { DatePicker } from '../../../components/common/DatePicker';
 import { Badge, Icon } from '../../../components/common/ui';
 import { useApiResource } from '../../../api/useApiResource';
+import { formatPhone } from '../../../domain/phone';
+import { formatAppDateTime, formatAppDateValue } from '../../../domain/time';
 
 const MESSAGE_TYPE_OPTIONS = [
   { value: 'all', label: '전체' },
@@ -15,13 +17,17 @@ const MESSAGE_TYPE_OPTIONS = [
 
 const STATUS_OPTIONS = [
   { value: 'all', label: '전체' },
-  { value: 'sent', label: '성공' },
-  { value: 'failed', label: '실패' },
+  { value: 'sent', label: '요청성공' },
+  { value: 'delivered', label: '배송완료' },
+  { value: 'failed', label: '요청실패' },
+  { value: 'delivery_failed', label: '배송실패' },
 ];
 
 export function MessagesPage({ onOpenOrder }) {
   const messagesResource = useApiResource(listAdminMessages);
+  const settingsResource = useApiResource(getAdminMessageSettings);
   const messages = messagesResource.data || [];
+  const messageSettings = settingsResource.data || null;
   const [query, setQuery] = React.useState('');
   const [typeFilter, setTypeFilter] = React.useState('all');
   const [statusFilter, setStatusFilter] = React.useState('all');
@@ -44,7 +50,8 @@ export function MessagesPage({ onOpenOrder }) {
     setIsResending(true);
     try {
       const resent = await sendAdminMessage(message.order_id, message.message_type, message.recipient_type);
-      setNotice(`${shortOrderId(message.order_id)} ${messageTypeLabel(message.message_type)} 재발송 결과: ${messageStatusLabel(resent.status)}`);
+      const reason = isMessageFailure(resent.status) ? ` (${providerErrorText(resent)})` : '';
+      setNotice(`${shortOrderId(message.order_id)} ${messageTypeLabel(message.message_type)} 재발송 결과: ${messageStatusLabel(resent.status)}${reason}`);
       messagesResource.reload();
     } catch (requestError) {
       setError(toActionErrorMessage(requestError));
@@ -62,6 +69,8 @@ export function MessagesPage({ onOpenOrder }) {
           <StatCard label="실패" value={stats.failed} icon="x" tone="danger" />
           <StatCard label="고객 링크" value={stats.customerLinks} icon="fileText" tone="info" />
         </div>
+
+        {messageSettings && <MessageSettingsStrip settings={messageSettings} />}
 
         <section className="card" style={{ padding: 0, overflow: 'hidden' }}>
           <div style={{
@@ -146,8 +155,8 @@ export function MessagesPage({ onOpenOrder }) {
           {!messagesResource.isLoading && messagesResource.error && <StateLine text="발송 이력을 불러오지 못했습니다." tone="danger" />}
           {!messagesResource.isLoading && !messagesResource.error && filtered.length === 0 && <StateLine text="표시할 발송 이력이 없습니다." />}
           {!messagesResource.isLoading && !messagesResource.error && filtered.length > 0 && (
-            <div style={{ display: 'grid', gridTemplateColumns: '132px 120px 132px 136px 1fr 72px 76px 128px', fontSize: 12 }}>
-              {['발송시각', '주문번호', '유형', '수신자', '내용', '채널', '상태', '관리'].map((header) => (
+            <div style={{ display: 'grid', gridTemplateColumns: '126px 104px 124px 128px minmax(220px, 1fr) 70px 120px 108px 112px', fontSize: 12 }}>
+              {['발송시각', '주문번호', '유형', '수신자', '내용', '채널', 'Provider', '상태', '관리'].map((header) => (
                 <HeaderCell key={header}>{header}</HeaderCell>
               ))}
               {filtered.map((message) => (
@@ -167,7 +176,7 @@ export function MessagesPage({ onOpenOrder }) {
                   <BodyCell>
                     <div style={{ minWidth: 0 }}>
                       <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{message.recipient_name}</div>
-                      <div className="mono" style={{ color: 'var(--text-tertiary)', fontSize: 10.5 }}>{maskPhone(message.recipient_phone)}</div>
+                      <div className="mono" style={{ color: 'var(--text-tertiary)', fontSize: 10.5 }}>{formatPhone(message.recipient_phone)}</div>
                     </div>
                   </BodyCell>
                   <BodyCell>
@@ -177,7 +186,22 @@ export function MessagesPage({ onOpenOrder }) {
                   </BodyCell>
                   <BodyCell>{channelLabel(message.channel)}</BodyCell>
                   <BodyCell>
-                    <Badge tone={message.status === 'sent' ? 'success' : 'danger'} dot>{messageStatusLabel(message.status)}</Badge>
+                    <div style={{ minWidth: 0, display: 'flex', flexDirection: 'column', gap: 3 }}>
+                      <span style={{ fontWeight: 700 }}>{providerLabel(message.provider)}</span>
+                      <span className="mono" title={providerRef(message)} style={{ color: 'var(--text-tertiary)', fontSize: 10.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {providerRef(message)}
+                      </span>
+                    </div>
+                  </BodyCell>
+                  <BodyCell>
+                    <div style={{ minWidth: 0, display: 'flex', flexDirection: 'column', gap: 4 }}>
+                      <Badge tone={messageStatusTone(message.status)} dot>{messageStatusLabel(message.status)}</Badge>
+                      {isMessageFailure(message.status) && (
+                        <span title={message.error_message || message.provider_error_code || ''} style={{ color: 'var(--danger-fg)', fontSize: 10.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {providerErrorText(message)}
+                        </span>
+                      )}
+                    </div>
                   </BodyCell>
                   <BodyCell>
                     <div style={{ display: 'inline-flex', gap: 5 }}>
@@ -269,6 +293,60 @@ function Segmented({ testPrefix, value, options, onChange }) {
   );
 }
 
+function MessageSettingsStrip({ settings }) {
+  const templateReadyCount = Object.values(settings.kakao_templates_configured || {})
+    .filter(Boolean).length;
+  const templateTotal = Object.keys(settings.kakao_templates_configured || {}).length;
+  const hasWarnings = (settings.warnings || []).length > 0;
+  return (
+    <section className="card" data-testid="messages-settings-strip" style={{ padding: 12, display: 'grid', gridTemplateColumns: '1.1fr repeat(4, minmax(0, 0.8fr))', gap: 8, alignItems: 'center' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 9, minWidth: 0 }}>
+        <span style={{
+          width: 30,
+          height: 30,
+          borderRadius: 6,
+          display: 'inline-flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          background: hasWarnings ? 'var(--warn-bg)' : 'var(--success-bg)',
+          color: hasWarnings ? 'var(--warn-fg)' : 'var(--success-fg)',
+        }}>
+          <Icon name={hasWarnings ? 'lock' : 'check'} size={14} />
+        </span>
+        <div style={{ minWidth: 0 }}>
+          <div style={{ fontSize: 12.5, fontWeight: 700 }}>{providerLabel(settings.provider)}</div>
+          <div style={{ marginTop: 2, fontSize: 11, color: hasWarnings ? 'var(--warn-fg)' : 'var(--text-tertiary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {hasWarnings ? settingsWarningText(settings.warnings[0]) : '실발송 준비 완료'}
+          </div>
+        </div>
+      </div>
+      <ReadinessPill label="SMS" ready={settings.can_send_sms} />
+      <ReadinessPill label="알림톡" ready={settings.can_send_alimtalk} />
+      <ReadinessPill label="Webhook" ready={settings.solapi_webhook_configured} />
+      <ReadinessPill label={`템플릿 ${templateReadyCount}/${templateTotal}`} ready={templateTotal > 0 && templateReadyCount === templateTotal} />
+    </section>
+  );
+}
+
+function ReadinessPill({ label, ready }) {
+  return (
+    <div style={{
+      minHeight: 34,
+      padding: '7px 9px',
+      border: '1px solid var(--border)',
+      borderRadius: 6,
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      gap: 8,
+      fontSize: 11.5,
+    }}>
+      <span style={{ color: 'var(--text-secondary)', fontWeight: 600 }}>{label}</span>
+      <Badge tone={ready ? 'success' : 'warn'} dot>{ready ? '준비' : '점검'}</Badge>
+    </div>
+  );
+}
+
 function StatCard({ label, value, icon, tone = 'neutral' }) {
   return (
     <div className="card" style={{ padding: 14, display: 'flex', alignItems: 'center', gap: 10 }}>
@@ -343,8 +421,8 @@ function StateLine({ text, tone = 'muted', testId = undefined }) {
 
 function toStats(messages) {
   return {
-    sent: messages.filter((message) => message.status === 'sent').length,
-    failed: messages.filter((message) => message.status === 'failed').length,
+    sent: messages.filter((message) => ['sent', 'delivered'].includes(message.status)).length,
+    failed: messages.filter((message) => ['failed', 'delivery_failed'].includes(message.status)).length,
     customerLinks: messages.filter((message) => ['customer_schedule_confirmed', 'customer_day_before', 'customer_photo_ready'].includes(message.message_type)).length,
   };
 }
@@ -361,6 +439,10 @@ function matchesQuery(message, query) {
     message.message_type,
     message.content,
     message.error_message,
+    message.provider,
+    message.provider_error_code,
+    message.provider_group_id,
+    message.provider_message_id,
   ].some((value) => String(value || '').toLowerCase().includes(keyword));
 }
 
@@ -401,8 +483,7 @@ function toDateValue(value) {
   if (!value) {
     return '';
   }
-  const date = new Date(value);
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+  return formatAppDateValue(value);
 }
 
 function messageTypeLabel(type) {
@@ -414,9 +495,22 @@ function messageTypeLabel(type) {
 }
 
 function messageStatusLabel(status) {
-  if (status === 'sent') return '성공';
-  if (status === 'failed') return '실패';
+  if (status === 'sent') return '요청성공';
+  if (status === 'failed') return '요청실패';
+  if (status === 'delivered') return '배송완료';
+  if (status === 'delivery_failed') return '배송실패';
   return status || '-';
+}
+
+function messageStatusTone(status) {
+  if (status === 'delivered') return 'success';
+  if (status === 'sent') return 'info';
+  if (isMessageFailure(status)) return 'danger';
+  return 'neutral';
+}
+
+function isMessageFailure(status) {
+  return status === 'failed' || status === 'delivery_failed';
 }
 
 function channelLabel(channel) {
@@ -426,23 +520,49 @@ function channelLabel(channel) {
   return String(channel || '-').toUpperCase();
 }
 
-function formatDateTime(value) {
-  if (!value) {
-    return '-';
-  }
-  const date = new Date(value);
-  return `${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')} ${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
+function providerLabel(provider) {
+  if (provider === 'mock') return 'Mock';
+  if (provider === 'solapi') return 'SOL API';
+  if (provider === 'configuration_error') return 'Config';
+  return provider || '-';
 }
 
-function maskPhone(phone) {
-  if (!phone) {
-    return '-';
-  }
-  const digits = phone.replace(/\D/g, '');
-  if (digits.length < 8) {
-    return phone;
-  }
-  return `${digits.slice(0, 3)}-${digits.slice(3, 5)}**-${digits.slice(-4)}`;
+function providerRef(message) {
+  return message.provider_group_id || message.provider_message_id || '-';
+}
+
+function providerErrorText(message) {
+  const code = message.provider_error_code || '';
+  const map = {
+    missing_recipient: '수신번호 없음',
+    solapi_missing_credentials: 'SOL API 인증 설정 누락',
+    solapi_missing_sender_number: 'SOL API 발신번호 누락',
+    solapi_missing_kakao_pf_id: 'SOL API 카카오 채널 ID 누락',
+    solapi_missing_kakao_template_id: '알림톡 승인 템플릿 ID 누락',
+    solapi_http_error: 'SOL API HTTP 오류',
+    solapi_request_failed: 'SOL API 요청 실패',
+    solapi_invalid_response: 'SOL API 응답 오류',
+    solapi_provider_failed: 'SOL API 발송 실패',
+    unsupported_message_provider: 'Provider 설정 오류',
+  };
+  return map[code] || message.provider_status_message || message.error_message || '실패 사유 미상';
+}
+
+function settingsWarningText(code) {
+  const map = {
+    message_provider_mock: 'Mock 발송 모드',
+    solapi_missing_credentials: 'SOL API 인증 설정 필요',
+    solapi_missing_sender_number: '발신번호 설정 필요',
+    solapi_missing_webhook_secret: 'Webhook secret 설정 필요',
+    solapi_missing_kakao_pf_id: '카카오 채널 ID 설정 필요',
+    solapi_missing_kakao_template_ids: '알림톡 템플릿 ID 설정 필요',
+    unsupported_message_provider: 'Provider 설정 확인 필요',
+  };
+  return map[code] || '메시지 설정 확인 필요';
+}
+
+function formatDateTime(value) {
+  return formatAppDateTime(value);
 }
 
 function shortOrderId(orderId) {

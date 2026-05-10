@@ -25,3 +25,26 @@ class MessageRepository(Repository[MessageLog]):
             .order_by(MessageLog.created_at.asc(), MessageLog.id.asc())
         )
         return list(self.db.scalars(stmt))
+
+    def get_by_provider_message_id(self, provider: str, provider_message_id: str) -> MessageLog | None:
+        stmt = (
+            select(MessageLog)
+            .where(
+                MessageLog.provider == provider,
+                MessageLog.provider_message_id == provider_message_id,
+            )
+            .order_by(MessageLog.created_at.desc(), MessageLog.id.desc())
+            .limit(1)
+        )
+        return self.db.scalars(stmt).first()
+
+    def list_by_provider_group_id(self, provider: str, provider_group_id: str) -> list[MessageLog]:
+        stmt = (
+            select(MessageLog)
+            .where(
+                MessageLog.provider == provider,
+                MessageLog.provider_group_id == provider_group_id,
+            )
+            .order_by(MessageLog.created_at.desc(), MessageLog.id.desc())
+        )
+        return list(self.db.scalars(stmt))
