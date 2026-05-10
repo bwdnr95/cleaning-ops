@@ -8,9 +8,17 @@ from fastapi.staticfiles import StaticFiles
 from app.api.router import api_router
 from app.core.config import settings
 from app.core.middleware import SecurityHeadersMiddleware
+from app.core.observability import (
+    RequestIDMiddleware,
+    configure_structlog,
+    init_sentry,
+)
 
 
 def create_app() -> FastAPI:
+    init_sentry(settings)
+    configure_structlog(settings)
+
     app = FastAPI(title=settings.app_name, version=settings.app_version)
     if settings.storage_provider.strip().lower() == "local":
         app.mount(
@@ -19,6 +27,7 @@ def create_app() -> FastAPI:
             name="uploads",
         )
 
+    app.add_middleware(RequestIDMiddleware)
     app.add_middleware(SecurityHeadersMiddleware)
 
     app.add_middleware(

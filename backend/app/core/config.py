@@ -45,6 +45,11 @@ class Settings(BaseSettings):
     solapi_kakao_template_partner_assignment: str = ""
     solapi_kakao_template_customer_photo_ready: str = ""
     solapi_alimtalk_fallback_sms: bool = True
+    sentry_dsn: str = ""
+    sentry_environment: str = ""
+    sentry_release: str = ""
+    sentry_traces_sample_rate: float = 0.1
+    sentry_send_default_pii: bool = False
 
     def model_post_init(self, __context: object) -> None:
         provider = self.message_provider.strip().lower()
@@ -95,6 +100,10 @@ class Settings(BaseSettings):
                         "production solapi message provider missing settings: "
                         + ", ".join(missing)
                     )
+            if not self.sentry_dsn:
+                raise ValueError("production requires sentry_dsn for error tracking")
+            if not 0.0 <= self.sentry_traces_sample_rate <= 1.0:
+                raise ValueError("sentry_traces_sample_rate must be in [0.0, 1.0]")
 
 
 settings = Settings()
