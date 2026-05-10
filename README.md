@@ -1,5 +1,9 @@
 # Handoff: Cleaning Ops Control Center
 
+> Archive note: the standalone design prototype files now live in
+> `.master/design_handoff_prototype/`. Production implementation lives in
+> `backend/` and `frontend/`.
+
 청소업체용 통합 운영 관리 시스템 — 주문 접수, 협력사 배정, 일정관리, 사진 검수, 고객 안내, 결제 확인을 통합한 B2B SaaS.
 
 ---
@@ -10,7 +14,7 @@
 
 작업할 일은 이 디자인을 **타깃 코드베이스의 환경(React + 라이브러리, Vue, Next.js 등)에 맞게 재구현**하는 것입니다. 코드베이스에 이미 디자인 시스템이 있다면 그 패턴/컴포넌트를 사용해서 같은 비주얼·동작을 만드세요. 환경이 아직 없다면 React + Tailwind 또는 React + CSS Modules 조합을 권장합니다.
 
-프로토타입은 React 18 (Babel standalone)으로 작성되어 있어 — 빌드 시스템 없이 바로 브라우저에서 열어 확인 가능합니다. `Cleaning Ops Control Center.html` 을 브라우저로 여세요.
+프로토타입은 React 18 (Babel standalone)으로 작성되어 있어 — 빌드 시스템 없이 바로 브라우저에서 열어 확인 가능합니다. `.master/design_handoff_prototype/Cleaning Ops Control Center.html` 을 브라우저로 여세요.
 
 ## Fidelity
 
@@ -163,7 +167,7 @@
 
 ## Design Tokens
 
-전체는 `styles.css` 의 `:root` 와 `[data-theme="dark"]` 참고.
+전체는 `.master/design_handoff_prototype/styles.css` 의 `:root` 와 `[data-theme="dark"]` 참고.
 
 ### Colors (Light)
 
@@ -290,20 +294,20 @@
 
 | 파일 | 역할 |
 |---|---|
-| `Cleaning Ops Control Center.html` | 엔트리 — design canvas로 모든 화면 진열 |
-| `styles.css` | 디자인 토큰 + 공통 CSS (버튼, 테이블, 인풋, 카드) |
-| `components.jsx` | 공통 컴포넌트 (Icon, Badge, StatusBadge, Avatar, Sparkline) |
-| `data.jsx` | Mock 데이터 (ORDERS, KPI, QUEUES, TODAY_JOBS 등) |
-| `admin-shell.jsx` | 관리자 사이드바 + topbar |
-| `page-dashboard.jsx` | 관리자 대시보드 |
-| `page-orders.jsx` | 관리자 주문 리스트 (모던 톤) |
-| `page-calendar.jsx` | 관리자 일정 캘린더 |
-| `page-order-detail.jsx` | 관리자 주문 상세 |
-| `page-photo-review.jsx` | 관리자 사진 검수 |
-| `page-partner.jsx` | 협력사 모바일 작업 상세 |
-| `page-customer.jsx` | 고객 모바일 예약 확인 |
-| `design-canvas.jsx` | 디자인 캔버스 (개발 환경에서는 사용 안 함) |
-| `tweaks-panel.jsx` | 라이트/다크 토글 (개발 환경에서는 사용 안 함) |
+| `.master/design_handoff_prototype/Cleaning Ops Control Center.html` | 엔트리 — design canvas로 모든 화면 진열 |
+| `.master/design_handoff_prototype/styles.css` | 디자인 토큰 + 공통 CSS (버튼, 테이블, 인풋, 카드) |
+| `.master/design_handoff_prototype/components.jsx` | 공통 컴포넌트 (Icon, Badge, StatusBadge, Avatar, Sparkline) |
+| `.master/design_handoff_prototype/data.jsx` | Mock 데이터 (ORDERS, KPI, QUEUES, TODAY_JOBS 등) |
+| `.master/design_handoff_prototype/admin-shell.jsx` | 관리자 사이드바 + topbar |
+| `.master/design_handoff_prototype/page-dashboard.jsx` | 관리자 대시보드 |
+| `.master/design_handoff_prototype/page-orders.jsx` | 관리자 주문 리스트 (모던 톤) |
+| `.master/design_handoff_prototype/page-calendar.jsx` | 관리자 일정 캘린더 |
+| `.master/design_handoff_prototype/page-order-detail.jsx` | 관리자 주문 상세 |
+| `.master/design_handoff_prototype/page-photo-review.jsx` | 관리자 사진 검수 |
+| `.master/design_handoff_prototype/page-partner.jsx` | 협력사 모바일 작업 상세 |
+| `.master/design_handoff_prototype/page-customer.jsx` | 고객 모바일 예약 확인 |
+| `.master/design_handoff_prototype/design-canvas.jsx` | 디자인 캔버스 (개발 환경에서는 사용 안 함) |
+| `.master/design_handoff_prototype/tweaks-panel.jsx` | 라이트/다크 토글 (개발 환경에서는 사용 안 함) |
 
 ---
 
@@ -311,7 +315,7 @@
 
 1. **프레임워크**: React 18 + TypeScript 권장. Next.js (App Router) 또는 Vite + React Router.
 2. **스타일링**:
-   - **선호**: CSS Modules 또는 vanilla-extract — `styles.css` 의 토큰을 그대로 옮기기 쉬움
+   - **선호**: CSS Modules 또는 vanilla-extract — `.master/design_handoff_prototype/styles.css` 의 토큰을 그대로 옮기기 쉬움
    - **대안**: Tailwind — `tailwind.config` 의 `theme.extend.colors` 에 디자인 토큰 매핑
    - 인라인 스타일은 프로토타입 편의용. production 에서는 className 기반으로 분리.
 3. **컴포넌트 라이브러리**: Headless UI (Radix UI) 권장 — 드롭다운, 체크박스, 탭 등의 접근성 처리.

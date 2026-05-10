@@ -10,6 +10,7 @@ venv/
 backend/cleaning_ops.db
 backend/e2e_cleaning_ops.db
 backend/e2e_storage/
+backend/local_storage/
 *.sqlite3
 
 # Frontend
@@ -22,3 +23,9 @@ frontend/test-results/
 .env
 .env.*
 !.env.example
+
+# Operator workspace (not for repo)
+.claude/
+.master/*
+!.master/design_handoff_prototype/
+!.master/design_handoff_prototype/**

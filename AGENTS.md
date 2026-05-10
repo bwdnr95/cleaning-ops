@@ -7,8 +7,8 @@
 
 - 제품/업무 기획: `.master/cleaning_ops_control_center_project_brief.md`
 - 개발/QA 브리프: `.master/codex_claude_code_dev_brief.md`
-- 디자인 핸드오프: `README.md`, `styles.css`, `page-*.jsx`, `components.jsx`, `admin-shell.jsx`
-- 현재 루트의 HTML/JSX 파일은 high-fidelity prototype이다. Production 코드로 그대로 복사하지 말고, 대상 앱 구조에 맞게 재구현한다.
+- 디자인 핸드오프: `README.md`, `.master/design_handoff_prototype/styles.css`, `.master/design_handoff_prototype/page-*.jsx`, `.master/design_handoff_prototype/components.jsx`, `.master/design_handoff_prototype/admin-shell.jsx`
+- `.master/design_handoff_prototype/`의 HTML/JSX 파일은 high-fidelity prototype이다. Production 코드로 그대로 복사하지 말고, 대상 앱 구조에 맞게 재구현한다.
 
 ## Product Invariants
 
@@ -165,7 +165,7 @@ export interface MessageProvider {
 - 관리자 화면은 데스크톱 우선, 테이블과 업무 큐 중심이다.
 - 협력사 화면은 모바일 우선, 큰 버튼과 작업 카드 중심이다.
 - 고객 화면은 모바일 우선, 신뢰감 있는 브랜드 페이지처럼 만든다.
-- 디자인 토큰은 `README.md`와 `styles.css`를 기준으로 한다.
+- 디자인 토큰은 `README.md`와 `.master/design_handoff_prototype/styles.css`를 기준으로 한다.
 - 기존 프로토타입의 색상, 간격, 상태 배지 의미를 보존한다.
 - 상태별 색상과 배지 의미를 임의로 바꾸지 않는다.
 - 고객/협력사 화면에는 내부 운영 용어를 노출하지 않는다.
