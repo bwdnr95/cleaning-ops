@@ -1,11 +1,12 @@
 from fastapi import APIRouter
 
-from app.api.routes import auth, webhooks
+from app.api.routes import auth, health, webhooks
 from app.api.routes.admin import calendar, dashboard, messages, orders, partners, photos, services
 from app.api.routes.customer import orders as customer_orders
 from app.api.routes.partner import jobs
 
 api_router = APIRouter()
+api_router.include_router(health.router, prefix="/health", tags=["health"])
 api_router.include_router(auth.router, prefix="/auth", tags=["auth"])
 api_router.include_router(dashboard.router, prefix="/admin/dashboard", tags=["admin-dashboard"])
 api_router.include_router(calendar.router, prefix="/admin/calendar", tags=["admin-calendar"])
