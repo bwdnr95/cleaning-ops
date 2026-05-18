@@ -41,6 +41,31 @@ export function updateAdminOrder(orderId, input) {
   });
 }
 
+export function createOrderGroup(input) {
+  return apiRequest('/admin/orders/groups', {
+    method: 'POST',
+    body: input,
+  });
+}
+
+export function getAdminOrderGroup(groupId) {
+  return apiRequest(`/admin/orders/groups/${encodeURIComponent(groupId)}`);
+}
+
+export function addLineToGroup(groupId, input) {
+  return apiRequest(`/admin/orders/groups/${encodeURIComponent(groupId)}/lines`, {
+    method: 'POST',
+    body: input,
+  });
+}
+
+export function updateAdminOrderGroup(groupId, input) {
+  return apiRequest(`/admin/orders/groups/${encodeURIComponent(groupId)}`, {
+    method: 'PATCH',
+    body: input,
+  });
+}
+
 export function listPartners() {
   return apiRequest('/admin/partners');
 }
