@@ -979,14 +979,10 @@ class MessageService:
             return
 
         if payload.message_type == MessageType.CUSTOMER_PHOTO_READY:
-            self._advance_status(
-                order,
-                OrderStatus.CUSTOMER_DELIVERY_DONE,
-                actor_user_id=actor_user_id,
-                title="고객 전달 완료",
-                description="고객에게 작업 사진 확인 링크를 발송했습니다.",
-            )
+            # 정책 변경(2026-05-18): 사진 링크 발송은 메시지/timeline만 남기고
+            # 주문 상태는 자동 advance 하지 않는다. 재전송 가능성을 보장하기 위함.
             self._record_customer_link_sent(order, payload, log, actor_user_id=actor_user_id)
+            return
 
     def _advance_status(
         self,
