@@ -1,37 +1,37 @@
 import React from 'react';
 
-import { createAdminOrder, getAdminOrder, listPartners, listServiceCatalog, updateAdminOrder } from '../../../api/admin';
+import {
+  createOrderGroup,
+  getAdminOrder,
+  listPartners,
+  listServiceCatalog,
+  updateAdminOrder,
+  updateAdminOrderGroup,
+} from '../../../api/admin';
+import { useApiResource } from '../../../api/useApiResource';
 import { DatePicker } from '../../../components/common/DatePicker';
 import { Icon } from '../../../components/common/ui';
 import { ORDER_STATUSES } from '../../../domain/orderStatus';
 import { PARTNER_PAYMENT_STATUSES, PAYMENT_STATUSES } from '../../../domain/paymentStatus';
 import { getAppTodayValue } from '../../../domain/time';
-import { useApiResource } from '../../../api/useApiResource';
 
 export function OrderFormPage({ mode = 'create', orderId = null, onCancel, onSaved }) {
   const partners = useApiResource(listPartners);
   const serviceCatalog = useApiResource(listServiceCatalog);
-  const [form, setForm] = React.useState(() => createEmptyForm());
+  const [form, setForm] = React.useState(() => createEmptyGroupForm());
   const [isLoadingOrder, setIsLoadingOrder] = React.useState(mode === 'edit');
   const [isSaving, setIsSaving] = React.useState(false);
   const [error, setError] = React.useState(null);
-  const [isBalanceManual, setIsBalanceManual] = React.useState(false);
   const activeServiceCategories = React.useMemo(
     () => (serviceCatalog.data || []).filter((category) => category.is_active),
     [serviceCatalog.data],
   );
-  const selectedServiceItems = React.useMemo(() => {
-    return activeServiceCategories
-      .filter((category) => category.id === form.service_category_id)
-      .flatMap((category) => (category.items || []).filter((item) => item.is_active));
-  }, [activeServiceCategories, form.service_category_id]);
 
   React.useEffect(() => {
     let isCurrent = true;
 
     if (mode !== 'edit' || !orderId) {
-      setForm(createEmptyForm());
-      setIsBalanceManual(false);
+      setForm(createEmptyGroupForm());
       setIsLoadingOrder(false);
       return () => {
         isCurrent = false;
@@ -43,7 +43,6 @@ export function OrderFormPage({ mode = 'create', orderId = null, onCancel, onSav
       .then((order) => {
         if (isCurrent) {
           setForm(toForm(order));
-          setIsBalanceManual(false);
         }
       })
       .catch(() => {
@@ -62,71 +61,90 @@ export function OrderFormPage({ mode = 'create', orderId = null, onCancel, onSav
     };
   }, [mode, orderId]);
 
-  const setField = (key, value) => {
+  const setGroupField = (key, value) => {
     setForm((current) => ({ ...current, [key]: value }));
   };
 
-  const handleMoneyChange = (key, value) => {
-    const formattedValue = formatMoneyInput(value);
-
-    if (key === 'balance_amount') {
-      setIsBalanceManual(true);
-      setForm((current) => ({ ...current, balance_amount: formattedValue }));
-      return;
-    }
-
+  const setLineField = (lineIndex, key, value) => {
     setForm((current) => {
-      const next = { ...current, [key]: formattedValue };
-
-      if ((key === 'total_amount' || key === 'deposit_amount') && !isBalanceManual) {
-        return {
-          ...next,
-          balance_amount: calculateBalanceAmount(next.total_amount, next.deposit_amount),
-        };
-      }
-
-      return next;
+      const nextLines = current.lines.slice();
+      nextLines[lineIndex] = { ...nextLines[lineIndex], [key]: value };
+      return { ...current, lines: nextLines };
     });
   };
 
-  const handlePartnerChange = (partnerId) => {
-    const partner = (partners.data || []).find((item) => item.id === partnerId);
-    setForm((current) => ({
-      ...current,
-      partner_id: partnerId,
-      team_name: partner?.name || '',
-    }));
+  const addLine = () => {
+    setForm((current) => ({ ...current, lines: [...current.lines, createEmptyLineForm()] }));
   };
 
-  const handleServiceCategoryChange = (categoryId) => {
-    setForm((current) => ({
-      ...current,
-      service_category_id: categoryId,
-      service_item_id: '',
-    }));
-  };
-
-  const handleServiceItemChange = (serviceItemId) => {
-    const option = selectedServiceItems.find((item) => item.id === serviceItemId);
+  const removeLine = (lineIndex) => {
     setForm((current) => {
-      const totalAmount = option && current.total_amount === ''
-        ? formatMoneyInput(Math.round(Number(option.base_price || 0)))
-        : current.total_amount;
-      const next = {
-        ...current,
-        service_item_id: serviceItemId,
-        service_name: option?.name || current.service_name,
-        total_amount: totalAmount,
-      };
+      if (current.lines.length <= 1) {
+        return current;
+      }
+      return { ...current, lines: current.lines.filter((_, index) => index !== lineIndex) };
+    });
+  };
 
-      if (!isBalanceManual) {
-        return {
-          ...next,
-          balance_amount: calculateBalanceAmount(next.total_amount, next.deposit_amount),
-        };
+  const handleMoneyChange = (lineIndex, key, value) => {
+    const formattedValue = formatMoneyInput(value);
+    setForm((current) => {
+      const nextLines = current.lines.slice();
+      const nextLine = { ...nextLines[lineIndex], [key]: formattedValue };
+
+      if (key === 'total_amount' || key === 'deposit_amount') {
+        nextLine.balance_amount = calculateBalanceAmount(nextLine.total_amount, nextLine.deposit_amount);
       }
 
-      return next;
+      nextLines[lineIndex] = nextLine;
+      return { ...current, lines: nextLines };
+    });
+  };
+
+  const handlePartnerChange = (lineIndex, partnerId) => {
+    const partner = (partners.data || []).find((item) => item.id === partnerId);
+    setForm((current) => {
+      const nextLines = current.lines.slice();
+      nextLines[lineIndex] = {
+        ...nextLines[lineIndex],
+        partner_id: partnerId,
+        team_name: partner?.name || '',
+      };
+      return { ...current, lines: nextLines };
+    });
+  };
+
+  const handleServiceCategoryChange = (lineIndex, categoryId) => {
+    setForm((current) => {
+      const nextLines = current.lines.slice();
+      nextLines[lineIndex] = {
+        ...nextLines[lineIndex],
+        service_category_id: categoryId,
+        service_item_id: '',
+      };
+      return { ...current, lines: nextLines };
+    });
+  };
+
+  const handleServiceItemChange = (lineIndex, serviceItemId) => {
+    const line = form.lines[lineIndex];
+    const option = getServiceItems(activeServiceCategories, line.service_category_id)
+      .find((item) => item.id === serviceItemId);
+    setForm((current) => {
+      const nextLines = current.lines.slice();
+      const currentLine = nextLines[lineIndex];
+      const totalAmount = option && currentLine.total_amount === ''
+        ? formatMoneyInput(Math.round(Number(option.base_price || 0)))
+        : currentLine.total_amount;
+      const nextLine = {
+        ...currentLine,
+        service_item_id: serviceItemId,
+        service_name: option?.name || currentLine.service_name,
+        total_amount: totalAmount,
+      };
+      nextLine.balance_amount = calculateBalanceAmount(nextLine.total_amount, nextLine.deposit_amount);
+      nextLines[lineIndex] = nextLine;
+      return { ...current, lines: nextLines };
     });
   };
 
@@ -134,18 +152,25 @@ export function OrderFormPage({ mode = 'create', orderId = null, onCancel, onSav
     event.preventDefault();
     setError(null);
 
-    if (!form.customer_name.trim() || !form.customer_phone.trim() || !form.customer_address.trim() || !form.service_name.trim()) {
-      setError('고객명, 연락처, 주소, 상품명은 필수입니다.');
+    if (!form.customer_name.trim() || !form.customer_phone.trim() || !form.customer_address.trim()) {
+      setError('고객명, 연락처, 주소는 필수입니다.');
+      return;
+    }
+    if (form.lines.some((line) => !line.service_name.trim())) {
+      setError('모든 라인의 상품명은 필수입니다.');
       return;
     }
 
     setIsSaving(true);
     try {
-      const payload = toPayload(form);
-      const saved = mode === 'edit' && orderId
-        ? await updateAdminOrder(orderId, payload)
-        : await createAdminOrder(payload);
-      onSaved?.(saved);
+      if (mode === 'edit' && orderId) {
+        await updateAdminOrderGroup(form.group_id, toGroupMetadataPayload(form));
+        const saved = await updateAdminOrder(orderId, toLinePayload(form.lines[0]));
+        onSaved?.(saved);
+      } else {
+        const savedGroup = await createOrderGroup(toGroupCreatePayload(form));
+        onSaved?.(savedGroup.lines?.[0] || savedGroup);
+      }
     } catch (requestError) {
       setError(requestError?.message || '주문을 저장하지 못했습니다.');
     } finally {
@@ -185,118 +210,54 @@ export function OrderFormPage({ mode = 'create', orderId = null, onCancel, onSav
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
             <Section title="고객 정보">
               <FieldGrid>
-                <TextField testId="order-customer-name" label="고객명" required value={form.customer_name} onChange={(value) => setField('customer_name', value)} />
-                <TextField testId="order-customer-phone" label="연락처" required value={form.customer_phone} onChange={(value) => setField('customer_phone', value)} placeholder="010-0000-0000" />
-                <TextField label="유입 경로" value={form.source_channel} onChange={(value) => setField('source_channel', value)} />
-                <TextField testId="order-customer-address" label="주소" required span={2} value={form.customer_address} onChange={(value) => setField('customer_address', value)} />
+                <TextField testId="order-customer-name" label="고객명" required value={form.customer_name} onChange={(value) => setGroupField('customer_name', value)} />
+                <TextField testId="order-customer-phone" label="연락처" required value={form.customer_phone} onChange={(value) => setGroupField('customer_phone', value)} placeholder="010-0000-0000" />
+                <TextField label="유입 경로" value={form.source_channel} onChange={(value) => setGroupField('source_channel', value)} />
+                <TextField testId="order-customer-address" label="주소" required span={2} value={form.customer_address} onChange={(value) => setGroupField('customer_address', value)} />
               </FieldGrid>
             </Section>
 
-            <Section title="상품 / 일정">
-              <FieldGrid>
-                <Field label="카테고리">
-                  <select
-                    className="input"
-                    data-testid="order-service-category"
-                    value={form.service_category_id}
-                    onChange={(event) => handleServiceCategoryChange(event.target.value)}
-                  >
-                    <option value="">직접 입력</option>
-                    {activeServiceCategories.map((category) => (
-                      <option key={category.id} value={category.id}>{category.name}</option>
-                    ))}
-                  </select>
-                </Field>
-                <Field label="상세상품">
-                  <select
-                    className="input"
-                    data-testid="order-service-item"
-                    value={form.service_item_id}
-                    onChange={(event) => handleServiceItemChange(event.target.value)}
-                    disabled={!form.service_category_id}
-                  >
-                    <option value="">직접 입력</option>
-                    {selectedServiceItems.map((item) => (
-                      <option key={item.id} value={item.id}>
-                        {item.name} · {formatWon(item.base_price)}
-                      </option>
-                    ))}
-                  </select>
-                </Field>
-                <TextField testId="order-service-name" label="상품명" required value={form.service_name} onChange={(value) => setField('service_name', value)} />
-                <TextField label="수량/규격" value={form.size_or_quantity} onChange={(value) => setField('size_or_quantity', value)} />
-                <Field label="접수일">
-                  <DatePicker testId="order-received-date" value={form.received_date} onChange={(value) => setField('received_date', value)} />
-                </Field>
-                <Field label="방문 예정일">
-                  <DatePicker testId="order-scheduled-date" value={form.scheduled_date} onChange={(value) => setField('scheduled_date', value)} placeholder="방문일 선택" />
-                </Field>
-                <TextField testId="order-requested-time" label="요청 시간" value={form.requested_time} onChange={(value) => setField('requested_time', value)} placeholder="14:00 또는 오후 2-5시" />
-                <TextField label="상품 상세" span={2} multiline value={form.service_detail} onChange={(value) => setField('service_detail', value)} />
-                <TextField label="요청사항" span={2} multiline value={form.special_request} onChange={(value) => setField('special_request', value)} />
-              </FieldGrid>
-            </Section>
-
-            <Section title="금액 / 결제">
-              <FieldGrid>
-                <TextField testId="order-total-amount" label="총 금액" inputMode="numeric" value={form.total_amount} onChange={(value) => handleMoneyChange('total_amount', value)} />
-                <TextField testId="order-deposit-amount" label="계약금" inputMode="numeric" value={form.deposit_amount} onChange={(value) => handleMoneyChange('deposit_amount', value)} />
-                <TextField testId="order-balance-amount" label="잔금" inputMode="numeric" value={form.balance_amount} onChange={(value) => handleMoneyChange('balance_amount', value)} />
-                <TextField testId="order-onsite-extra-amount" label="현장 추가" inputMode="numeric" value={form.onsite_extra_amount} onChange={(value) => handleMoneyChange('onsite_extra_amount', value)} />
-                <Field label="결제 상태">
-                  <select className="input" data-testid="order-payment-status" value={form.payment_status} onChange={(event) => setField('payment_status', event.target.value)}>
-                    <option value="">미입력</option>
-                    {PAYMENT_STATUSES.map((status) => (
-                      <option key={status.value} value={status.value}>{status.label}</option>
-                    ))}
-                  </select>
-                </Field>
-                <TextField label="VAT" value={form.vat_type} onChange={(value) => setField('vat_type', value)} />
-                <TextField label="결제 메모" span={2} multiline value={form.payment_memo} onChange={(value) => setField('payment_memo', value)} />
-                <TextField label="증빙 메모" span={2} multiline value={form.evidence_memo} onChange={(value) => setField('evidence_memo', value)} />
-              </FieldGrid>
-            </Section>
-
-            <Section title="협력사 / 정산">
-              <FieldGrid>
-                <Field label="협력사">
-                  <select className="input" data-testid="order-partner" value={form.partner_id} onChange={(event) => handlePartnerChange(event.target.value)}>
-                    <option value="">미배정</option>
-                    {(partners.data || []).map((partner) => (
-                      <option key={partner.id} value={partner.id}>{partner.name}</option>
-                    ))}
-                  </select>
-                </Field>
-                <TextField label="팀명" value={form.team_name} onChange={(value) => setField('team_name', value)} />
-                <TextField testId="order-partner-payment-amount" label="협력사 지급액" inputMode="numeric" value={form.partner_payment_amount} onChange={(value) => handleMoneyChange('partner_payment_amount', value)} />
-                <Field label="협력사 정산 상태">
-                  <select className="input" data-testid="order-partner-payment-status" value={form.partner_payment_status} onChange={(event) => setField('partner_payment_status', event.target.value)}>
-                    <option value="">미입력</option>
-                    {PARTNER_PAYMENT_STATUSES.map((status) => (
-                      <option key={status.value} value={status.value}>{status.label}</option>
-                    ))}
-                  </select>
-                </Field>
-              </FieldGrid>
+            <Section
+              title="상품 / 일정"
+              action={mode === 'create' ? (
+                <button type="button" data-testid="order-add-line" className="btn btn--ghost btn--sm" onClick={addLine}>
+                  <Icon name="plus" size={12}/> 라인 추가
+                </button>
+              ) : null}
+            >
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                {form.lines.map((line, lineIndex) => (
+                  <LineEditor
+                    key={line.local_id}
+                    line={line}
+                    lineIndex={lineIndex}
+                    canRemove={mode === 'create' && form.lines.length > 1}
+                    activeServiceCategories={activeServiceCategories}
+                    partners={partners.data || []}
+                    onFieldChange={setLineField}
+                    onMoneyChange={handleMoneyChange}
+                    onPartnerChange={handlePartnerChange}
+                    onServiceCategoryChange={handleServiceCategoryChange}
+                    onServiceItemChange={handleServiceItemChange}
+                    onRemove={removeLine}
+                  />
+                ))}
+              </div>
             </Section>
           </div>
 
           <aside style={{ display: 'flex', flexDirection: 'column', gap: 12, position: 'sticky', top: 0, alignSelf: 'flex-start' }}>
             <div className="card" style={{ padding: 14 }}>
-              <div style={{ fontSize: 11, color: 'var(--text-tertiary)', fontWeight: 600, letterSpacing: '0.04em', marginBottom: 8 }}>운영 상태</div>
-              <Field label="주문 상태">
-                <select className="input" value={form.status} onChange={(event) => setField('status', event.target.value)}>
-                  {ORDER_STATUSES.map((status) => <option key={status} value={status}>{status}</option>)}
-                </select>
-              </Field>
-              <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 12, fontSize: 12, color: 'var(--text-secondary)' }}>
+              <div style={{ fontSize: 11, color: 'var(--text-tertiary)', fontWeight: 600, letterSpacing: 0, marginBottom: 8 }}>그룹 설정</div>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: 'var(--text-secondary)' }}>
                 <input
                   type="checkbox"
                   checked={form.customer_visible_payment}
-                  onChange={(event) => setField('customer_visible_payment', event.target.checked)}
+                  onChange={(event) => setGroupField('customer_visible_payment', event.target.checked)}
                 />
                 고객 페이지에 결제 금액 노출
               </label>
+              <TextField label="그룹 메모" span={1} multiline value={form.notes} onChange={(value) => setGroupField('notes', value)} />
             </div>
 
             {error && (
@@ -306,7 +267,7 @@ export function OrderFormPage({ mode = 'create', orderId = null, onCancel, onSav
             )}
 
             <div className="card" style={{ padding: 14 }}>
-              <div style={{ fontSize: 11, color: 'var(--text-tertiary)', fontWeight: 600, letterSpacing: '0.04em', marginBottom: 8 }}>저장 시 처리</div>
+              <div style={{ fontSize: 11, color: 'var(--text-tertiary)', fontWeight: 600, letterSpacing: 0, marginBottom: 8 }}>저장 시 처리</div>
               <div style={{ fontSize: 12, lineHeight: 1.55, color: 'var(--text-secondary)' }}>
                 신규 주문 저장 시 고객 확인 링크가 생성됩니다. 상태와 협력사 변경은 타임라인에 함께 기록됩니다.
               </div>
@@ -315,6 +276,127 @@ export function OrderFormPage({ mode = 'create', orderId = null, onCancel, onSav
         </div>
       </div>
     </form>
+  );
+}
+
+function LineEditor({
+  line,
+  lineIndex,
+  canRemove,
+  activeServiceCategories,
+  partners,
+  onFieldChange,
+  onMoneyChange,
+  onPartnerChange,
+  onServiceCategoryChange,
+  onServiceItemChange,
+  onRemove,
+}) {
+  const serviceItems = getServiceItems(activeServiceCategories, line.service_category_id);
+
+  return (
+    <div style={{ border: '1px solid var(--divider)', borderRadius: 8, background: 'var(--surface-subtle)', overflow: 'hidden' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '9px 12px', borderBottom: '1px solid var(--divider)' }}>
+        <div style={{ fontSize: 12, fontWeight: 700 }}>라인 {lineIndex + 1}</div>
+        <div style={{ flex: 1 }}/>
+        {canRemove && (
+          <button
+            type="button"
+            data-testid={`order-remove-line-${lineIndex}`}
+            className="btn btn--ghost btn--sm"
+            onClick={() => onRemove(lineIndex)}
+          >
+            <Icon name="x" size={12}/> 삭제
+          </button>
+        )}
+      </div>
+
+      <div style={{ padding: 12, display: 'flex', flexDirection: 'column', gap: 14 }}>
+        <FieldGrid>
+          <Field label="주문 상태">
+            <select className="input" value={line.status} onChange={(event) => onFieldChange(lineIndex, 'status', event.target.value)}>
+              {ORDER_STATUSES.map((status) => <option key={status} value={status}>{status}</option>)}
+            </select>
+          </Field>
+          <Field label="협력사">
+            <select className="input" data-testid={`order-line-${lineIndex}-partner`} value={line.partner_id} onChange={(event) => onPartnerChange(lineIndex, event.target.value)}>
+              <option value="">미배정</option>
+              {partners.map((partner) => (
+                <option key={partner.id} value={partner.id}>{partner.name}</option>
+              ))}
+            </select>
+          </Field>
+          <Field label="카테고리">
+            <select
+              className="input"
+              data-testid={`order-line-${lineIndex}-service-category`}
+              value={line.service_category_id}
+              onChange={(event) => onServiceCategoryChange(lineIndex, event.target.value)}
+            >
+              <option value="">직접 입력</option>
+              {activeServiceCategories.map((category) => (
+                <option key={category.id} value={category.id}>{category.name}</option>
+              ))}
+            </select>
+          </Field>
+          <Field label="상세상품">
+            <select
+              className="input"
+              data-testid={`order-line-${lineIndex}-service-item`}
+              value={line.service_item_id}
+              onChange={(event) => onServiceItemChange(lineIndex, event.target.value)}
+              disabled={!line.service_category_id}
+            >
+              <option value="">직접 입력</option>
+              {serviceItems.map((item) => (
+                <option key={item.id} value={item.id}>
+                  {item.name} · {formatWon(item.base_price)}
+                </option>
+              ))}
+            </select>
+          </Field>
+          <TextField testId={`order-line-${lineIndex}-service-name`} label="상품명" required value={line.service_name} onChange={(value) => onFieldChange(lineIndex, 'service_name', value)} />
+          <TextField label="수량/규격" value={line.size_or_quantity} onChange={(value) => onFieldChange(lineIndex, 'size_or_quantity', value)} />
+          <Field label="접수일">
+            <DatePicker testId={`order-line-${lineIndex}-received-date`} value={line.received_date} onChange={(value) => onFieldChange(lineIndex, 'received_date', value)} />
+          </Field>
+          <Field label="방문 예정일">
+            <DatePicker testId={`order-line-${lineIndex}-scheduled-date`} value={line.scheduled_date} onChange={(value) => onFieldChange(lineIndex, 'scheduled_date', value)} placeholder="방문일 선택" />
+          </Field>
+          <TextField testId={`order-line-${lineIndex}-requested-time`} label="요청 시간" value={line.requested_time} onChange={(value) => onFieldChange(lineIndex, 'requested_time', value)} placeholder="14:00 또는 오후 2-5시" />
+          <TextField label="팀명" value={line.team_name} onChange={(value) => onFieldChange(lineIndex, 'team_name', value)} />
+          <TextField label="상품 상세" span={2} multiline value={line.service_detail} onChange={(value) => onFieldChange(lineIndex, 'service_detail', value)} />
+          <TextField label="요청사항" span={2} multiline value={line.special_request} onChange={(value) => onFieldChange(lineIndex, 'special_request', value)} />
+        </FieldGrid>
+
+        <FieldGrid>
+          <TextField testId={`order-line-${lineIndex}-total-amount`} label="총 금액" inputMode="numeric" value={line.total_amount} onChange={(value) => onMoneyChange(lineIndex, 'total_amount', value)} />
+          <TextField label="계약금" inputMode="numeric" value={line.deposit_amount} onChange={(value) => onMoneyChange(lineIndex, 'deposit_amount', value)} />
+          <TextField label="잔금" inputMode="numeric" value={line.balance_amount} onChange={(value) => onMoneyChange(lineIndex, 'balance_amount', value)} />
+          <TextField label="현장 추가" inputMode="numeric" value={line.onsite_extra_amount} onChange={(value) => onMoneyChange(lineIndex, 'onsite_extra_amount', value)} />
+          <Field label="결제 상태">
+            <select className="input" value={line.payment_status} onChange={(event) => onFieldChange(lineIndex, 'payment_status', event.target.value)}>
+              <option value="">미입력</option>
+              {PAYMENT_STATUSES.map((status) => (
+                <option key={status.value} value={status.value}>{status.label}</option>
+              ))}
+            </select>
+          </Field>
+          <TextField label="VAT" value={line.vat_type} onChange={(value) => onFieldChange(lineIndex, 'vat_type', value)} />
+          <TextField label="결제 메모" span={2} multiline value={line.payment_memo} onChange={(value) => onFieldChange(lineIndex, 'payment_memo', value)} />
+          <TextField label="증빙 메모" span={2} multiline value={line.evidence_memo} onChange={(value) => onFieldChange(lineIndex, 'evidence_memo', value)} />
+          <TextField label="협력사 지급액" inputMode="numeric" value={line.partner_payment_amount} onChange={(value) => onMoneyChange(lineIndex, 'partner_payment_amount', value)} />
+          <Field label="협력사 정산 상태">
+            <select className="input" value={line.partner_payment_status} onChange={(event) => onFieldChange(lineIndex, 'partner_payment_status', event.target.value)}>
+              <option value="">미입력</option>
+              {PARTNER_PAYMENT_STATUSES.map((status) => (
+                <option key={status.value} value={status.value}>{status.label}</option>
+              ))}
+            </select>
+          </Field>
+        </FieldGrid>
+      </div>
+    </div>
   );
 }
 
@@ -333,11 +415,13 @@ function FormState({ text, onCancel }) {
   );
 }
 
-function Section({ title, children }) {
+function Section({ title, action = null, children }) {
   return (
     <div className="card" style={{ padding: 0 }}>
-      <div style={{ padding: '10px 14px', borderBottom: '1px solid var(--divider)', fontSize: 12.5, fontWeight: 600 }}>
-        {title}
+      <div style={{ padding: '10px 14px', borderBottom: '1px solid var(--divider)', fontSize: 12.5, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 8 }}>
+        <span>{title}</span>
+        <div style={{ flex: 1 }}/>
+        {action}
       </div>
       <div style={{ padding: 14 }}>{children}</div>
     </div>
@@ -384,8 +468,22 @@ function TextField({ label, value, onChange, type = 'text', inputMode = undefine
   );
 }
 
-function createEmptyForm() {
+function createEmptyGroupForm() {
   return {
+    group_id: '',
+    customer_name: '',
+    customer_phone: '',
+    customer_address: '',
+    source_channel: '',
+    customer_visible_payment: false,
+    notes: '',
+    lines: [createEmptyLineForm()],
+  };
+}
+
+function createEmptyLineForm() {
+  return {
+    local_id: crypto.randomUUID(),
     status: ORDER_STATUSES[0],
     received_date: todayString(),
     scheduled_date: '',
@@ -398,10 +496,6 @@ function createEmptyForm() {
     size_or_quantity: '',
     service_detail: '',
     special_request: '',
-    source_channel: '',
-    customer_name: '',
-    customer_phone: '',
-    customer_address: '',
     total_amount: '',
     deposit_amount: '',
     balance_amount: '',
@@ -412,12 +506,25 @@ function createEmptyForm() {
     evidence_memo: '',
     partner_payment_amount: '',
     partner_payment_status: '',
-    customer_visible_payment: false,
   };
 }
 
 function toForm(order) {
   return {
+    group_id: order.group_id || '',
+    customer_name: order.customer_name || '',
+    customer_phone: order.customer_phone || '',
+    customer_address: order.customer_address || '',
+    source_channel: order.source_channel || '',
+    customer_visible_payment: Boolean(order.customer_visible_payment),
+    notes: order.notes || '',
+    lines: [toLineForm(order)],
+  };
+}
+
+function toLineForm(order) {
+  return {
+    ...createEmptyLineForm(),
     status: order.status || ORDER_STATUSES[0],
     received_date: order.received_date || todayString(),
     scheduled_date: order.scheduled_date || '',
@@ -430,10 +537,6 @@ function toForm(order) {
     size_or_quantity: order.size_or_quantity || '',
     service_detail: order.service_detail || '',
     special_request: order.special_request || '',
-    source_channel: order.source_channel || '',
-    customer_name: order.customer_name || '',
-    customer_phone: order.customer_phone || '',
-    customer_address: order.customer_address || '',
     total_amount: toInputNumber(order.total_amount),
     deposit_amount: toInputNumber(order.deposit_amount),
     balance_amount: toInputNumber(order.balance_amount),
@@ -444,40 +547,58 @@ function toForm(order) {
     evidence_memo: order.evidence_memo || '',
     partner_payment_amount: toInputNumber(order.partner_payment_amount),
     partner_payment_status: order.partner_payment_status || '',
-    customer_visible_payment: Boolean(order.customer_visible_payment),
   };
 }
 
-function toPayload(form) {
+function toGroupCreatePayload(form) {
   return {
-    status: form.status,
-    received_date: form.received_date,
-    scheduled_date: emptyToNull(form.scheduled_date),
-    requested_time: emptyToNull(form.requested_time),
-    partner_id: emptyToNull(form.partner_id),
-    team_name: emptyToNull(form.team_name),
-    service_category_id: emptyToNull(form.service_category_id),
-    service_item_id: emptyToNull(form.service_item_id),
-    service_name: form.service_name.trim(),
-    size_or_quantity: emptyToNull(form.size_or_quantity),
-    service_detail: emptyToNull(form.service_detail),
-    special_request: emptyToNull(form.special_request),
-    source_channel: emptyToNull(form.source_channel),
+    ...toGroupMetadataPayload(form),
+    lines: form.lines.map(toLinePayload),
+  };
+}
+
+function toGroupMetadataPayload(form) {
+  return {
     customer_name: form.customer_name.trim(),
     customer_phone: form.customer_phone.trim(),
     customer_address: form.customer_address.trim(),
-    total_amount: numberOrNull(form.total_amount),
-    deposit_amount: numberOrNull(form.deposit_amount),
-    balance_amount: numberOrNull(form.balance_amount),
-    onsite_extra_amount: numberOrNull(form.onsite_extra_amount),
-    vat_type: emptyToNull(form.vat_type),
-    payment_status: emptyToNull(form.payment_status),
-    payment_memo: emptyToNull(form.payment_memo),
-    evidence_memo: emptyToNull(form.evidence_memo),
-    partner_payment_amount: numberOrNull(form.partner_payment_amount),
-    partner_payment_status: emptyToNull(form.partner_payment_status),
+    source_channel: emptyToNull(form.source_channel),
     customer_visible_payment: form.customer_visible_payment,
+    notes: emptyToNull(form.notes),
   };
+}
+
+function toLinePayload(line) {
+  return {
+    status: line.status,
+    received_date: line.received_date,
+    scheduled_date: emptyToNull(line.scheduled_date),
+    requested_time: emptyToNull(line.requested_time),
+    partner_id: emptyToNull(line.partner_id),
+    team_name: emptyToNull(line.team_name),
+    service_category_id: emptyToNull(line.service_category_id),
+    service_item_id: emptyToNull(line.service_item_id),
+    service_name: line.service_name.trim(),
+    size_or_quantity: emptyToNull(line.size_or_quantity),
+    service_detail: emptyToNull(line.service_detail),
+    special_request: emptyToNull(line.special_request),
+    total_amount: numberOrNull(line.total_amount),
+    deposit_amount: numberOrNull(line.deposit_amount),
+    balance_amount: numberOrNull(line.balance_amount),
+    onsite_extra_amount: numberOrNull(line.onsite_extra_amount),
+    vat_type: emptyToNull(line.vat_type),
+    payment_status: emptyToNull(line.payment_status),
+    payment_memo: emptyToNull(line.payment_memo),
+    evidence_memo: emptyToNull(line.evidence_memo),
+    partner_payment_amount: numberOrNull(line.partner_payment_amount),
+    partner_payment_status: emptyToNull(line.partner_payment_status),
+  };
+}
+
+function getServiceItems(categories, categoryId) {
+  return categories
+    .filter((category) => category.id === categoryId)
+    .flatMap((category) => (category.items || []).filter((item) => item.is_active));
 }
 
 function todayString() {
