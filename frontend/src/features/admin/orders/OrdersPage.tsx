@@ -255,6 +255,36 @@ export function OrdersPage({ onOpenOrder, onCreateOrder, onEditOrder, initialTab
       .filter((o) => matchesOrderQuery(o, query)),
     sortBy,
   );
+  const groupedFiltered = React.useMemo(() => {
+    const sorted = [...filtered].sort((a, b) => {
+      const aKey = `${a.groupId || a.id}|${a.scheduledDate || ''}|${a.id}`;
+      const bKey = `${b.groupId || b.id}|${b.scheduledDate || ''}|${b.id}`;
+      return aKey.localeCompare(bKey);
+    });
+    const groupStatusMap = new Map();
+    for (const row of sorted) {
+      const key = row.groupId || row.id;
+      const group = groupStatusMap.get(key) || { count: 0, cancelled: 0 };
+      group.count += 1;
+      if (row.status === '취소') {
+        group.cancelled += 1;
+      }
+      groupStatusMap.set(key, group);
+    }
+    return sorted.map((row, idx) => {
+      const prev = sorted[idx - 1];
+      const next = sorted[idx + 1];
+      const key = row.groupId || row.id;
+      const group = groupStatusMap.get(key);
+      return {
+        ...row,
+        isGroupFirst: !prev || (prev.groupId || prev.id) !== key,
+        isGroupLast: !next || (next.groupId || next.id) !== key,
+        groupSize: group?.count || 1,
+        isGroupCancelled: Boolean(group && group.count > 1 && group.count === group.cancelled),
+      };
+    });
+  }, [filtered]);
 
   const setDatePreset = (preset) => {
     setDateFilter(createDateFilter(preset));
@@ -589,7 +619,7 @@ export function OrdersPage({ onOpenOrder, onCreateOrder, onEditOrder, initialTab
             </tr>
           </thead>
           <tbody>
-            {!ordersResource.isLoading && !ordersResource.error && filtered.map((o) => {
+            {!ordersResource.isLoading && !ordersResource.error && groupedFiltered.map((o) => {
               const isUnassigned = o.team === '미배정';
               const isUnpaid = o.paid === 'pending' && o.amount > 0 && !['취소', '신규접수', '상담중'].includes(o.status);
               const isCancelled = o.status === '취소';
@@ -604,11 +634,30 @@ export function OrdersPage({ onOpenOrder, onCreateOrder, onEditOrder, initialTab
                   onMouseLeave={() => setHoverRow(null)}
                   onClick={() => onOpenOrder && onOpenOrder(o.id)}
                   style={{ cursor: 'pointer' }}>
-                  <td onClick={(e) => e.stopPropagation()} style={{ paddingRight: 0 }}>
+                  <td
+                    onClick={(e) => e.stopPropagation()}
+                    style={{
+                      paddingRight: 0,
+                      borderLeft: o.groupId && o.groupSize > 1 ? '3px solid var(--brand)' : '3px solid transparent',
+                      paddingLeft: o.groupId && o.groupSize > 1 && !o.isGroupFirst ? 12 : 6,
+                    }}
+                  >
+                    {o.groupId && o.groupSize > 1 && !o.isGroupFirst && (
+                      <span aria-hidden="true" style={{ color: 'var(--text-quaternary)', marginRight: 5, fontSize: 12 }}>└</span>
+                    )}
                     <input type="checkbox" checked={selected.has(o.id)}
                       onChange={() => toggleRow(o.id)} style={{ margin: 0 }}/>
                   </td>
-                  <td><StatusDot status={o.status}/></td>
+                  <td>
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                      <StatusDot status={o.status}/>
+                      {o.isGroupFirst && o.isGroupCancelled && (
+                        <span style={{ fontSize: 10.5, color: 'var(--danger-fg)', background: 'var(--danger-bg)', borderRadius: 4, padding: '1px 5px' }}>
+                          취소됨
+                        </span>
+                      )}
+                    </span>
+                  </td>
                   <td className="mono" style={{ fontSize: 11.5, color: 'var(--text-tertiary)' }}>{o.id}</td>
                   <td style={{ fontWeight: 500 }}>
                     {o.visit === '미정'
@@ -896,6 +945,7 @@ function sortOrders(orders, sortBy) {
 function toOrderRow(order) {
   return {
     id: order.id,
+    groupId: order.group_id || null,
     partnerId: order.partner_id || null,
     status: order.status,
     receivedRaw: order.received_date,
@@ -919,6 +969,7 @@ function toOrderRow(order) {
 function toMockOrderRow(order) {
   return {
     ...order,
+    groupId: order.groupId || null,
     partnerId: order.partnerId || null,
     receivedRaw: mockDateToValue(order.received),
     scheduledDate: mockDateToValue(order.visit),
