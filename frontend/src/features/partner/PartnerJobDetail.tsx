@@ -122,8 +122,15 @@ export function PartnerJobDetail() {
         await completePartnerJob(job.id);
       }
       refreshFlow();
-    } catch {
-      setStatusError('작업 상태를 변경하지 못했습니다.');
+    } catch (requestError) {
+      if (
+        requestError instanceof ApiError
+        && requestError.detail === 'photo_required_for_completion'
+      ) {
+        setStatusError('사진을 1장 이상 업로드한 뒤 완료 처리해주세요.');
+      } else {
+        setStatusError('작업 상태를 변경하지 못했습니다.');
+      }
     } finally {
       setIsSavingStatus(false);
     }

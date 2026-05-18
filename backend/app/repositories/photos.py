@@ -1,4 +1,4 @@
-from sqlalchemy import or_, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from app.domain.constants import OrderStatus
@@ -17,6 +17,14 @@ class PhotoRepository(Repository[OrderPhoto]):
             stmt = stmt.where(OrderPhoto.is_customer_visible.is_(True))
         stmt = stmt.order_by(OrderPhoto.photo_type.asc(), OrderPhoto.created_at.asc(), OrderPhoto.id.asc())
         return list(self.db.scalars(stmt))
+
+    def count_visible_for_order(self, order_id: str) -> int:
+        return self.db.execute(
+            select(func.count(OrderPhoto.id)).where(
+                OrderPhoto.order_id == order_id,
+                OrderPhoto.is_customer_visible.is_(True),
+            )
+        ).scalar_one()
 
     def list_review_queue(self) -> list[tuple[Order, list[OrderPhoto], int]]:
         stmt = (

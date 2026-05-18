@@ -59,6 +59,8 @@ def start_my_job(
     except ValueError as exc:
         if str(exc) == "invalid_status_transition":
             raise HTTPException(status_code=409, detail="invalid_status_transition") from exc
+        if str(exc) == "photo_required_for_completion":
+            raise HTTPException(status_code=422, detail="photo_required_for_completion") from exc
         raise HTTPException(status_code=404, detail="order_not_found") from exc
     photos = PhotoRepository(db).list_for_order(order.id)
     return to_partner_job_dto(order, photos=photos)

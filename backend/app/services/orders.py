@@ -9,6 +9,7 @@ from app.domain.phone import normalize_phone
 from app.models.order import Order
 from app.models.photo import OrderPhoto
 from app.repositories.orders import OrderRepository
+from app.repositories.photos import PhotoRepository
 from app.schemas.message import MessageLogRead
 from app.schemas.order import (
     AdminOrderDetailRead,
@@ -39,6 +40,7 @@ class OrderService:
     def __init__(self, db: Session) -> None:
         self.db = db
         self.orders = OrderRepository(db)
+        self.photos = PhotoRepository(db)
         self.service_catalog = ServiceCatalogService(db)
         self.timeline = TimelineService(db)
 
@@ -179,12 +181,16 @@ class OrderService:
         if order.status not in PARTNER_JOB_COMPLETABLE_STATUSES:
             raise ValueError("invalid_status_transition")
 
+        photo_count = self.photos.count_visible_for_order(order.id)
+        if photo_count == 0:
+            raise ValueError("photo_required_for_completion")
+
         self._change_status(
             order,
-            OrderStatus.PHOTO_REVIEW_PENDING,
+            OrderStatus.CUSTOMER_DELIVERY_NEEDED,
             actor_user_id=actor_user_id,
             title="작업 완료",
-            description="협력사가 작업 완료를 처리했습니다. 관리자 사진 검수가 필요합니다.",
+            description="협력사가 작업 완료를 처리했습니다. 자동 공개된 사진으로 고객 전달이 가능합니다.",
         )
         self.db.commit()
         self.db.refresh(order)
