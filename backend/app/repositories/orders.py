@@ -35,9 +35,9 @@ class OrderRepository(Repository[Order]):
         stmt = select(Order).where(Order.partner_id == partner_id).order_by(Order.scheduled_date.asc())
         return list(self.db.scalars(stmt))
 
-    def get_by_customer_token(self, token: str) -> Order | None:
-        stmt = select(Order).where(Order.customer_token == token)
-        return self.db.scalar(stmt)
+    def list_by_group(self, group_id: str) -> list[Order]:
+        stmt = select(Order).where(Order.group_id == group_id).order_by(Order.created_at.asc(), Order.id.asc())
+        return list(self.db.scalars(stmt))
 
     def count_scheduled_on(self, target: date) -> int:
         stmt = select(Order).where(Order.scheduled_date == target)
