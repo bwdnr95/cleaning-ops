@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from app.domain.constants import PhotoType
 from app.schemas.common import ApiModel
 
@@ -51,4 +53,5 @@ class AdminPhotoReviewItem(ApiModel):
     pending_photo_count: int = 0
     approved_photo_count: int = 0
     can_send_customer_link: bool = False
+    last_customer_link_sent_at: datetime | None = None
     photos: list[PhotoRead]

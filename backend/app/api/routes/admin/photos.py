@@ -2,7 +2,8 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from app.api.deps import CurrentUser, get_session, require_admin
-from app.domain.constants import OrderStatus
+from app.domain.constants import MessageType, OrderStatus
+from app.repositories.messages import MessageRepository
 from app.repositories.photos import PhotoRepository
 from app.schemas.photo import AdminPhotoReviewItem, PhotoRead
 from app.services.photos import PhotoService
@@ -15,6 +16,7 @@ def list_photo_review_queue(
     db: Session = Depends(get_session),
     _: CurrentUser = Depends(require_admin),
 ) -> list[AdminPhotoReviewItem]:
+    message_repo = MessageRepository(db)
     items = []
     for order, photos, approved_count in PhotoRepository(db).list_review_queue():
         pending_count = len([photo for photo in photos if not photo.is_customer_visible])
@@ -30,8 +32,13 @@ def list_photo_review_queue(
                 requested_time=order.requested_time,
                 pending_photo_count=pending_count,
                 approved_photo_count=approved_count,
-                can_send_customer_link=approved_count > 0
-                and order.status not in {OrderStatus.CUSTOMER_DELIVERY_DONE, OrderStatus.COMPLETED},
+                can_send_customer_link=(
+                    approved_count > 0 and order.status != OrderStatus.CANCELLED
+                ),
+                last_customer_link_sent_at=message_repo.last_sent_at(
+                    order_id=order.id,
+                    message_type=MessageType.CUSTOMER_PHOTO_READY,
+                ),
                 photos=photos,
             )
         )

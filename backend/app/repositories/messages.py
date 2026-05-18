@@ -1,6 +1,9 @@
+from datetime import datetime
+
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.domain.constants import MessageStatus, MessageType
 from app.models.message import MessageLog
 from app.repositories.base import Repository
 
@@ -25,6 +28,23 @@ class MessageRepository(Repository[MessageLog]):
             .order_by(MessageLog.created_at.asc(), MessageLog.id.asc())
         )
         return list(self.db.scalars(stmt))
+
+    def last_sent_at(
+        self,
+        *,
+        order_id: str,
+        message_type: MessageType,
+    ) -> datetime | None:
+        return self.db.execute(
+            select(MessageLog.sent_at)
+            .where(
+                MessageLog.order_id == order_id,
+                MessageLog.message_type == message_type,
+                MessageLog.status.in_([MessageStatus.SENT, MessageStatus.DELIVERED]),
+            )
+            .order_by(MessageLog.sent_at.desc())
+            .limit(1)
+        ).scalar_one_or_none()
 
     def get_by_provider_message_id(self, provider: str, provider_message_id: str) -> MessageLog | None:
         stmt = (
