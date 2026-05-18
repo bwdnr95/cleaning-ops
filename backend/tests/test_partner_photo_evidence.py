@@ -185,7 +185,7 @@ def test_partner_job_list_does_not_include_other_partner_photos(tmp_path, monkey
     assert all(photo["order_id"] == DEV_ORDER_ID for photo in jobs[0]["photos"])
 
 
-def test_partner_upload_defaults_to_customer_hidden_and_records_timeline(tmp_path, monkeypatch) -> None:
+def test_partner_upload_auto_publishes_and_records_timeline(tmp_path, monkeypatch) -> None:
     client = make_test_client(tmp_path, monkeypatch)
     headers = partner_headers(client)
 
@@ -201,15 +201,15 @@ def test_partner_upload_defaults_to_customer_hidden_and_records_timeline(tmp_pat
     assert uploaded["photo_type"] == "before"
     assert uploaded["file_name"] == "upload-before.png"
     assert uploaded["file_url"].startswith("/uploads/photos/")
-    assert uploaded["is_customer_visible"] is False
+    assert uploaded["is_customer_visible"] is True
     assert "uploaded_by_user_id" not in uploaded
 
     detail_response = client.get(f"/api/partner/jobs/{DEV_ORDER_ID}", headers=headers)
     assert detail_response.status_code == 200
     detail = detail_response.json()
-    assert detail["status"] == OrderStatus.PHOTO_REVIEW_PENDING
+    assert detail["status"] == OrderStatus.SCHEDULE_CONFIRMED
     assert uploaded["id"] in {photo["id"] for photo in detail["photos"]}
-    assert all(photo["is_customer_visible"] is False for photo in detail["photos"])
+    assert all(photo["is_customer_visible"] is True for photo in detail["photos"])
 
     admin_detail_response = client.get(
         f"/api/admin/orders/{DEV_ORDER_ID}",
@@ -217,7 +217,8 @@ def test_partner_upload_defaults_to_customer_hidden_and_records_timeline(tmp_pat
     )
     assert admin_detail_response.status_code == 200
     event_types = {event["event_type"] for event in admin_detail_response.json()["timeline"]}
-    assert {"photo_uploaded", "status_changed"}.issubset(event_types)
+    assert {"photo_uploaded", "photo_approved"}.issubset(event_types)
+    assert "status_changed" not in event_types
 
 
 def test_partner_upload_removes_stored_file_when_db_write_fails(tmp_path, monkeypatch) -> None:

@@ -130,6 +130,12 @@ def test_partner_can_open_start_and_complete_own_job_with_timeline() -> None:
     detail_response = client.get("/api/partner/jobs/seed-order-2450", headers=headers)
     early_complete_response = client.post("/api/partner/jobs/seed-order-2450/complete", headers=headers)
     start_response = client.post("/api/partner/jobs/seed-order-2450/start", headers=headers)
+    upload_response = client.post(
+        "/api/partner/jobs/seed-order-2450/photos",
+        headers=headers,
+        data={"photo_type": "after"},
+        files={"file": ("complete-after.png", PNG_BYTES, "image/png")},
+    )
     complete_response = client.post("/api/partner/jobs/seed-order-2450/complete", headers=headers)
     restart_response = client.post("/api/partner/jobs/seed-order-2450/start", headers=headers)
     recomplete_response = client.post("/api/partner/jobs/seed-order-2450/complete", headers=headers)
@@ -145,8 +151,10 @@ def test_partner_can_open_start_and_complete_own_job_with_timeline() -> None:
     assert early_complete_response.json()["detail"] == "invalid_status_transition"
     assert start_response.status_code == 200
     assert start_response.json()["status"] == "작업진행"
+    assert upload_response.status_code == 200
+    assert upload_response.json()["is_customer_visible"] is True
     assert complete_response.status_code == 200
-    assert complete_response.json()["status"] == "사진검수대기"
+    assert complete_response.json()["status"] == "고객전달필요"
     assert restart_response.status_code == 409
     assert restart_response.json()["detail"] == "invalid_status_transition"
     assert recomplete_response.status_code == 409
@@ -160,10 +168,10 @@ def test_partner_can_open_start_and_complete_own_job_with_timeline() -> None:
 
     assert admin_detail.status_code == 200
     body = admin_detail.json()
-    assert body["status"] == "사진검수대기"
+    assert body["status"] == "고객전달필요"
     status_events = [event for event in body["timeline"] if event["event_type"] == "status_changed"]
     status_targets = {event["event_metadata"]["to"] for event in status_events}
-    assert {"작업진행", "사진검수대기"}.issubset(status_targets)
+    assert {"작업진행", "고객전달필요"}.issubset(status_targets)
 
 
 def test_partner_cannot_open_or_mutate_unassigned_job() -> None:
@@ -272,6 +280,63 @@ def test_other_partner_token_cannot_mutate_seed_partner_job() -> None:
             headers=headers,
             data={"photo_type": "before"},
             files={"file": ("not-owned.png", PNG_BYTES, "image/png")},
+        ),
+    ]
+
+    assert {response.status_code for response in responses} == {404}
+    assert {response.json()["detail"] for response in responses} == {"order_not_found"}
+
+
+def test_seed_partner_token_cannot_mutate_other_partner_order() -> None:
+    """역방향 cross-partner ownership 검증 (P1-9): seed partner 토큰이 다른 partner 의 order 를 못 본다."""
+
+    def seed_other_partner_order(db: Session) -> None:
+        db.add(
+            Partner(
+                id="other-partner-scope-reverse",
+                name="Reverse Scope Partner",
+                manager_name="Reverse Manager",
+                phone="01055556666",
+                service_areas="Seoul",
+                available_services="Cleaning",
+                memo=None,
+                is_active=True,
+            )
+        )
+        db.add(
+            Order(
+                id="other-partner-order-01",
+                customer_name="다른 협력사 고객",
+                customer_phone="01077778888",
+                customer_address="서울시 송파구",
+                service_name="입주청소",
+                status=OrderStatus.SCHEDULED,
+                received_date=date(2026, 5, 31),
+                scheduled_date=date(2026, 6, 1),
+                requested_time="10:00",
+                partner_id="other-partner-scope-reverse",
+                customer_token="other-partner-order-01-token",
+                customer_visible_payment=False,
+            )
+        )
+
+    client = make_test_client(seed_other_partner_order)
+    token = create_access_token(
+        user_id=DEV_PARTNER_USER_ID,
+        role=UserRole.PARTNER,
+        partner_id=DEV_PARTNER_ID,
+    )
+    headers = {"Authorization": f"Bearer {token}"}
+
+    responses = [
+        client.get("/api/partner/jobs/other-partner-order-01", headers=headers),
+        client.post("/api/partner/jobs/other-partner-order-01/start", headers=headers),
+        client.post("/api/partner/jobs/other-partner-order-01/complete", headers=headers),
+        client.post(
+            "/api/partner/jobs/other-partner-order-01/photos",
+            headers=headers,
+            data={"photo_type": "before"},
+            files={"file": ("reverse-attempt.png", PNG_BYTES, "image/png")},
         ),
     ]
 
@@ -955,7 +1020,7 @@ def test_dashboard_summary_matches_operational_queue_definitions() -> None:
                 ),
                 make_order(
                     "photo-review",
-                    status=OrderStatus.PHOTO_REVIEW_PENDING,
+                    status=OrderStatus.CUSTOMER_DELIVERY_NEEDED,
                     scheduled_date=date(2026, 5, 4),
                 ),
                 make_order(
@@ -993,11 +1058,11 @@ def test_dashboard_summary_matches_operational_queue_definitions() -> None:
 
         summary = DashboardService(db).summary(today=date(2026, 5, 4))
 
-    assert summary.today_jobs == 2
+    assert summary.today_jobs == 1
     assert summary.tomorrow_notice_targets == 1
     assert summary.partner_pending == 1
-    assert summary.photo_review_pending == 1
-    assert summary.customer_delivery_needed == 1
+    assert summary.photo_review_pending == 0
+    assert summary.customer_delivery_needed == 2
     assert summary.payment_check_needed == 1
     assert summary.monthly_completed == 1
     assert summary.monthly_revenue == 700000
@@ -1016,7 +1081,7 @@ def test_admin_dashboard_recent_activity_returns_photos_and_messages() -> None:
                 file_name="recent-photo-01.jpg",
                 file_size=1200,
                 content_type="image/jpeg",
-                is_customer_visible=False,
+                is_customer_visible=True,
             )
         )
         db.add(
@@ -1055,7 +1120,7 @@ def test_admin_dashboard_recent_activity_returns_photos_and_messages() -> None:
     body = response.json()
     assert body["photos"][0]["photo_id"] == "recent-photo-01"
     assert body["photos"][0]["order_id"] == "seed-order-2450"
-    assert body["photos"][0]["is_customer_visible"] is False
+    assert body["photos"][0]["is_customer_visible"] is True
     assert body["photos"][0]["file_url"] == "/uploads/photos/recent-photo-01.jpg"
     assert body["messages"][0]["order_id"] == "seed-order-2450"
     assert body["messages"][0]["message_type"] == "customer_photo_ready"
@@ -1189,21 +1254,22 @@ def test_customer_link_verify_returns_only_customer_visible_photos() -> None:
     assert "is_customer_visible" not in photos[0]
 
 
-def test_partner_upload_admin_approve_customer_visibility_flow(tmp_path, monkeypatch) -> None:
+def test_partner_upload_auto_visible_customer_delivery_flow(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(settings, "storage_root", str(tmp_path / "uploads"))
     client = make_test_client()
     partner_session = login(client, "/api/auth/partner/login", DEV_PARTNER_PHONE, DEV_PARTNER_PASSWORD)
+    partner_headers = {"Authorization": f"Bearer {partner_session['access_token']}"}
 
     upload_response = client.post(
         "/api/partner/jobs/seed-order-2450/photos",
-        headers={"Authorization": f"Bearer {partner_session['access_token']}"},
+        headers=partner_headers,
         data={"photo_type": "before"},
         files={"file": ("upload-before.png", PNG_BYTES, "image/png")},
     )
 
     assert upload_response.status_code == 200
     uploaded = upload_response.json()
-    assert uploaded["is_customer_visible"] is False
+    assert uploaded["is_customer_visible"] is True
     assert uploaded["file_url"].startswith("/uploads/photos/")
     assert uploaded["file_name"] == "upload-before.png"
     assert uploaded["file_size"] == len(PNG_BYTES)
@@ -1211,74 +1277,12 @@ def test_partner_upload_admin_approve_customer_visibility_flow(tmp_path, monkeyp
     assert "storage_key" not in uploaded
     assert "uploaded_by_user_id" not in uploaded
 
-    before_approval = client.post(
+    auto_visible = client.post(
         "/api/customer/orders/seed-customer-token-2450/verify",
         json={"phone_suffix": "5432"},
     )
-    assert before_approval.status_code == 200
-    assert before_approval.json()["photos"] == []
-
-    admin_session = login(client, "/api/auth/admin/login", DEV_ADMIN_EMAIL, DEV_ADMIN_PASSWORD)
-    queue_response = client.get(
-        "/api/admin/photos/review-queue",
-        headers={"Authorization": f"Bearer {admin_session['access_token']}"},
-    )
-    assert queue_response.status_code == 200
-    queue_item = queue_response.json()[0]
-    assert queue_item["photos"][0]["id"] == uploaded["id"]
-    assert queue_item["pending_photo_count"] == 1
-    assert queue_item["approved_photo_count"] == 0
-    assert queue_item["can_send_customer_link"] is False
-    detail_response = client.get(
-        "/api/admin/orders/seed-order-2450",
-        headers={"Authorization": f"Bearer {admin_session['access_token']}"},
-    )
-    assert detail_response.status_code == 200
-    detail = detail_response.json()
-    assert detail["status"] == "사진검수대기"
-    event_types = [event["event_type"] for event in detail["timeline"]]
-    assert "photo_uploaded" in event_types
-    assert "status_changed" in event_types
-
-    approve_response = client.post(
-        f"/api/admin/photos/{uploaded['id']}/approve",
-        headers={"Authorization": f"Bearer {admin_session['access_token']}"},
-    )
-    assert approve_response.status_code == 200
-    assert approve_response.json()["is_customer_visible"] is True
-    after_approve_detail = client.get(
-        "/api/admin/orders/seed-order-2450",
-        headers={"Authorization": f"Bearer {admin_session['access_token']}"},
-    )
-    assert after_approve_detail.status_code == 200
-    approved_detail = after_approve_detail.json()
-    assert approved_detail["status"] == "고객전달필요"
-    status_targets = {
-        event["event_metadata"]["to"]
-        for event in approved_detail["timeline"]
-        if event["event_type"] == "status_changed"
-    }
-    assert "고객전달필요" in status_targets
-
-    delivery_queue = client.get(
-        "/api/admin/photos/review-queue",
-        headers={"Authorization": f"Bearer {admin_session['access_token']}"},
-    )
-    assert delivery_queue.status_code == 200
-    delivery_item = delivery_queue.json()[0]
-    assert delivery_item["order_id"] == "seed-order-2450"
-    assert delivery_item["pending_photo_count"] == 0
-    assert delivery_item["approved_photo_count"] == 1
-    assert delivery_item["can_send_customer_link"] is True
-    assert delivery_item["photos"][0]["id"] == uploaded["id"]
-    assert delivery_item["photos"][0]["is_customer_visible"] is True
-
-    after_approval = client.post(
-        "/api/customer/orders/seed-customer-token-2450/verify",
-        json={"phone_suffix": "5432"},
-    )
-    assert after_approval.status_code == 200
-    assert after_approval.json()["photos"] == [
+    assert auto_visible.status_code == 200
+    assert auto_visible.json()["photos"] == [
         {
             "id": uploaded["id"],
             "photo_type": "before",
@@ -1287,9 +1291,45 @@ def test_partner_upload_admin_approve_customer_visibility_flow(tmp_path, monkeyp
         }
     ]
 
+    admin_session = login(client, "/api/auth/admin/login", DEV_ADMIN_EMAIL, DEV_ADMIN_PASSWORD)
+    admin_headers = {"Authorization": f"Bearer {admin_session['access_token']}"}
+    detail_response = client.get(
+        "/api/admin/orders/seed-order-2450",
+        headers=admin_headers,
+    )
+    assert detail_response.status_code == 200
+    detail = detail_response.json()
+    assert detail["status"] == "일정확정"
+    event_types = [event["event_type"] for event in detail["timeline"]]
+    assert "photo_uploaded" in event_types
+    assert "photo_approved" in event_types
+
+    start_response = client.post("/api/partner/jobs/seed-order-2450/start", headers=partner_headers)
+    complete_response = client.post(
+        "/api/partner/jobs/seed-order-2450/complete",
+        headers=partner_headers,
+    )
+    assert start_response.status_code == 200
+    assert complete_response.status_code == 200
+    assert complete_response.json()["status"] == "고객전달필요"
+
+    delivery_queue = client.get(
+        "/api/admin/photos/review-queue",
+        headers=admin_headers,
+    )
+    assert delivery_queue.status_code == 200
+    delivery_item = delivery_queue.json()[0]
+    assert delivery_item["order_id"] == "seed-order-2450"
+    assert delivery_item["pending_photo_count"] == 0
+    assert delivery_item["approved_photo_count"] == 1
+    assert delivery_item["can_send_customer_link"] is True
+    assert delivery_item["last_customer_link_sent_at"] is None
+    assert delivery_item["photos"][0]["id"] == uploaded["id"]
+    assert delivery_item["photos"][0]["is_customer_visible"] is True
+
     send_response = client.post(
         "/api/admin/messages/send",
-        headers={"Authorization": f"Bearer {admin_session['access_token']}"},
+        headers=admin_headers,
         json={
             "order_id": "seed-order-2450",
             "message_type": "customer_photo_ready",
@@ -1302,23 +1342,24 @@ def test_partner_upload_admin_approve_customer_visibility_flow(tmp_path, monkeyp
 
     delivered_detail = client.get(
         "/api/admin/orders/seed-order-2450",
-        headers={"Authorization": f"Bearer {admin_session['access_token']}"},
+        headers=admin_headers,
     )
     assert delivered_detail.status_code == 200
     delivered = delivered_detail.json()
-    assert delivered["status"] == "고객전달완료"
+    assert delivered["status"] == "고객전달필요"
     delivered_events = {event["event_type"] for event in delivered["timeline"]}
     assert "message_sent" in delivered_events
     assert "customer_link_sent" in delivered_events
 
     delivered_queue = client.get(
         "/api/admin/photos/review-queue",
-        headers={"Authorization": f"Bearer {admin_session['access_token']}"},
+        headers=admin_headers,
     )
     assert delivered_queue.status_code == 200
     delivered_item = delivered_queue.json()[0]
     assert delivered_item["order_id"] == "seed-order-2450"
-    assert delivered_item["can_send_customer_link"] is False
+    assert delivered_item["can_send_customer_link"] is True
+    assert delivered_item["last_customer_link_sent_at"] is not None
 
 
 def test_partner_upload_rejects_invalid_photo_content_type(tmp_path, monkeypatch) -> None:
@@ -1439,19 +1480,23 @@ def test_admin_e2e_order_to_customer_delivery_flow(tmp_path, monkeypatch) -> Non
     assert start_response.status_code == 200
     assert upload_response.status_code == 200
     uploaded = upload_response.json()
-    assert uploaded["is_customer_visible"] is False
+    assert uploaded["is_customer_visible"] is True
 
-    before_approval = client.post(
+    auto_visible = client.post(
         f"/api/customer/orders/{order['customer_token']}/verify",
         json={"phone_suffix": "2222"},
     )
-    assert before_approval.status_code == 200
-    assert before_approval.json()["photos"] == []
+    assert auto_visible.status_code == 200
+    assert auto_visible.json()["photos"] == [
+        {
+            "id": uploaded["id"],
+            "photo_type": "after",
+            "file_url": uploaded["file_url"],
+            "file_name": "e2e-after.png",
+        }
+    ]
 
-    approve_response = client.post(
-        f"/api/admin/photos/{uploaded['id']}/approve",
-        headers=admin_headers,
-    )
+    complete_response = client.post(f"/api/partner/jobs/{order_id}/complete", headers=partner_headers)
     send_photo_response = client.post(
         "/api/admin/messages/send",
         headers=admin_headers,
@@ -1463,7 +1508,8 @@ def test_admin_e2e_order_to_customer_delivery_flow(tmp_path, monkeypatch) -> Non
         },
     )
 
-    assert approve_response.status_code == 200
+    assert complete_response.status_code == 200
+    assert complete_response.json()["status"] == "고객전달필요"
     assert send_photo_response.status_code == 200
 
     customer_response = client.post(
@@ -1488,7 +1534,7 @@ def test_admin_e2e_order_to_customer_delivery_flow(tmp_path, monkeypatch) -> Non
     admin_detail = client.get(f"/api/admin/orders/{order_id}", headers=admin_headers)
     assert admin_detail.status_code == 200
     detail = admin_detail.json()
-    assert detail["status"] == "고객전달완료"
+    assert detail["status"] == "고객전달필요"
     event_types = {event["event_type"] for event in detail["timeline"]}
     assert {
         "created",
@@ -1537,9 +1583,9 @@ def test_customer_photo_ready_message_includes_customer_link_and_timeline() -> N
 
     assert log.status == "sent"
     assert "http://localhost:5173/c/seed-customer-token-2450" in log.content
-    assert order.status == OrderStatus.CUSTOMER_DELIVERY_DONE
+    assert order.status == OrderStatus.SCHEDULE_CONFIRMED
     assert TimelineEventType.MESSAGE_SENT in {event.event_type for event in events}
-    assert TimelineEventType.STATUS_CHANGED in {event.event_type for event in events}
+    assert TimelineEventType.STATUS_CHANGED not in {event.event_type for event in events}
     assert TimelineEventType.CUSTOMER_LINK_SENT in {event.event_type for event in events}
 
 
@@ -1781,11 +1827,11 @@ def test_admin_can_send_customer_photo_ready_message() -> None:
     detail_response = client.get("/api/admin/orders/seed-order-2450", headers=headers)
     assert detail_response.status_code == 200
     detail = detail_response.json()
-    assert detail["status"] == "고객전달완료"
+    assert detail["status"] == "일정확정"
     assert detail["message_logs"][0]["message_type"] == "customer_photo_ready"
     assert detail["message_logs"][0]["provider"] == "mock"
     assert "message_sent" in {event["event_type"] for event in detail["timeline"]}
-    assert "status_changed" in {event["event_type"] for event in detail["timeline"]}
+    assert "status_changed" not in {event["event_type"] for event in detail["timeline"]}
     assert "customer_link_sent" in {event["event_type"] for event in detail["timeline"]}
 
 

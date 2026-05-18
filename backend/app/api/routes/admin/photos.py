@@ -57,3 +57,17 @@ def approve_photo(
         if str(exc) == "photo_not_found":
             raise HTTPException(status_code=404, detail="photo_not_found") from exc
         raise
+
+
+@router.post("/{photo_id}/revoke", response_model=PhotoRead)
+def revoke_photo(
+    photo_id: str,
+    db: Session = Depends(get_session),
+    user: CurrentUser = Depends(require_admin),
+):
+    try:
+        return PhotoService(db).revoke_visibility(photo_id, actor_user_id=user.id)
+    except ValueError as exc:
+        if str(exc) == "photo_not_found":
+            raise HTTPException(status_code=404, detail="photo_not_found") from exc
+        raise

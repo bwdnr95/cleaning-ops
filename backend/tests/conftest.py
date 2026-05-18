@@ -10,6 +10,9 @@ from __future__ import annotations
 
 import os
 
+import pytest
+from fastapi.testclient import TestClient
+
 _TEST_ENV: dict[str, str] = {
     "ENVIRONMENT": "test",
     "FRONTEND_URL": "http://localhost:5173",
@@ -23,3 +26,41 @@ _TEST_ENV: dict[str, str] = {
 
 for key, value in _TEST_ENV.items():
     os.environ[key] = value
+
+from app.db.seed import (  # noqa: E402
+    DEV_ADMIN_EMAIL,
+    DEV_ADMIN_PASSWORD,
+    DEV_ORDER_ID,
+    DEV_PARTNER_PASSWORD,
+    DEV_PARTNER_PHONE,
+)
+from tests.test_auth_integration import make_test_client  # noqa: E402
+
+
+@pytest.fixture
+def client() -> TestClient:
+    """In-memory SQLite seed DB + FastAPI app을 한 묶음으로 제공한다."""
+    return make_test_client()
+
+
+@pytest.fixture
+def seed_admin_token(client: TestClient) -> str:
+    response = client.post(
+        "/api/auth/admin/login",
+        json={"identifier": DEV_ADMIN_EMAIL, "password": DEV_ADMIN_PASSWORD},
+    )
+    return response.json()["access_token"]
+
+
+@pytest.fixture
+def seed_partner_token(client: TestClient) -> str:
+    response = client.post(
+        "/api/auth/partner/login",
+        json={"identifier": DEV_PARTNER_PHONE, "password": DEV_PARTNER_PASSWORD},
+    )
+    return response.json()["access_token"]
+
+
+@pytest.fixture
+def seed_order_id() -> str:
+    return DEV_ORDER_ID
