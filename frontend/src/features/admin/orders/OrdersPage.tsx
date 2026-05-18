@@ -113,13 +113,15 @@ const BULK_MESSAGE_OPTIONS = [
 export function OrdersPage({ onOpenOrder, onCreateOrder, onEditOrder, initialTab = 'all', initialDatePreset = undefined }) {
   const ordersResource = useApiResource(listAdminOrders);
   const partnersResource = useApiResource(listPartners);
-  const orders = ordersResource.data ? ordersResource.data.map(toOrderRow) : ORDERS;
+  const orders = ordersResource.data ? ordersResource.data.map(toOrderRow) : ORDERS.map(toMockOrderRow);
   const [tab, setTab] = React.useState(initialTab);
   const [selected, setSelected] = React.useState(new Set());
   const [hoverRow, setHoverRow] = React.useState(null);
   const [sortBy, setSortBy] = React.useState('visit');
   const [query, setQuery] = React.useState('');
   const [dateFilter, setDateFilter] = React.useState(() => createInitialDateFilter(initialTab, initialDatePreset));
+  const [partnerFilter, setPartnerFilter] = React.useState('all');
+  const [receivedDateFilter, setReceivedDateFilter] = React.useState(() => createDateFilter('all'));
   const [actionError, setActionError] = React.useState('');
   const [actionNotice, setActionNotice] = React.useState(null);
   const [isSavingAction, setIsSavingAction] = React.useState(false);
@@ -129,7 +131,14 @@ export function OrdersPage({ onOpenOrder, onCreateOrder, onEditOrder, initialTab
   const [bulkMessageType, setBulkMessageType] = React.useState('customer_schedule_confirmed');
   const statusTabs = getStatusTabs(orders);
   const isDateFilterActive = dateFilter.start !== '' || dateFilter.end !== '';
-  const partners = partnersResource.data || [];
+  const isReceivedDateFilterActive = receivedDateFilter.start !== '' || receivedDateFilter.end !== '';
+  const partners = React.useMemo(() => partnersResource.data || [], [partnersResource.data]);
+  const sortedActivePartners = React.useMemo(() => {
+    return partners
+      .filter((partner) => partner.is_active !== false)
+      .slice()
+      .sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'ko'));
+  }, [partners]);
 
   React.useEffect(() => {
     setTab(initialTab);
@@ -241,6 +250,8 @@ export function OrdersPage({ onOpenOrder, onCreateOrder, onEditOrder, initialTab
         return true;
       })
       .filter((o) => matchesDateFilter(o.scheduledDate, dateFilter))
+      .filter((o) => matchesReceivedDateFilter(o.receivedRaw, receivedDateFilter))
+      .filter((o) => matchesPartnerFilter(o, partnerFilter))
       .filter((o) => matchesOrderQuery(o, query)),
     sortBy,
   );
@@ -251,6 +262,14 @@ export function OrdersPage({ onOpenOrder, onCreateOrder, onEditOrder, initialTab
 
   const setDateBoundary = (key, value) => {
     setDateFilter((current) => ({
+      ...current,
+      preset: 'range',
+      [key]: value,
+    }));
+  };
+
+  const setReceivedDateBoundary = (key, value) => {
+    setReceivedDateFilter((current) => ({
       ...current,
       preset: 'range',
       [key]: value,
@@ -374,6 +393,81 @@ export function OrdersPage({ onOpenOrder, onCreateOrder, onEditOrder, initialTab
         <button style={softGhostBtn} onClick={() => setSortBy(sortBy === 'visit' ? 'received' : 'visit')}>
           <Icon name="list" size={11}/> {sortBy === 'visit' ? '방문일순' : '접수일순'}
         </button>
+      </div>
+
+      {/* 협력사 탭 */}
+      <div style={{ padding: '0 24px 8px', background: 'var(--bg)', display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, color: 'var(--text-tertiary)', fontSize: 12, fontWeight: 600, whiteSpace: 'nowrap' }}>
+          <Icon name="user" size={12}/> 협력사
+        </span>
+        <button
+          type="button"
+          data-testid="orders-partner-tab-all"
+          aria-pressed={partnerFilter === 'all'}
+          onClick={() => setPartnerFilter('all')}
+          style={datePresetButton(partnerFilter === 'all')}
+        >
+          전체
+        </button>
+        {sortedActivePartners.map((partner) => (
+          <button
+            key={partner.id}
+            type="button"
+            data-testid={`orders-partner-tab-${partner.id}`}
+            aria-pressed={partnerFilter === partner.id}
+            onClick={() => setPartnerFilter(partner.id)}
+            style={datePresetButton(partnerFilter === partner.id)}
+          >
+            {partner.name}
+          </button>
+        ))}
+      </div>
+
+      {/* 접수일 필터 */}
+      <div style={{ padding: '0 24px 12px', background: 'var(--bg)', display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, color: 'var(--text-tertiary)', fontSize: 12, fontWeight: 600, whiteSpace: 'nowrap' }}>
+          <Icon name="calendar" size={12}/> 접수일
+        </span>
+        {[
+          ['all', '전체'],
+          ['today', '오늘'],
+          ['tomorrow', '내일'],
+          ['week', '이번주'],
+          ['month', '이번달'],
+        ].map(([key, label]) => (
+          <button
+            key={key}
+            type="button"
+            data-testid={`orders-received-preset-${key}`}
+            aria-pressed={receivedDateFilter.preset === key}
+            onClick={() => setReceivedDateFilter(createDateFilter(key))}
+            style={datePresetButton(receivedDateFilter.preset === key)}
+          >
+            {label}
+          </button>
+        ))}
+        <DatePicker
+          compact
+          testId="orders-received-start"
+          ariaLabel="접수일 시작"
+          placeholder="시작일"
+          value={receivedDateFilter.start}
+          onChange={(value) => setReceivedDateBoundary('start', value)}
+        />
+        <span style={{ color: 'var(--text-quaternary)', fontSize: 12 }}>~</span>
+        <DatePicker
+          compact
+          testId="orders-received-end"
+          ariaLabel="접수일 종료"
+          placeholder="종료일"
+          value={receivedDateFilter.end}
+          onChange={(value) => setReceivedDateBoundary('end', value)}
+        />
+        {isReceivedDateFilterActive && (
+          <button type="button" data-testid="orders-received-clear" style={softGhostBtn} onClick={() => setReceivedDateFilter(createDateFilter('all'))}>
+            해제
+          </button>
+        )}
       </div>
 
       {/* Tabs — minimal underline */}
@@ -780,10 +874,21 @@ function matchesDateFilter(value, dateFilter) {
   return true;
 }
 
+function matchesReceivedDateFilter(receivedValue, dateFilter) {
+  return matchesDateFilter(receivedValue, dateFilter);
+}
+
+function matchesPartnerFilter(order, partnerFilter) {
+  if (!partnerFilter || partnerFilter === 'all') {
+    return true;
+  }
+  return order.partnerId === partnerFilter;
+}
+
 function sortOrders(orders, sortBy) {
   return [...orders].sort((a, b) => {
-    const aValue = sortBy === 'received' ? a.received : (a.scheduledDate || '9999-99-99');
-    const bValue = sortBy === 'received' ? b.received : (b.scheduledDate || '9999-99-99');
+    const aValue = sortBy === 'received' ? (a.receivedRaw || a.received) : (a.scheduledDate || '9999-99-99');
+    const bValue = sortBy === 'received' ? (b.receivedRaw || b.received) : (b.scheduledDate || '9999-99-99');
     return String(aValue).localeCompare(String(bValue));
   });
 }
@@ -791,7 +896,9 @@ function sortOrders(orders, sortBy) {
 function toOrderRow(order) {
   return {
     id: order.id,
+    partnerId: order.partner_id || null,
     status: order.status,
+    receivedRaw: order.received_date,
     received: formatDate(order.received_date),
     visit: formatDate(order.scheduled_date) || '미정',
     scheduledDate: order.scheduled_date,
@@ -807,6 +914,26 @@ function toOrderRow(order) {
     photo: toPhotoState(order.status),
     delivered: toDeliveredState(order.status),
   };
+}
+
+function toMockOrderRow(order) {
+  return {
+    ...order,
+    partnerId: order.partnerId || null,
+    receivedRaw: mockDateToValue(order.received),
+    scheduledDate: mockDateToValue(order.visit),
+  };
+}
+
+function mockDateToValue(value) {
+  if (!value || value === '미정') {
+    return '';
+  }
+  const match = String(value).match(/^(\d{2})-(\d{2})/);
+  if (!match) {
+    return value;
+  }
+  return `${getAppTodayDate().getFullYear()}-${match[1]}-${match[2]}`;
 }
 
 function createDateFilter(preset) {
