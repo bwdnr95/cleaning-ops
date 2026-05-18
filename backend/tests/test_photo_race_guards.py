@@ -40,6 +40,7 @@ class _FakeSession:
 def test_complete_partner_job_locks_order_before_photo_count() -> None:
     order = Order(
         id="order-1",
+        group_id="group-1",
         status=OrderStatus.IN_PROGRESS.value,
         received_date="2026-05-18",
         scheduled_date=None,
@@ -84,6 +85,7 @@ def test_revoke_refreshes_photo_after_order_lock_before_idempotent_return() -> N
     )
     order = Order(
         id="order-1",
+        group_id="group-1",
         status=OrderStatus.CUSTOMER_DELIVERY_NEEDED.value,
         received_date="2026-05-18",
         scheduled_date=None,

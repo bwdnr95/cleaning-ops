@@ -8,6 +8,7 @@ from app.services.orders import to_customer_order_dto, to_partner_job_dto
 def make_order(*, customer_visible_payment: bool = False) -> Order:
     return Order(
         id="order-1",
+        group_id="group-1",
         status=OrderStatus.SCHEDULE_CONFIRMED,
         received_date=date(2026, 5, 1),
         scheduled_date=date(2026, 5, 2),
@@ -56,10 +57,11 @@ def test_customer_order_dto_hides_internal_fields_and_payment_by_default() -> No
 
     assert payload["customer_name"] == "이서연"
     assert payload["customer_phone"] == "01012345678"
-    assert payload["total_amount"] is None
-    assert payload["deposit_amount"] is None
-    assert payload["balance_amount"] is None
-    assert payload["payment_status"] is None
+    line = payload["lines"][0]
+    assert line["total_amount"] is None
+    assert line["deposit_amount"] is None
+    assert line["balance_amount"] is None
+    assert line["payment_status"] is None
     assert "source_channel" not in payload
     assert "payment_memo" not in payload
     assert "evidence_memo" not in payload
@@ -69,8 +71,9 @@ def test_customer_order_dto_hides_internal_fields_and_payment_by_default() -> No
 def test_customer_order_dto_can_show_payment_when_admin_allows_it() -> None:
     dto = to_customer_order_dto(make_order(customer_visible_payment=True))
     payload = dto.model_dump()
+    line = payload["lines"][0]
 
-    assert payload["total_amount"] == 320000
-    assert payload["deposit_amount"] == 100000
-    assert payload["balance_amount"] == 220000
-    assert payload["payment_status"] == "계약금"
+    assert line["total_amount"] == 320000
+    assert line["deposit_amount"] == 100000
+    assert line["balance_amount"] == 220000
+    assert line["payment_status"] == "계약금"

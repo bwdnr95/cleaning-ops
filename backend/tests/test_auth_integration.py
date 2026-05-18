@@ -33,7 +33,7 @@ from app.domain.constants import (
     UserRole,
 )
 from app.main import create_app
-from app.models import Base, MessageLog, Order, OrderPhoto, Partner, User
+from app.models import Base, MessageLog, Order, OrderGroup, OrderPhoto, Partner, User
 from app.repositories.timeline import TimelineRepository
 from app.schemas.message import MessageSendRequest
 from app.services.dashboard import DashboardService
@@ -74,6 +74,30 @@ def login(client: TestClient, path: str, identifier: str, password: str) -> dict
     response = client.post(path, json={"identifier": identifier, "password": password})
     assert response.status_code == 200, response.text
     return response.json()
+
+
+def add_order_group(
+    db: Session,
+    *,
+    group_id: str,
+    customer_token: str,
+    customer_name: str,
+    customer_phone: str,
+    customer_address: str,
+    customer_visible_payment: bool = False,
+    source_channel: str | None = None,
+) -> None:
+    db.add(
+        OrderGroup(
+            id=group_id,
+            customer_token=customer_token,
+            customer_name=customer_name,
+            customer_phone=customer_phone,
+            customer_address=customer_address,
+            customer_visible_payment=customer_visible_payment,
+            source_channel=source_channel,
+        )
+    )
 
 
 def solapi_webhook_signature(secret: str, body: bytes) -> str:
@@ -176,9 +200,18 @@ def test_partner_can_open_start_and_complete_own_job_with_timeline() -> None:
 
 def test_partner_cannot_open_or_mutate_unassigned_job() -> None:
     def seed_unassigned_job(db: Session) -> None:
+        add_order_group(
+            db,
+            group_id="unassigned-order-01-group",
+            customer_token="unassigned-customer-token",
+            customer_name="권한테스트",
+            customer_phone="01011112222",
+            customer_address="서울 테스트구 권한로 1",
+        )
         db.add(
             Order(
                 id="unassigned-order-01",
+                group_id="unassigned-order-01-group",
                 status=OrderStatus.SCHEDULE_CONFIRMED,
                 received_date=date(2026, 5, 4),
                 scheduled_date=date(2026, 5, 5),
@@ -303,9 +336,18 @@ def test_seed_partner_token_cannot_mutate_other_partner_order() -> None:
                 is_active=True,
             )
         )
+        add_order_group(
+            db,
+            group_id="other-partner-order-01-group",
+            customer_token="other-partner-order-01-token",
+            customer_name="다른 협력사 고객",
+            customer_phone="01077778888",
+            customer_address="서울시 송파구",
+        )
         db.add(
             Order(
                 id="other-partner-order-01",
+                group_id="other-partner-order-01-group",
                 customer_name="다른 협력사 고객",
                 customer_phone="01077778888",
                 customer_address="서울시 송파구",
@@ -526,12 +568,18 @@ def test_admin_can_create_order_and_update_operational_fields() -> None:
     assert created["customer_phone"] == "01011112222"
     assert created["customer_token"]
 
-    update_response = client.patch(
-        f"/api/admin/orders/{created['id']}",
+    group_update_response = client.patch(
+        f"/api/admin/orders/groups/{created['group_id']}",
         headers=headers,
         json={
             "customer_phone": "010-9999-8888",
             "customer_address": "서울 성동구 수정로 2",
+        },
+    )
+    update_response = client.patch(
+        f"/api/admin/orders/{created['id']}",
+        headers=headers,
+        json={
             "service_name": "이사청소",
             "size_or_quantity": "40평",
             "total_amount": 410000,
@@ -540,6 +588,7 @@ def test_admin_can_create_order_and_update_operational_fields() -> None:
     )
     detail_response = client.get(f"/api/admin/orders/{created['id']}", headers=headers)
 
+    assert group_update_response.status_code == 200
     assert update_response.status_code == 200
     assert detail_response.status_code == 200
     detail = detail_response.json()
@@ -981,6 +1030,7 @@ def test_dashboard_summary_matches_operational_queue_definitions() -> None:
     ) -> Order:
         return Order(
             id=order_id,
+            group_id=f"group-{order_id}",
             status=status,
             received_date=date(2026, 5, 1),
             scheduled_date=scheduled_date,
@@ -1137,15 +1187,16 @@ def test_customer_link_verify_returns_customer_dto_only() -> None:
 
     assert response.status_code == 200
     body = response.json()
-    assert body["id"] == "seed-order-2450"
+    assert body["id"] == "seed-order-group-2450"
     assert body["customer_name"] == "박고객"
-    assert body["total_amount"] is None
     assert body["customer_phone"] == "01098765432"
     assert "source_channel" not in body
     assert "payment_memo" not in body
     assert "evidence_memo" not in body
     assert "partner_payment_amount" not in body
-    assert body["photos"] == []
+    assert body["lines"][0]["id"] == "seed-order-2450"
+    assert body["lines"][0]["total_amount"] is None
+    assert body["lines"][0]["photos"] == []
 
 
 def test_customer_link_verify_rejects_wrong_phone_suffix() -> None:
@@ -1162,9 +1213,18 @@ def test_customer_link_verify_rejects_wrong_phone_suffix() -> None:
 
 def test_customer_link_verify_locks_after_repeated_wrong_suffix(monkeypatch) -> None:
     def seed_rate_limited_order(db: Session) -> None:
+        add_order_group(
+            db,
+            group_id="customer-rate-limit-group",
+            customer_token="rate-limit-token",
+            customer_name="Rate Limited Customer",
+            customer_phone="01011112222",
+            customer_address="Seoul",
+        )
         db.add(
             Order(
                 id="customer-rate-limit-order",
+                group_id="customer-rate-limit-group",
                 status=OrderStatus.SCHEDULE_CONFIRMED,
                 received_date=date(2026, 5, 5),
                 service_name="입주청소",
@@ -1241,7 +1301,7 @@ def test_customer_link_verify_returns_only_customer_visible_photos() -> None:
     )
 
     assert response.status_code == 200
-    photos = response.json()["photos"]
+    photos = response.json()["lines"][0]["photos"]
     assert photos == [
         {
             "id": "photo-public",
@@ -1282,7 +1342,7 @@ def test_partner_upload_auto_visible_customer_delivery_flow(tmp_path, monkeypatc
         json={"phone_suffix": "5432"},
     )
     assert auto_visible.status_code == 200
-    assert auto_visible.json()["photos"] == [
+    assert auto_visible.json()["lines"][0]["photos"] == [
         {
             "id": uploaded["id"],
             "photo_type": "before",
@@ -1487,7 +1547,7 @@ def test_admin_e2e_order_to_customer_delivery_flow(tmp_path, monkeypatch) -> Non
         json={"phone_suffix": "2222"},
     )
     assert auto_visible.status_code == 200
-    assert auto_visible.json()["photos"] == [
+    assert auto_visible.json()["lines"][0]["photos"] == [
         {
             "id": uploaded["id"],
             "photo_type": "after",
@@ -1518,11 +1578,12 @@ def test_admin_e2e_order_to_customer_delivery_flow(tmp_path, monkeypatch) -> Non
     )
     assert customer_response.status_code == 200
     customer = customer_response.json()
-    assert customer["id"] == order_id
-    assert customer["total_amount"] is None
+    assert customer["id"] == order["group_id"]
+    assert customer["lines"][0]["id"] == order_id
+    assert customer["lines"][0]["total_amount"] is None
     assert "payment_memo" not in customer
     assert "partner_payment_amount" not in customer
-    assert customer["photos"] == [
+    assert customer["lines"][0]["photos"] == [
         {
             "id": uploaded["id"],
             "photo_type": "after",
@@ -2131,9 +2192,18 @@ def test_admin_can_send_partner_assignment_to_partner_only() -> None:
 
 def test_partner_assignment_message_requires_assigned_partner() -> None:
     def seed_unassigned(db: Session) -> None:
+        add_order_group(
+            db,
+            group_id="message-unassigned-group",
+            customer_token="message-unassigned-token",
+            customer_name="미배정고객",
+            customer_phone="01011112222",
+            customer_address="서울 테스트구",
+        )
         db.add(
             Order(
                 id="message-unassigned-order",
+                group_id="message-unassigned-group",
                 status=OrderStatus.CONSULTING,
                 received_date=date(2026, 5, 4),
                 scheduled_date=date(2026, 5, 6),

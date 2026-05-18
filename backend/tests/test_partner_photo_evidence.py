@@ -21,7 +21,7 @@ from app.db.seed import (
 )
 from app.domain.constants import OrderStatus, PhotoType
 from app.main import create_app
-from app.models import Base, Order, OrderPhoto, Partner
+from app.models import Base, Order, OrderGroup, OrderPhoto, Partner
 from app.services.photos import PhotoService
 
 
@@ -105,6 +105,27 @@ def seed_photo(
     )
 
 
+def add_order_group(
+    db: Session,
+    *,
+    group_id: str,
+    customer_token: str,
+    customer_name: str,
+    customer_phone: str,
+    customer_address: str,
+) -> None:
+    db.add(
+        OrderGroup(
+            id=group_id,
+            customer_token=customer_token,
+            customer_name=customer_name,
+            customer_phone=customer_phone,
+            customer_address=customer_address,
+            customer_visible_payment=False,
+        )
+    )
+
+
 def seed_other_partner_order_with_photo(db: Session) -> None:
     db.add(
         Partner(
@@ -118,9 +139,18 @@ def seed_other_partner_order_with_photo(db: Session) -> None:
             is_active=True,
         )
     )
+    add_order_group(
+        db,
+        group_id="other-partner-order-group",
+        customer_token="other-partner-customer-token",
+        customer_name="Other Customer",
+        customer_phone="01022223333",
+        customer_address="Seoul Other Address",
+    )
     db.add(
         Order(
             id="other-partner-order",
+            group_id="other-partner-order-group",
             status=OrderStatus.SCHEDULE_CONFIRMED,
             received_date=date(2026, 5, 5),
             scheduled_date=date(2026, 5, 7),
@@ -276,7 +306,7 @@ def test_customer_dto_exposes_only_approved_photos(tmp_path, monkeypatch) -> Non
     assert response.status_code == 200
     body = response.json()
     assert body["customer_phone"] == "01098765432"
-    assert body["photos"] == [
+    assert body["lines"][0]["photos"] == [
         {
             "id": "customer-visible-photo",
             "photo_type": "after",
