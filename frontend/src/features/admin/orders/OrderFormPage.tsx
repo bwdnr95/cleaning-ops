@@ -16,6 +16,15 @@ export function OrderFormPage({ mode = 'create', orderId = null, onCancel, onSav
   const [isSaving, setIsSaving] = React.useState(false);
   const [error, setError] = React.useState(null);
   const [isBalanceManual, setIsBalanceManual] = React.useState(false);
+  const activeServiceCategories = React.useMemo(
+    () => (serviceCatalog.data || []).filter((category) => category.is_active),
+    [serviceCatalog.data],
+  );
+  const selectedServiceItems = React.useMemo(() => {
+    return activeServiceCategories
+      .filter((category) => category.id === form.service_category_id)
+      .flatMap((category) => (category.items || []).filter((item) => item.is_active));
+  }, [activeServiceCategories, form.service_category_id]);
 
   React.useEffect(() => {
     let isCurrent = true;
@@ -89,15 +98,22 @@ export function OrderFormPage({ mode = 'create', orderId = null, onCancel, onSav
     }));
   };
 
+  const handleServiceCategoryChange = (categoryId) => {
+    setForm((current) => ({
+      ...current,
+      service_category_id: categoryId,
+      service_item_id: '',
+    }));
+  };
+
   const handleServiceItemChange = (serviceItemId) => {
-    const option = flattenServiceItems(serviceCatalog.data || []).find((item) => item.id === serviceItemId);
+    const option = selectedServiceItems.find((item) => item.id === serviceItemId);
     setForm((current) => {
       const totalAmount = option && current.total_amount === ''
         ? formatMoneyInput(Math.round(Number(option.base_price || 0)))
         : current.total_amount;
       const next = {
         ...current,
-        service_category_id: option?.category_id || '',
         service_item_id: serviceItemId,
         service_name: option?.name || current.service_name,
         total_amount: totalAmount,
@@ -178,12 +194,31 @@ export function OrderFormPage({ mode = 'create', orderId = null, onCancel, onSav
 
             <Section title="상품 / 일정">
               <FieldGrid>
-                <Field label="카탈로그 상품">
-                  <select className="input" data-testid="order-service-item" value={form.service_item_id} onChange={(event) => handleServiceItemChange(event.target.value)}>
+                <Field label="카테고리">
+                  <select
+                    className="input"
+                    data-testid="order-service-category"
+                    value={form.service_category_id}
+                    onChange={(event) => handleServiceCategoryChange(event.target.value)}
+                  >
                     <option value="">직접 입력</option>
-                    {flattenServiceItems(serviceCatalog.data || []).map((item) => (
+                    {activeServiceCategories.map((category) => (
+                      <option key={category.id} value={category.id}>{category.name}</option>
+                    ))}
+                  </select>
+                </Field>
+                <Field label="상세상품">
+                  <select
+                    className="input"
+                    data-testid="order-service-item"
+                    value={form.service_item_id}
+                    onChange={(event) => handleServiceItemChange(event.target.value)}
+                    disabled={!form.service_category_id}
+                  >
+                    <option value="">직접 입력</option>
+                    {selectedServiceItems.map((item) => (
                       <option key={item.id} value={item.id}>
-                        {item.category_name} / {item.name} · {formatWon(item.base_price)}
+                        {item.name} · {formatWon(item.base_price)}
                       </option>
                     ))}
                   </select>
@@ -492,14 +527,6 @@ function calculateBalanceAmount(totalAmount, depositAmount) {
   }
 
   return formatMoneyInput(Math.max(total - deposit, 0));
-}
-
-function flattenServiceItems(categories) {
-  return categories.flatMap((category) => (
-    (category.items || [])
-      .filter((item) => item.is_active && category.is_active)
-      .map((item) => ({ ...item, category_name: category.name }))
-  ));
 }
 
 function formatWon(value) {
