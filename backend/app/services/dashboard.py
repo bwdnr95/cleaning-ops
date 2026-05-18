@@ -31,7 +31,6 @@ class DashboardService:
                     [
                         OrderStatus.SCHEDULED,
                         OrderStatus.IN_PROGRESS,
-                        OrderStatus.PHOTO_REVIEW_PENDING,
                     ]
                 ),
             ),
