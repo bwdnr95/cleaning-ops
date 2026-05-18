@@ -43,7 +43,7 @@
   - `evidence_memo`
   - `source_channel`
   - 다른 협력사 주문/정산 정보
-- 협력사가 업로드한 사진은 기본값이 `is_customer_visible=false`여야 한다.
+- 협력사가 업로드한 사진은 자동 공개 정책(자세한 내용은 Photo Rules 참조)에 따라 처리한다. 관리자는 언제든 revoke로 가릴 수 있다.
 - 고객 페이지는 `is_customer_visible=true`인 사진만 보여준다.
 
 ## Domain Constants
@@ -155,10 +155,16 @@ export interface MessageProvider {
 ## Photo Rules
 
 - 사진 타입은 `before`, `after`, `etc`만 사용한다.
-- 협력사 업로드 직후 고객 공개 여부는 항상 false다.
-- 관리자가 승인한 사진만 고객에게 보인다.
+- 협력사가 업로드한 사진은 기본적으로 고객에게 즉시 노출된다 (자동 공개). 별도 관리자 검수 단계 없이 `is_customer_visible=true`로 저장된다.
+- 자동 공개는 시스템 액션으로 처리하되 `order_timeline`에 `photo_approved` 이벤트를 system actor로 기록한다. 운영 추적 가능성을 잃지 않는다.
+- 잘못 올라온 사진은 관리자가 "비공개로 되돌리기(revoke)"로 즉시 가릴 수 있다. revoke 시 `is_customer_visible=false`로 되돌리고 `order_timeline`에 `photo_revoked` 이벤트를 남긴다.
+- **사진 업로드 자체로는 주문 상태가 바뀌지 않는다.** 협력사가 명시적으로 "작업 완료" 액션을 실행한 시점에서만 `IN_PROGRESS → 고객전달필요`로 전환된다 (사진검수대기 단계를 거치지 않는다).
+- 협력사 "작업 완료" 동작은 사진이 1장 이상일 때만 허용한다. 사진 0장이면 422로 거부하고 "사진을 1장 이상 업로드한 뒤 완료 처리하세요" 메시지를 반환한다. 또한 주문이 `작업진행` 상태가 아니면 409 `invalid_status_transition`을 반환한다.
+- `사진검수대기` enum 자체는 brief에 박힌 13개 status enum 호환을 위해 유지되지만, 신규 자동 전환 경로는 없다. 향후 운영자가 명시적으로 이 상태로 되돌릴 수 있는 액션이 추가될 수 있다.
+- `customer_photo_ready` 메시지 발송과 주문 상태 전환은 분리되어 있다. 발송 자체로는 `고객전달완료`로 advance하지 않는다 — 운영자가 주문 상세에서 명시적으로 변경하거나 차후 자동화 트리거가 처리한다.
+- 고객 사진 링크 발송(`customer_photo_ready`)은 명시적으로 여러 번 호출할 수 있다. 매 발송마다 `message_logs`와 `customer_link_sent` timeline 이벤트를 새로 남긴다.
 - 사진 업로드 실패, 파일 형식 오류, 용량 초과는 사용자에게 명확히 표시한다.
-- 고객 공개 승인 액션은 타임라인에 남긴다.
+- 고객 페이지는 `is_customer_visible=true`인 사진만 보여준다.
 
 ## UI Rules
 
