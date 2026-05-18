@@ -8,34 +8,39 @@ from app.api.deps import get_session
 from app.core.config import settings
 from app.core.time import utc_now
 from app.domain.phone import phone_suffix_matches
-from app.repositories.orders import OrderRepository
+from app.repositories.order_groups import OrderGroupRepository
 from app.repositories.photos import PhotoRepository
-from app.schemas.order import CustomerOrderRead, CustomerVerifyRequest
-from app.services.orders import to_customer_order_dto
+from app.schemas.order import CustomerOrderGroupRead, CustomerVerifyRequest
+from app.services.orders import to_customer_group_dto
 
 router = APIRouter()
 
 _customer_verify_attempts: dict[str, dict] = defaultdict(lambda: {"count": 0, "locked_until": None})
 
 
-@router.post("/{customer_token}/verify", response_model=CustomerOrderRead)
+@router.post("/{customer_token}/verify", response_model=CustomerOrderGroupRead)
 def verify_customer_order(
     customer_token: str,
     payload: CustomerVerifyRequest,
     request: Request,
     db: Session = Depends(get_session),
-) -> CustomerOrderRead:
+) -> CustomerOrderGroupRead:
     rate_limit_key = _customer_verify_rate_limit_key(customer_token, request)
     _check_customer_verify_lockout(rate_limit_key)
 
-    order = OrderRepository(db).get_by_customer_token(customer_token)
-    if order is None or not phone_suffix_matches(order.customer_phone, payload.phone_suffix):
+    group_repo = OrderGroupRepository(db)
+    group = group_repo.get_by_customer_token(customer_token)
+    if group is None or not phone_suffix_matches(group.customer_phone, payload.phone_suffix):
         _record_customer_verify_failure(rate_limit_key)
         raise HTTPException(status_code=404, detail="order_not_found")
     _reset_customer_verify_failures(rate_limit_key)
 
-    photos = PhotoRepository(db).list_for_order(order.id, customer_visible_only=True)
-    return to_customer_order_dto(order, photos=photos)
+    photo_repo = PhotoRepository(db)
+    lines_with_photos = [
+        (line, photo_repo.list_for_order(line.id, customer_visible_only=True))
+        for line in group_repo.list_lines(group.id)
+    ]
+    return to_customer_group_dto(group, lines_with_photos=lines_with_photos)
 
 
 def _customer_verify_rate_limit_key(customer_token: str, request: Request) -> str:

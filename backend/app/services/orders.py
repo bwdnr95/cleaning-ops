@@ -15,12 +15,17 @@ from app.repositories.orders import OrderRepository
 from app.repositories.photos import PhotoRepository
 from app.schemas.message import MessageLogRead
 from app.schemas.order import (
+    AdminOrderGroupRead,
     AdminOrderDetailRead,
     AdminOrderRead,
+    AdminOrderSiblingRead,
+    CustomerOrderGroupRead,
+    CustomerOrderLineRead,
     CustomerOrderRead,
     CustomerPhotoRead,
     OrderCreate,
     OrderGroupCreate,
+    OrderGroupUpdate,
     OrderLineCreate,
     OrderUpdate,
     PartnerJobRead,
@@ -225,6 +230,42 @@ class OrderService:
         self.db.refresh(order)
         return order
 
+    def update_group(
+        self,
+        group_id: str,
+        payload: OrderGroupUpdate,
+        *,
+        actor_user_id: str | None = None,
+    ) -> OrderGroup:
+        group = self.db.get(OrderGroup, group_id)
+        if group is None:
+            raise ValueError("group_not_found")
+
+        changes = payload.model_dump(exclude_unset=True)
+        if "customer_phone" in changes and changes["customer_phone"] is not None:
+            changes["customer_phone"] = normalize_phone(changes["customer_phone"])
+
+        for key, value in changes.items():
+            setattr(group, key, value)
+
+        mirror_fields = {
+            "customer_name",
+            "customer_phone",
+            "customer_address",
+            "source_channel",
+            "customer_visible_payment",
+        }
+        mirror_changes = {key: changes[key] for key in mirror_fields if key in changes}
+        if mirror_changes:
+            lines = self.db.scalars(select(Order).where(Order.group_id == group_id)).all()
+            for line in lines:
+                for key, value in mirror_changes.items():
+                    setattr(line, key, value)
+
+        self.db.commit()
+        self.db.refresh(group)
+        return group
+
     def _apply_service_catalog(self, values: dict) -> None:
         service_item_id = values.get("service_item_id")
         if service_item_id:
@@ -322,9 +363,39 @@ class OrderService:
         )
 
 
-def to_admin_order_dto(order: Order, *, timeline: list | None = None) -> AdminOrderRead:
+def to_admin_group_dto(group: OrderGroup, *, lines: list[Order] | None = None) -> AdminOrderGroupRead:
+    return AdminOrderGroupRead(
+        id=group.id,
+        customer_token=group.customer_token,
+        customer_name=group.customer_name,
+        customer_phone=group.customer_phone,
+        customer_address=group.customer_address,
+        source_channel=group.source_channel,
+        customer_visible_payment=group.customer_visible_payment,
+        notes=group.notes,
+        created_at=group.created_at,
+        updated_at=group.updated_at,
+        lines=[to_admin_order_dto(line, group=group) for line in lines or []],
+    )
+
+
+def to_admin_order_dto(
+    order: Order,
+    *,
+    group: OrderGroup | None = None,
+    timeline: list | None = None,
+) -> AdminOrderRead:
+    customer_name = group.customer_name if group else order.customer_name
+    customer_phone = group.customer_phone if group else order.customer_phone
+    customer_address = group.customer_address if group else order.customer_address
+    source_channel = group.source_channel if group else order.source_channel
+    customer_visible_payment = (
+        group.customer_visible_payment if group else bool(order.customer_visible_payment)
+    )
+    customer_token = group.customer_token if group else order.customer_token
     return AdminOrderRead(
         id=order.id,
+        group_id=order.group_id or "",
         status=order.status,
         received_date=order.received_date,
         scheduled_date=order.scheduled_date,
@@ -337,10 +408,10 @@ def to_admin_order_dto(order: Order, *, timeline: list | None = None) -> AdminOr
         size_or_quantity=order.size_or_quantity,
         service_detail=order.service_detail,
         special_request=order.special_request,
-        source_channel=order.source_channel,
-        customer_name=order.customer_name,
-        customer_phone=order.customer_phone,
-        customer_address=order.customer_address,
+        source_channel=source_channel,
+        customer_name=customer_name or "",
+        customer_phone=customer_phone or "",
+        customer_address=customer_address or "",
         total_amount=order.total_amount,
         deposit_amount=order.deposit_amount,
         balance_amount=order.balance_amount,
@@ -351,8 +422,8 @@ def to_admin_order_dto(order: Order, *, timeline: list | None = None) -> AdminOr
         evidence_memo=order.evidence_memo,
         partner_payment_amount=order.partner_payment_amount,
         partner_payment_status=order.partner_payment_status,
-        customer_visible_payment=order.customer_visible_payment,
-        customer_token=order.customer_token,
+        customer_visible_payment=customer_visible_payment,
+        customer_token=customer_token or "",
         created_at=order.created_at,
         updated_at=order.updated_at,
         timeline=timeline or [],
@@ -362,15 +433,18 @@ def to_admin_order_dto(order: Order, *, timeline: list | None = None) -> AdminOr
 def to_admin_order_detail_dto(
     order: Order,
     *,
+    group: OrderGroup | None = None,
     timeline: list | None = None,
     photos: list[OrderPhoto] | None = None,
     message_logs: list | None = None,
+    sibling_lines: list[AdminOrderSiblingRead] | None = None,
 ) -> AdminOrderDetailRead:
-    base = to_admin_order_dto(order, timeline=timeline)
+    base = to_admin_order_dto(order, group=group, timeline=timeline)
     return AdminOrderDetailRead(
         **base.model_dump(),
         photos=[to_admin_photo_dto(photo) for photo in photos or []],
         message_logs=[MessageLogRead.model_validate(log) for log in message_logs or []],
+        sibling_lines=sibling_lines or [],
     )
 
 
@@ -418,24 +492,60 @@ def to_partner_photo_dto(photo: OrderPhoto) -> PartnerPhotoRead:
     )
 
 
+def to_customer_group_dto(
+    group: OrderGroup,
+    *,
+    lines_with_photos: list[tuple[Order, list[OrderPhoto]]],
+) -> CustomerOrderGroupRead:
+    return CustomerOrderGroupRead(
+        id=group.id,
+        customer_name=group.customer_name,
+        customer_phone=group.customer_phone,
+        customer_address=group.customer_address,
+        customer_visible_payment=group.customer_visible_payment,
+        lines=[
+            _to_customer_line_dto(
+                line,
+                photos,
+                payment_visible=group.customer_visible_payment,
+            )
+            for line, photos in lines_with_photos
+        ],
+    )
+
+
+def _to_customer_line_dto(
+    line: Order,
+    photos: list[OrderPhoto],
+    *,
+    payment_visible: bool,
+) -> CustomerOrderLineRead:
+    return CustomerOrderLineRead(
+        id=line.id,
+        status=line.status,
+        scheduled_date=line.scheduled_date,
+        requested_time=line.requested_time,
+        service_name=line.service_name,
+        size_or_quantity=line.size_or_quantity,
+        service_detail=line.service_detail,
+        special_request=line.special_request,
+        total_amount=line.total_amount if payment_visible else None,
+        deposit_amount=line.deposit_amount if payment_visible else None,
+        balance_amount=line.balance_amount if payment_visible else None,
+        payment_status=line.payment_status if payment_visible else None,
+        photos=[to_customer_photo_dto(photo) for photo in photos if photo.is_customer_visible],
+    )
+
+
 def to_customer_order_dto(order: Order, *, photos: list[OrderPhoto] | None = None) -> CustomerOrderRead:
+    payment_visible = bool(order.customer_visible_payment)
     return CustomerOrderRead(
         id=order.id,
-        status=order.status,
-        scheduled_date=order.scheduled_date,
-        requested_time=order.requested_time,
-        service_name=order.service_name,
-        size_or_quantity=order.size_or_quantity,
-        service_detail=order.service_detail,
-        special_request=order.special_request,
-        customer_name=order.customer_name,
-        customer_phone=order.customer_phone,
-        customer_address=order.customer_address,
-        total_amount=order.total_amount if order.customer_visible_payment else None,
-        deposit_amount=order.deposit_amount if order.customer_visible_payment else None,
-        balance_amount=order.balance_amount if order.customer_visible_payment else None,
-        payment_status=order.payment_status if order.customer_visible_payment else None,
-        photos=[to_customer_photo_dto(photo) for photo in photos or [] if photo.is_customer_visible],
+        customer_name=order.customer_name or "",
+        customer_phone=order.customer_phone or "",
+        customer_address=order.customer_address or "",
+        customer_visible_payment=payment_visible,
+        lines=[_to_customer_line_dto(order, photos or [], payment_visible=payment_visible)],
     )
 
 
