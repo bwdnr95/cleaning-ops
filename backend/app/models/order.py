@@ -11,6 +11,7 @@ class Order(TimestampMixin, Base):
     __tablename__ = "orders"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    group_id: Mapped[str] = mapped_column(ForeignKey("order_groups.id"), index=True)
     status: Mapped[OrderStatus] = mapped_column(String(40), default=OrderStatus.NEW, index=True)
     received_date: Mapped[date] = mapped_column(Date, index=True)
     scheduled_date: Mapped[date | None] = mapped_column(Date, index=True)
@@ -23,10 +24,11 @@ class Order(TimestampMixin, Base):
     size_or_quantity: Mapped[str | None] = mapped_column(String(80))
     service_detail: Mapped[str | None] = mapped_column(Text)
     special_request: Mapped[str | None] = mapped_column(Text)
-    source_channel: Mapped[str | None] = mapped_column(String(120))
-    customer_name: Mapped[str] = mapped_column(String(80), index=True)
-    customer_phone: Mapped[str] = mapped_column(String(30), index=True)
-    customer_address: Mapped[str] = mapped_column(Text)
+    # R7 deprecated: see OrderGroup. Drop in R7.5.
+    source_channel: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    customer_name: Mapped[str | None] = mapped_column(String(80), index=True, nullable=True)
+    customer_phone: Mapped[str | None] = mapped_column(String(30), index=True, nullable=True)
+    customer_address: Mapped[str | None] = mapped_column(Text, nullable=True)
     total_amount: Mapped[float | None] = mapped_column(Numeric(12, 2))
     deposit_amount: Mapped[float | None] = mapped_column(Numeric(12, 2))
     balance_amount: Mapped[float | None] = mapped_column(Numeric(12, 2))
@@ -37,5 +39,6 @@ class Order(TimestampMixin, Base):
     evidence_memo: Mapped[str | None] = mapped_column(Text)
     partner_payment_amount: Mapped[float | None] = mapped_column(Numeric(12, 2))
     partner_payment_status: Mapped[str | None] = mapped_column(String(40))
-    customer_token: Mapped[str] = mapped_column(String(80), unique=True, index=True)
-    customer_visible_payment: Mapped[bool] = mapped_column(Boolean, default=False)
+    # R7 deprecated: see OrderGroup. Drop in R7.5.
+    customer_token: Mapped[str | None] = mapped_column(String(80), index=True, nullable=True)
+    customer_visible_payment: Mapped[bool | None] = mapped_column(Boolean, default=False, nullable=True)

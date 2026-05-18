@@ -2,6 +2,7 @@ from app.models.base import Base
 from app.models.audit_log import AuditLog
 from app.models.message import MessageLog
 from app.models.order import Order
+from app.models.order_group import OrderGroup
 from app.models.partner import Partner, PartnerCategory
 from app.models.photo import OrderPhoto
 from app.models.refresh_token import RefreshToken
@@ -14,6 +15,7 @@ __all__ = [
     "AuditLog",
     "MessageLog",
     "Order",
+    "OrderGroup",
     "OrderPhoto",
     "OrderTimeline",
     "Partner",
