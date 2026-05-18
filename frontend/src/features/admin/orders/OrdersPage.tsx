@@ -1029,7 +1029,7 @@ function createInitialDateFilter(initialTab, initialDatePreset) {
   if (['monthly_done', 'monthly_revenue'].includes(initialTab)) {
     return createDateFilter('month');
   }
-  return createDateFilter('today');
+  return createDateFilter('all');
 }
 
 function normalizeDateRange(start, end) {

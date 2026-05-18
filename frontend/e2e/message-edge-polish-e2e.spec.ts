@@ -17,7 +17,7 @@ test('admin sees blocked message actions clearly on orders without partner or ap
 
   await loginAsAdmin(page);
   await page.getByTestId('admin-nav-orders').click();
-  await page.getByTestId('orders-date-clear').click();
+  await expect(page.getByTestId('orders-date-preset-all')).toHaveAttribute('aria-pressed', 'true');
   await page.getByTestId(`admin-order-row-${order.id}`).click();
   await expect(page.getByTestId('admin-order-detail-page')).toBeVisible();
 
@@ -29,7 +29,7 @@ test('admin sees blocked message actions clearly on orders without partner or ap
 test('admin previews message channel readiness before sending', async ({ page }) => {
   await loginAsAdmin(page);
   await page.getByTestId('admin-nav-orders').click();
-  await page.getByTestId('orders-date-clear').click();
+  await expect(page.getByTestId('orders-date-preset-all')).toHaveAttribute('aria-pressed', 'true');
   await page.getByTestId('admin-order-row-seed-order-2450').click();
   await expect(page.getByTestId('admin-order-detail-page')).toBeVisible();
 
@@ -78,7 +78,7 @@ test('admin order list and detail stay usable with long operational text', async
 
   await loginAsAdmin(page);
   await page.getByTestId('admin-nav-orders').click();
-  await page.getByTestId('orders-date-clear').click();
+  await expect(page.getByTestId('orders-date-preset-all')).toHaveAttribute('aria-pressed', 'true');
 
   const row = page.getByTestId(`admin-order-row-${order.id}`);
   await expect(row).toBeVisible();

@@ -56,7 +56,7 @@ const ADMIN_PAGE_META = {
   },
 };
 
-const DEFAULT_ORDERS_VIEW = { tab: 'all', datePreset: 'today' };
+const DEFAULT_ORDERS_VIEW = { tab: 'all', datePreset: 'all' };
 
 export function App() {
   const auth = useAuth();

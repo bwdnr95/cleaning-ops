@@ -138,8 +138,7 @@ test('admin can filter orders by visit date with the custom date picker', async 
   await loginAsAdmin(page);
   await page.getByTestId('admin-nav-orders').click();
   await expect(page.getByTestId('admin-orders-page')).toBeVisible();
-  await expect(page.getByTestId('orders-date-preset-today')).toHaveAttribute('aria-pressed', 'true');
-  await page.getByTestId('orders-date-clear').click();
+  await expect(page.getByTestId('orders-date-preset-all')).toHaveAttribute('aria-pressed', 'true');
   await expect(page.getByTestId(`admin-order-row-${targetOrder.id}`)).toBeVisible();
   await expect(page.getByTestId(`admin-order-row-${outsideOrder.id}`)).toBeVisible();
 
@@ -159,7 +158,7 @@ test('admin can run selected order bulk operations from the order list', async (
   await loginAsAdmin(page);
   await page.getByTestId('admin-nav-orders').click();
   await expect(page.getByTestId('admin-orders-page')).toBeVisible();
-  await page.getByTestId('orders-date-clear').click();
+  await expect(page.getByTestId('orders-date-preset-all')).toHaveAttribute('aria-pressed', 'true');
 
   await selectOrderRows(page, orders);
   await page.getByTestId('orders-bulk-status-open').click();
@@ -192,7 +191,7 @@ test('admin can adjust schedule from order detail and jump to related ops pages'
   await loginAsAdmin(page);
   await page.getByTestId('admin-nav-orders').click();
   await expect(page.getByTestId('admin-orders-page')).toBeVisible();
-  await page.getByTestId('orders-date-clear').click();
+  await expect(page.getByTestId('orders-date-preset-all')).toHaveAttribute('aria-pressed', 'true');
   await page.getByTestId(`admin-order-row-${order.id}`).click();
   await expect(page.getByTestId('admin-order-detail-page')).toBeVisible();
 
