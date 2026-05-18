@@ -185,6 +185,7 @@ export function App() {
                           orderId={detailOrderId}
                           onBack={() => setDetailOrderId(null)}
                           onEdit={() => setOrderForm({ mode: 'edit', orderId: detailOrderId })}
+                          onOpenOrder={(nextOrderId) => setDetailOrderId(nextOrderId)}
                           onNav={(nextPage) => {
                             setDetailOrderId(null);
                             setOrderForm(null);

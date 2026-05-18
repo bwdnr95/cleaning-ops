@@ -45,7 +45,7 @@ const MESSAGE_ACTIONS = {
   },
 };
 
-export function OrderDetailPage({ orderId, onBack, onEdit, onNav }) {
+export function OrderDetailPage({ orderId, onBack, onEdit, onNav, onOpenOrder }) {
   const loadOrder = React.useCallback(() => getAdminOrder(orderId), [orderId]);
   const orderResource = useApiResource(loadOrder, orderId);
   const partnersResource = useApiResource(listPartners);
@@ -353,6 +353,42 @@ export function OrderDetailPage({ orderId, onBack, onEdit, onNav }) {
           </div>
 
           <aside style={{ display: 'flex', flexDirection: 'column', gap: 12, position: 'sticky', top: 0, alignSelf: 'flex-start' }}>
+            {order.sibling_lines && order.sibling_lines.length > 0 && (
+              <div className="card" style={{ padding: 14 }}>
+                <PanelTitle>이 그룹의 다른 라인</PanelTitle>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  {order.sibling_lines.map((sibling) => (
+                    <button
+                      key={sibling.id}
+                      type="button"
+                      data-testid={`order-sibling-${sibling.id}`}
+                      onClick={() => onOpenOrder?.(sibling.id)}
+                      style={{
+                        display: 'block',
+                        width: '100%',
+                        border: '1px solid var(--divider)',
+                        borderRadius: 6,
+                        background: 'var(--surface)',
+                        padding: 8,
+                        textAlign: 'left',
+                        cursor: 'pointer',
+                      }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+                        <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 12.5, fontWeight: 600 }}>
+                          {sibling.service_name}
+                        </span>
+                        <StatusBadge status={sibling.status} dot={false}/>
+                      </div>
+                      <div style={{ fontSize: 11.5, color: 'var(--text-tertiary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                        {sibling.team_name || '미배정'} · {formatWon(sibling.total_amount)}
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
             <div className="card" style={{ padding: 14 }}>
               <PanelTitle>상태 변경</PanelTitle>
               <select className="input" value={selectedStatus} onChange={(event) => setSelectedStatus(event.target.value)} style={{ width: '100%', height: 34, marginBottom: 8 }}>
