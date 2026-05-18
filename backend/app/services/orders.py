@@ -8,7 +8,9 @@ from app.domain.constants import OrderStatus, TimelineEventType
 from app.domain.payment_status import PAYMENT_TRACKED_FIELDS
 from app.domain.phone import normalize_phone
 from app.models.order import Order
+from app.models.order_group import OrderGroup
 from app.models.photo import OrderPhoto
+from app.repositories.order_groups import OrderGroupRepository
 from app.repositories.orders import OrderRepository
 from app.repositories.photos import PhotoRepository
 from app.schemas.message import MessageLogRead
@@ -18,6 +20,8 @@ from app.schemas.order import (
     CustomerOrderRead,
     CustomerPhotoRead,
     OrderCreate,
+    OrderGroupCreate,
+    OrderLineCreate,
     OrderUpdate,
     PartnerJobRead,
 )
@@ -46,12 +50,105 @@ class OrderService:
         self.timeline = TimelineService(db)
 
     def create(self, payload: OrderCreate, *, actor_user_id: str | None = None) -> Order:
-        values = payload.model_dump(exclude={"customer_phone"})
+        group = self.create_group(
+            OrderGroupCreate(
+                customer_name=payload.customer_name,
+                customer_phone=payload.customer_phone,
+                customer_address=payload.customer_address,
+                source_channel=payload.source_channel,
+                customer_visible_payment=payload.customer_visible_payment,
+                notes=None,
+                lines=[
+                    OrderLineCreate(
+                        status=payload.status,
+                        received_date=payload.received_date,
+                        scheduled_date=payload.scheduled_date,
+                        requested_time=payload.requested_time,
+                        partner_id=payload.partner_id,
+                        team_name=payload.team_name,
+                        service_category_id=payload.service_category_id,
+                        service_item_id=payload.service_item_id,
+                        service_name=payload.service_name,
+                        size_or_quantity=payload.size_or_quantity,
+                        service_detail=payload.service_detail,
+                        special_request=payload.special_request,
+                        total_amount=payload.total_amount,
+                        deposit_amount=payload.deposit_amount,
+                        balance_amount=payload.balance_amount,
+                        onsite_extra_amount=payload.onsite_extra_amount,
+                        vat_type=payload.vat_type,
+                        payment_status=payload.payment_status,
+                        payment_memo=payload.payment_memo,
+                        evidence_memo=payload.evidence_memo,
+                        partner_payment_amount=payload.partner_payment_amount,
+                        partner_payment_status=payload.partner_payment_status,
+                    )
+                ],
+            ),
+            actor_user_id=actor_user_id,
+        )
+        lines = OrderGroupRepository(self.db).list_lines(group.id)
+        return lines[0]
+
+    def create_group(
+        self,
+        payload: OrderGroupCreate,
+        *,
+        actor_user_id: str | None = None,
+    ) -> OrderGroup:
+        if not payload.lines:
+            raise ValueError("at_least_one_line_required")
+        group = OrderGroup(
+            id=str(uuid4()),
+            customer_token=token_urlsafe(24),
+            customer_name=payload.customer_name,
+            customer_phone=normalize_phone(payload.customer_phone),
+            customer_address=payload.customer_address,
+            source_channel=payload.source_channel,
+            customer_visible_payment=payload.customer_visible_payment,
+            notes=payload.notes,
+        )
+        self.db.add(group)
+        self.db.flush()
+        for line_payload in payload.lines:
+            self._create_line_internal(group, line_payload, actor_user_id=actor_user_id)
+        self.db.commit()
+        self.db.refresh(group)
+        return group
+
+    def add_line_to_group(
+        self,
+        group_id: str,
+        payload: OrderLineCreate,
+        *,
+        actor_user_id: str | None = None,
+    ) -> Order:
+        group = self.db.get(OrderGroup, group_id)
+        if group is None:
+            raise ValueError("group_not_found")
+        order = self._create_line_internal(group, payload, actor_user_id=actor_user_id)
+        self.db.commit()
+        self.db.refresh(order)
+        return order
+
+    def _create_line_internal(
+        self,
+        group: OrderGroup,
+        payload: OrderLineCreate,
+        *,
+        actor_user_id: str | None,
+    ) -> Order:
+        values = payload.model_dump()
         self._apply_service_catalog(values)
         order = Order(
             id=str(uuid4()),
-            customer_token=token_urlsafe(24),
-            customer_phone=normalize_phone(payload.customer_phone),
+            group_id=group.id,
+            customer_token=group.customer_token,
+            customer_name=group.customer_name,
+            customer_phone=group.customer_phone,
+            customer_address=group.customer_address,
+            source_channel=group.source_channel,
+            customer_visible_payment=group.customer_visible_payment,
             **values,
         )
         self.orders.add(order)
@@ -69,8 +166,6 @@ class OrderService:
                 title="협력사 배정",
                 metadata={"partner_id": order.partner_id},
             )
-        self.db.commit()
-        self.db.refresh(order)
         return order
 
     def update(self, order_id: str, payload: OrderUpdate, *, actor_user_id: str | None = None) -> Order:
