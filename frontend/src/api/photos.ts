@@ -10,6 +10,12 @@ export function approvePhoto(photoId) {
   });
 }
 
+export function revokePhoto(photoId) {
+  return apiRequest(`/admin/photos/${encodeURIComponent(photoId)}/revoke`, {
+    method: 'POST',
+  });
+}
+
 export function uploadPartnerJobPhoto(orderId, input) {
   const body = new FormData();
   body.set('photo_type', input.photoType);
