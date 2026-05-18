@@ -8,7 +8,31 @@ from app.schemas.message import MessageLogRead
 from app.schemas.photo import PartnerPhotoRead, PhotoRead
 
 
-class OrderBase(ApiModel):
+class OrderGroupBase(ApiModel):
+    customer_name: str
+    customer_phone: str
+    customer_address: str
+    source_channel: str | None = None
+    customer_visible_payment: bool = False
+    notes: str | None = None
+
+
+class OrderGroupCreate(OrderGroupBase):
+    lines: list["OrderLineCreate"] = Field(default_factory=list, min_length=1)
+
+
+class OrderGroupUpdate(ApiModel):
+    customer_name: str | None = None
+    customer_phone: str | None = None
+    customer_address: str | None = None
+    source_channel: str | None = None
+    customer_visible_payment: bool | None = None
+    notes: str | None = None
+
+
+class OrderLineBase(ApiModel):
+    """Line operation fields only; group/customer metadata lives on OrderGroup."""
+
     status: OrderStatus = OrderStatus.NEW
     received_date: date
     scheduled_date: date | None = None
@@ -21,10 +45,6 @@ class OrderBase(ApiModel):
     size_or_quantity: str | None = None
     service_detail: str | None = None
     special_request: str | None = None
-    source_channel: str | None = None
-    customer_name: str
-    customer_phone: str
-    customer_address: str
     total_amount: float | None = Field(default=None, ge=0)
     deposit_amount: float | None = Field(default=None, ge=0)
     balance_amount: float | None = Field(default=None, ge=0)
@@ -35,11 +55,20 @@ class OrderBase(ApiModel):
     evidence_memo: str | None = None
     partner_payment_amount: float | None = Field(default=None, ge=0)
     partner_payment_status: str | None = None
-    customer_visible_payment: bool = False
 
 
-class OrderCreate(OrderBase):
+class OrderLineCreate(OrderLineBase):
     pass
+
+
+class OrderCreate(OrderLineBase):
+    """Deprecated (R7): use OrderGroupCreate. Kept for 1-line wrapper compatibility."""
+
+    customer_name: str
+    customer_phone: str
+    customer_address: str
+    source_channel: str | None = None
+    customer_visible_payment: bool = False
 
 
 class OrderUpdate(ApiModel):
@@ -55,10 +84,6 @@ class OrderUpdate(ApiModel):
     size_or_quantity: str | None = None
     service_detail: str | None = None
     special_request: str | None = None
-    source_channel: str | None = None
-    customer_name: str | None = None
-    customer_phone: str | None = None
-    customer_address: str | None = None
     total_amount: float | None = Field(default=None, ge=0)
     deposit_amount: float | None = Field(default=None, ge=0)
     balance_amount: float | None = Field(default=None, ge=0)
@@ -69,20 +94,43 @@ class OrderUpdate(ApiModel):
     evidence_memo: str | None = None
     partner_payment_amount: float | None = Field(default=None, ge=0)
     partner_payment_status: str | None = None
-    customer_visible_payment: bool | None = None
 
 
-class AdminOrderRead(OrderBase):
+class AdminOrderRead(OrderLineBase):
     id: str
+    group_id: str
+    customer_name: str
+    customer_phone: str
+    customer_address: str
+    source_channel: str | None = None
+    customer_visible_payment: bool = False
     customer_token: str
     created_at: datetime | None = None
     updated_at: datetime | None = None
     timeline: list[TimelineEventRead] = Field(default_factory=list)
 
 
+class AdminOrderGroupRead(OrderGroupBase):
+    id: str
+    customer_token: str
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+    lines: list[AdminOrderRead] = Field(default_factory=list)
+
+
+class AdminOrderSiblingRead(ApiModel):
+    id: str
+    status: OrderStatus
+    service_name: str
+    partner_id: str | None = None
+    team_name: str | None = None
+    total_amount: float | None = None
+
+
 class AdminOrderDetailRead(AdminOrderRead):
     photos: list[PhotoRead] = Field(default_factory=list)
     message_logs: list[MessageLogRead] = Field(default_factory=list)
+    sibling_lines: list[AdminOrderSiblingRead] = Field(default_factory=list)
 
 
 class AdminCalendarOrderRead(ApiModel):
@@ -120,7 +168,7 @@ class CustomerPhotoRead(ApiModel):
     file_name: str | None = None
 
 
-class CustomerOrderRead(ApiModel):
+class CustomerOrderLineRead(ApiModel):
     id: str
     status: OrderStatus
     scheduled_date: date | None
@@ -129,9 +177,6 @@ class CustomerOrderRead(ApiModel):
     size_or_quantity: str | None = None
     service_detail: str | None = None
     special_request: str | None = None
-    customer_name: str
-    customer_phone: str
-    customer_address: str
     total_amount: float | None = None
     deposit_amount: float | None = None
     balance_amount: float | None = None
@@ -139,5 +184,22 @@ class CustomerOrderRead(ApiModel):
     photos: list[CustomerPhotoRead] = Field(default_factory=list)
 
 
+class CustomerOrderGroupRead(ApiModel):
+    id: str
+    customer_name: str
+    customer_phone: str
+    customer_address: str
+    customer_visible_payment: bool = False
+    lines: list[CustomerOrderLineRead] = Field(default_factory=list)
+
+
 class CustomerVerifyRequest(ApiModel):
     phone_suffix: str = Field(min_length=4, max_length=4, pattern=r"^\d{4}$")
+
+
+CustomerOrderRead = CustomerOrderGroupRead
+
+OrderGroupCreate.model_rebuild()
+AdminOrderGroupRead.model_rebuild()
+AdminOrderDetailRead.model_rebuild()
+CustomerOrderLineRead.model_rebuild()
