@@ -30,15 +30,13 @@ class PhotoService:
         if order is None or order.partner_id != partner_id:
             raise ValueError("order_not_found")
 
-        old_status = order.status
         photo = OrderPhoto(
             id=str(uuid4()),
             uploaded_by_user_id=user_id,
-            is_customer_visible=False,
+            is_customer_visible=True,
             **payload.model_dump(),
         )
         self.photos.add(photo)
-        order.status = OrderStatus.PHOTO_REVIEW_PENDING
         self.timeline.record(
             order_id=payload.order_id,
             actor_user_id=user_id,
@@ -46,15 +44,14 @@ class PhotoService:
             title="사진 업로드",
             metadata={"photo_id": photo.id, "photo_type": payload.photo_type},
         )
-        if old_status != order.status:
-            self.timeline.record(
-                order_id=payload.order_id,
-                actor_user_id=user_id,
-                event_type=TimelineEventType.STATUS_CHANGED,
-                title="사진 검수 요청",
-                description="협력사 사진 업로드로 관리자 검수 대기 상태가 되었습니다.",
-                metadata={"from": old_status, "to": order.status},
-            )
+        self.timeline.record(
+            order_id=payload.order_id,
+            actor_user_id=None,
+            event_type=TimelineEventType.PHOTO_APPROVED,
+            title="사진 자동 공개",
+            description="협력사 업로드 사진이 정책에 따라 자동 공개되었습니다.",
+            metadata={"photo_id": photo.id, "auto": True},
+        )
         self.db.commit()
         self.db.refresh(photo)
         return photo
@@ -80,18 +77,16 @@ class PhotoService:
         return self.upload_for_partner(payload, user_id=user_id, partner_id=partner_id)
 
     def approve(self, photo_id: str, *, actor_user_id: str | None = None) -> OrderPhoto:
+        """
+        Legacy compatibility hook. Publishing a photo records PHOTO_APPROVED only;
+        order status changes happen through the partner completion action.
+        """
         photo = self.photos.get(photo_id)
         if photo is None:
             raise ValueError("photo_not_found")
+        if photo.is_customer_visible:
+            return photo
         photo.is_customer_visible = True
-        order = self.orders.get(photo.order_id)
-        old_status = order.status if order is not None else None
-        if order is not None and order.status not in {
-            OrderStatus.CUSTOMER_DELIVERY_NEEDED,
-            OrderStatus.CUSTOMER_DELIVERY_DONE,
-            OrderStatus.COMPLETED,
-        }:
-            order.status = OrderStatus.CUSTOMER_DELIVERY_NEEDED
         self.timeline.record(
             order_id=photo.order_id,
             actor_user_id=actor_user_id,
@@ -99,15 +94,57 @@ class PhotoService:
             title="사진 고객 공개 승인",
             metadata={"photo_id": photo.id},
         )
-        if order is not None and old_status != order.status:
-            self.timeline.record(
-                order_id=photo.order_id,
-                actor_user_id=actor_user_id,
-                event_type=TimelineEventType.STATUS_CHANGED,
-                title="고객 전달 대기",
-                description="관리자가 고객 공개 사진을 승인했습니다.",
-                metadata={"from": old_status, "to": order.status},
-            )
+        self.db.commit()
+        self.db.refresh(photo)
+        return photo
+
+    def revoke_visibility(self, photo_id: str, *, actor_user_id: str | None = None) -> OrderPhoto:
+        from sqlalchemy import func, select
+
+        from app.models.order import Order
+        from app.models.photo import OrderPhoto as OrderPhotoModel
+
+        photo = self.photos.get(photo_id)
+        if photo is None:
+            raise ValueError("photo_not_found")
+        if not photo.is_customer_visible:
+            return photo
+
+        order = self.db.execute(
+            select(Order).where(Order.id == photo.order_id).with_for_update()
+        ).scalar_one_or_none()
+
+        photo.is_customer_visible = False
+        self.db.flush()
+
+        self.timeline.record(
+            order_id=photo.order_id,
+            actor_user_id=actor_user_id,
+            event_type=TimelineEventType.PHOTO_REVOKED,
+            title="사진 비공개로 되돌림",
+            metadata={"photo_id": photo.id},
+        )
+
+        if order is not None:
+            old_status = order.status
+            remaining_visible = self.db.execute(
+                select(func.count(OrderPhotoModel.id)).where(
+                    OrderPhotoModel.order_id == order.id,
+                    OrderPhotoModel.is_customer_visible.is_(True),
+                )
+            ).scalar_one()
+
+            if remaining_visible == 0 and order.status == OrderStatus.CUSTOMER_DELIVERY_NEEDED:
+                order.status = OrderStatus.IN_PROGRESS
+                self.timeline.record(
+                    order_id=photo.order_id,
+                    actor_user_id=actor_user_id,
+                    event_type=TimelineEventType.STATUS_CHANGED,
+                    title="작업 진행으로 되돌림",
+                    description="공개 사진이 모두 비공개로 처리되어 작업 진행 상태로 되돌렸습니다.",
+                    metadata={"from": old_status, "to": order.status},
+                )
+
         self.db.commit()
         self.db.refresh(photo)
         return photo
