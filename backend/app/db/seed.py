@@ -11,6 +11,7 @@ from app.domain.partner_category import (
 )
 from app.domain.phone import normalize_phone
 from app.models.order import Order
+from app.models.order_group import OrderGroup
 from app.models.partner import Partner, PartnerCategory
 from app.models.service_item import ServiceCategory, ServiceItem
 from app.models.timeline import OrderTimeline
@@ -26,6 +27,7 @@ DEV_ADMIN_ID = "seed-admin-user"
 DEV_PARTNER_ID = "seed-partner-01"
 DEV_PARTNER_CATEGORY_ID = RESIDENTIAL_PARTNER_CATEGORY_ID
 DEV_PARTNER_USER_ID = "seed-partner-user"
+DEV_ORDER_GROUP_ID = "seed-order-group-2450"
 DEV_ORDER_ID = "seed-order-2450"
 DEV_ORDER_TIMELINE_ID = "seed-order-2450-created"
 DEV_CUSTOMER_TOKEN = "seed-customer-token-2450"
@@ -181,9 +183,23 @@ def ensure_sample_order(db: Session) -> Order:
     order = db.get(Order, DEV_ORDER_ID)
     if order is not None:
         return order
+    group = db.get(OrderGroup, DEV_ORDER_GROUP_ID)
+    if group is None:
+        group = OrderGroup(
+            id=DEV_ORDER_GROUP_ID,
+            customer_token=DEV_CUSTOMER_TOKEN,
+            customer_name="박고객",
+            customer_phone=normalize_phone("01098765432"),
+            customer_address="서울 강남구 테헤란로 100",
+            source_channel="네이버 예약",
+            customer_visible_payment=False,
+        )
+        db.add(group)
+        db.flush()
 
     order = Order(
         id=DEV_ORDER_ID,
+        group_id=group.id,
         status=OrderStatus.SCHEDULE_CONFIRMED,
         received_date=date(2026, 5, 2),
         scheduled_date=date(2026, 5, 4),
