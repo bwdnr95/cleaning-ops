@@ -277,7 +277,7 @@ export function PartnerJobDetail() {
         )}
         {statusError && <div style={{ textAlign: 'center', fontSize: 11, color: 'var(--danger-fg)', marginTop: 6 }}>{statusError}</div>}
         <div style={{ textAlign: 'center', fontSize: 10.5, color: 'var(--text-tertiary)', marginTop: 6 }}>
-          사진 업로드와 완료 처리는 운영팀 확인 단계로 넘어갑니다
+          사진은 업로드 즉시 고객에게 공개됩니다. 잘못 올렸다면 운영팀에 비공개 처리를 요청해주세요.
         </div>
       </div>
     </div>
@@ -528,7 +528,7 @@ function getPartnerStatusLock(status) {
       icon: 'lock',
       tone: 'warn',
       title: '작업 완료 처리됨',
-      description: '운영팀의 사진 검수와 고객 전달 단계로 넘어간 작업입니다.',
+      description: '고객 사진 링크 발송 단계로 넘어간 작업입니다. 잘못 올린 사진은 운영팀에 비공개 처리를 요청해주세요.',
     };
   }
   return {

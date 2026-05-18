@@ -92,7 +92,7 @@ function VerificationGate({
           예약 정보를 확인합니다
         </h1>
         <p style={gateCopyStyle}>
-          문자로 받은 링크와 예약 연락처 마지막 4자리가 일치할 때만 예약 상세와 승인된 사진을 보여드립니다.
+          문자로 받은 링크와 예약 연락처 마지막 4자리가 일치할 때만 예약 상세와 공개된 사진을 보여드립니다.
         </p>
 
         {!isTokenFromLink && (
@@ -269,7 +269,7 @@ function VisitGuide() {
         <ul style={{ margin: '8px 0 0', padding: '0 0 0 16px', fontSize: 12.5, color: '#78350f', lineHeight: 1.65 }}>
           <li>작업 공간 주변 물건은 가능한 범위에서 미리 이동해주세요.</li>
           <li>현장 상황에 따라 작업 시간은 조금 달라질 수 있습니다.</li>
-          <li>완료 사진은 확인이 끝난 뒤 이 페이지에서 확인할 수 있습니다.</li>
+          <li>협력사가 업로드한 완료 사진은 이 페이지에서 확인할 수 있습니다.</li>
         </ul>
       </div>
     </section>
@@ -317,7 +317,7 @@ function CustomerPhotos({ photos }) {
             </div>
           ))}
           <div style={{ fontSize: 11.5, color: '#94a3b8', lineHeight: 1.45 }}>
-            확인 완료된 사진만 표시됩니다.
+            협력사가 업로드해 공개된 사진만 표시됩니다.
           </div>
         </div>
       )}
@@ -332,10 +332,10 @@ function PhotoPending() {
         <Icon name="camera" size={18} />
       </div>
       <div style={{ fontSize: 13, color: '#475569', fontWeight: 700, marginBottom: 3 }}>
-        작업 완료 후 사진이 표시됩니다
+        협력사가 사진을 올리면 이곳에 표시됩니다
       </div>
       <div style={{ fontSize: 11.5, color: '#94a3b8' }}>
-        확인 완료된 사진만 볼 수 있습니다.
+        업로드된 공개 사진만 볼 수 있습니다.
       </div>
     </div>
   );
@@ -347,7 +347,7 @@ function TrustFooter() {
       <div style={trustGridStyle}>
         {[
           { icon: 'shield', label: '보안 확인', sub: '링크 인증' },
-          { icon: 'star', label: '검수 사진', sub: '승인 후 공개' },
+          { icon: 'star', label: '공개 사진', sub: '업로드 후 표시' },
           { icon: 'sparkles', label: '고객센터', sub: '1688-9512' },
         ].map((item) => (
           <div key={item.label} style={{ textAlign: 'center' }}>
