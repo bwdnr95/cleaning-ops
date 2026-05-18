@@ -254,31 +254,31 @@ test('admin can add a catalog item in product ops and use it in an order', async
   await page.getByTestId('admin-orders-create').click();
   await expect(page.getByTestId('admin-order-form')).toBeVisible();
 
-  const categorySelect = page.getByTestId('order-service-category');
+  const categorySelect = page.getByTestId('order-line-0-service-category');
   const categoryValue = await categorySelect.locator('option', { hasText: '청소' }).first().getAttribute('value');
   expect(categoryValue).toBeTruthy();
   await categorySelect.selectOption(categoryValue ?? '');
 
-  const serviceSelect = page.getByTestId('order-service-item');
+  const serviceSelect = page.getByTestId('order-line-0-service-item');
   const itemValue = await serviceSelect.locator('option', { hasText: updatedItemName }).getAttribute('value');
   expect(itemValue).toBeTruthy();
 
   await serviceSelect.selectOption(itemValue ?? '');
-  await expect(page.getByTestId('order-service-name')).toHaveValue(updatedItemName);
-  await expect(page.getByTestId('order-total-amount')).toHaveValue('425,000');
+  await expect(page.getByTestId('order-line-0-service-name')).toHaveValue(updatedItemName);
+  await expect(page.getByTestId('order-line-0-total-amount')).toHaveValue('425,000');
 
-  await page.getByTestId('order-deposit-amount').fill('125000');
-  await expect(page.getByTestId('order-deposit-amount')).toHaveValue('125,000');
-  await expect(page.getByTestId('order-balance-amount')).toHaveValue('300,000');
+  await page.getByRole('textbox', { name: '계약금' }).fill('125000');
+  await expect(page.getByRole('textbox', { name: '계약금' })).toHaveValue('125,000');
+  await expect(page.getByRole('textbox', { name: '잔금' })).toHaveValue('300,000');
 
   await page.getByTestId('order-customer-name').fill('E2E Admin Customer');
   await page.getByTestId('order-customer-phone').fill('010-4444-8899');
   await page.getByTestId('order-customer-address').fill('Seoul E2E Admin QA 1');
-  await pickDate(page, 'order-scheduled-date', '2026-05-12');
-  await page.getByTestId('order-requested-time').fill('10:30');
-  await page.getByTestId('order-partner').selectOption(SEED_PARTNER_ID);
-  await page.getByTestId('order-payment-status').selectOption('deposit_paid');
-  await page.getByTestId('order-partner-payment-status').selectOption('unpaid');
+  await pickDate(page, 'order-line-0-scheduled-date', '2026-05-12');
+  await page.getByTestId('order-line-0-requested-time').fill('10:30');
+  await page.getByTestId('order-line-0-partner').selectOption(SEED_PARTNER_ID);
+  await page.getByLabel('결제 상태').selectOption('deposit_paid');
+  await page.getByLabel('협력사 정산 상태').selectOption('unpaid');
   await page.getByTestId('order-save').click();
 
   await expect(page.getByTestId('admin-order-detail-page')).toBeVisible();

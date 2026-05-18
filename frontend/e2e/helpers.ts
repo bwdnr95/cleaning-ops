@@ -18,9 +18,10 @@ type AuthSession = {
   access_token: string;
 };
 
-type CreatedOrder = {
+type CreatedOrderGroup = {
   id: string;
   customer_token: string;
+  lines: Array<{ id: string }>;
 };
 
 export async function adminLogin(page: Page) {
@@ -77,37 +78,84 @@ export async function partnerUploadPhoto(
 
 export async function createAssignedOrder(request: APIRequestContext) {
   const adminSession = await loginViaApi(request, 'admin');
-  const created = await checkedJson<CreatedOrder>(await request.post(`${backendUrl}/api/admin/orders`, {
+  const created = await checkedJson<CreatedOrderGroup>(await request.post(`${backendUrl}/api/admin/orders/groups`, {
     headers: authHeaders(adminSession.access_token),
     data: {
-      status: '일정확정',
-      received_date: '2026-05-05',
-      scheduled_date: '2026-05-14',
-      requested_time: '09:30',
-      partner_id: SEED_PARTNER_ID,
-      team_name: 'R6 Photo Review E2E Team',
-      service_item_id: SEED_SERVICE_ITEM_ID,
-      service_name: 'R6 Photo Review E2E',
-      size_or_quantity: '32py',
-      service_detail: 'R6 auto-publish + revoke flow',
-      special_request: 'Use only approved photos for customer view',
       source_channel: 'E2E internal source',
       customer_name: 'R6 Photo Review',
       customer_phone: '010-8899-7766',
       customer_address: 'Seoul R6 Photo Review E2E 1',
-      total_amount: 360000,
-      payment_status: 'deposit_paid',
-      payment_memo: 'Internal payment memo',
-      evidence_memo: 'Internal evidence memo',
-      partner_payment_amount: 210000,
-      partner_payment_status: 'unpaid',
       customer_visible_payment: false,
+      lines: [
+        {
+          status: '일정확정',
+          received_date: '2026-05-05',
+          scheduled_date: '2026-05-14',
+          requested_time: '09:30',
+          partner_id: SEED_PARTNER_ID,
+          team_name: 'R6 Photo Review E2E Team',
+          service_item_id: SEED_SERVICE_ITEM_ID,
+          service_name: 'R6 Photo Review E2E',
+          size_or_quantity: '32py',
+          service_detail: 'R6 auto-publish + revoke flow',
+          special_request: 'Use only approved photos for customer view',
+          total_amount: 360000,
+          payment_status: 'deposit_paid',
+          payment_memo: 'Internal payment memo',
+          evidence_memo: 'Internal evidence memo',
+          partner_payment_amount: 210000,
+          partner_payment_status: 'unpaid',
+        },
+      ],
     },
   }));
   return {
-    orderId: created.id,
+    orderId: created.lines[0].id,
+    groupId: created.id,
     customerToken: created.customer_token,
     phoneSuffix: '7766',
+  };
+}
+
+export async function createMultiLineOrder(
+  request: APIRequestContext,
+  lines: Array<{
+    service_name: string;
+    partner_id?: string | null;
+    total_amount?: number;
+    scheduled_date?: string;
+    requested_time?: string;
+    size_or_quantity?: string;
+  }>,
+): Promise<{ groupId: string; lineIds: string[]; customerToken: string; phoneSuffix: string }> {
+  const adminSession = await loginViaApi(request, 'admin');
+  const created = await checkedJson<CreatedOrderGroup>(await request.post(`${backendUrl}/api/admin/orders/groups`, {
+    headers: authHeaders(adminSession.access_token),
+    data: {
+      customer_name: 'R7 Multi-line Customer',
+      customer_phone: '010-2222-3333',
+      customer_address: 'Seoul R7 Multi-line E2E',
+      source_channel: 'E2E',
+      customer_visible_payment: false,
+      lines: lines.map((line) => ({
+        status: '일정확정',
+        received_date: '2026-05-05',
+        scheduled_date: line.scheduled_date ?? '2026-05-14',
+        requested_time: line.requested_time ?? '09:30',
+        partner_id: line.partner_id ?? null,
+        team_name: line.partner_id ? 'R7 Multi-line E2E Team' : null,
+        service_item_id: SEED_SERVICE_ITEM_ID,
+        service_name: line.service_name,
+        size_or_quantity: line.size_or_quantity ?? '32py',
+        total_amount: line.total_amount ?? 100000,
+      })),
+    },
+  }));
+  return {
+    groupId: created.id,
+    lineIds: created.lines.map((line) => line.id),
+    customerToken: created.customer_token,
+    phoneSuffix: '3333',
   };
 }
 
