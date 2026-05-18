@@ -1,6 +1,7 @@
 from secrets import token_urlsafe
 from uuid import uuid4
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.domain.constants import OrderStatus, TimelineEventType
@@ -177,7 +178,13 @@ class OrderService:
         actor_user_id: str,
         partner_id: str,
     ) -> Order:
-        order = self.get_for_partner(order_id, partner_id=partner_id)
+        order = self.db.execute(
+            select(Order)
+            .where(Order.id == order_id, Order.partner_id == partner_id)
+            .with_for_update()
+        ).scalar_one_or_none()
+        if order is None:
+            raise ValueError("order_not_found")
         if order.status not in PARTNER_JOB_COMPLETABLE_STATUSES:
             raise ValueError("invalid_status_transition")
 

@@ -37,11 +37,7 @@ export function PhotoReviewPage({ onOpenOrder, onNav }) {
     done: items.filter((item) => reviewStage(item).key === 'done').length,
   };
   const selectedStage = selected ? reviewStage(selected) : null;
-  const canSendCustomerLink = Boolean(
-    selected
-      && selected.status !== '취소'
-      && approvedPhotos.length > 0,
-  );
+  const canSendCustomerLink = Boolean(selected?.can_send_customer_link);
 
   React.useEffect(() => {
     setSelectedIdx(0);

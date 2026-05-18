@@ -107,12 +107,13 @@ class PhotoService:
         photo = self.photos.get(photo_id)
         if photo is None:
             raise ValueError("photo_not_found")
-        if not photo.is_customer_visible:
-            return photo
 
         order = self.db.execute(
             select(Order).where(Order.id == photo.order_id).with_for_update()
         ).scalar_one_or_none()
+        self.db.refresh(photo)
+        if not photo.is_customer_visible:
+            return photo
 
         photo.is_customer_visible = False
         self.db.flush()
