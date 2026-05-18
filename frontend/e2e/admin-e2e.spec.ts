@@ -30,7 +30,7 @@ test('admin can log in, navigate operational pages, and open order creation from
     await page.getByTestId(`admin-nav-${navKey}`).click();
     await expect(page.getByTestId(pageTestId)).toBeVisible();
     if (navKey === 'photos') {
-      await expect(page.getByTestId('photo-empty-title')).toContainText('검수 대기 사진이 없습니다');
+      await expect(page.getByTestId('photo-empty-title')).toContainText('사진 모니터링 큐가 비었습니다');
     }
   }
 
@@ -254,6 +254,11 @@ test('admin can add a catalog item in product ops and use it in an order', async
   await page.getByTestId('admin-orders-create').click();
   await expect(page.getByTestId('admin-order-form')).toBeVisible();
 
+  const categorySelect = page.getByTestId('order-service-category');
+  const categoryValue = await categorySelect.locator('option', { hasText: '청소' }).first().getAttribute('value');
+  expect(categoryValue).toBeTruthy();
+  await categorySelect.selectOption(categoryValue ?? '');
+
   const serviceSelect = page.getByTestId('order-service-item');
   const itemValue = await serviceSelect.locator('option', { hasText: updatedItemName }).getAttribute('value');
   expect(itemValue).toBeTruthy();
@@ -332,29 +337,30 @@ test('admin can edit and delete an unused partner explicitly', async ({ page }) 
   await expect(page.getByRole('button', { name: new RegExp(categoryName) })).toHaveCount(0);
 });
 
-test('admin photo review keeps customer send disabled until a photo is approved', async ({ page, request }) => {
-  const { orderId } = await createPhotoReviewJob(request);
+test('admin photo review sends customer links for automatically published photos', async ({ page, request }) => {
+  const { orderId, photoId } = await createPhotoReviewJob(request);
 
   await loginAsAdmin(page);
   await page.getByTestId('admin-nav-photos').click();
   await expect(page.getByTestId('admin-photo-review-page')).toBeVisible();
   await expect(page.getByText(orderId).first()).toBeVisible();
-  await expect(page.getByText('관리자 승인 게이트')).toBeVisible();
-  await expect(page.getByTestId('photo-filter-review')).toHaveAttribute('aria-pressed', 'false');
-  await page.getByTestId('photo-filter-review').click();
+  await expect(page.getByTestId('photo-filter-pending_link')).toHaveAttribute('aria-pressed', 'false');
+  await page.getByTestId('photo-filter-pending_link').click();
   await expect(page.getByTestId(`photo-review-item-${orderId}`)).toBeVisible();
   await page.getByTestId(`photo-review-item-${orderId}`).click();
+  await expect(page.getByTestId(`photo-thumb-${photoId}`).getByText('공개')).toBeVisible();
+
   await page.getByTestId('photo-open-order').click();
   await expect(page.getByTestId('admin-order-detail-page')).toBeVisible();
   await page.getByTestId('admin-nav-photos').click();
   await expect(page.getByTestId('admin-photo-review-page')).toBeVisible();
+  await page.getByTestId('photo-filter-pending_link').click();
   await expect(page.getByTestId(`photo-review-item-${orderId}`)).toBeVisible();
   await page.getByTestId(`photo-review-item-${orderId}`).click();
-  await expect(page.getByTestId('photo-send-customer-link')).toBeDisabled();
-
-  await page.getByTestId('photo-approve-selected').click();
-  await expect(page.getByTestId('photo-send-customer-link')).toBeEnabled();
-  await page.getByTestId('photo-send-customer-link').click();
+  const sendButton = page.getByTestId('photo-send-customer-link');
+  await expect(sendButton).toBeEnabled();
+  await sendButton.click();
+  await expect(page.getByTestId('photo-send-notice')).toContainText('고객 링크를 발송');
 
   await expect.poll(async () => {
     const adminSession = await loginViaApi(request, 'admin');
@@ -368,13 +374,15 @@ test('admin photo review keeps customer send disabled until a photo is approved'
       timeline: detail.timeline.map((event) => event.event_type),
     };
   }).toEqual(expect.objectContaining({
+    status: '고객전달필요',
     messages: 1,
     timeline: expect.arrayContaining(['photo_approved', 'message_sent', 'customer_link_sent']),
   }));
 
   await page.getByTestId('photo-filter-done').click();
   await expect(page.getByTestId(`photo-review-item-${orderId}`)).toBeVisible();
-  await expect(page.getByTestId('photo-send-customer-link')).toBeDisabled();
+  await expect(sendButton).toContainText('재전송');
+  await expect(sendButton).toBeEnabled();
   await page.getByTestId('photo-open-messages').click();
   await expect(page.getByTestId('admin-messages-page')).toBeVisible();
   await page.getByTestId('messages-type-customer_photo_ready').click();
@@ -431,6 +439,9 @@ async function createPhotoReviewJob(request) {
         buffer: ONE_PIXEL_PNG,
       },
     },
+  }));
+  await checkedJson(await request.post(`${backendUrl}/api/partner/jobs/${created.id}/complete`, {
+    headers: partnerHeaders,
   }));
   return { orderId: created.id, photoId: uploaded.id };
 }
