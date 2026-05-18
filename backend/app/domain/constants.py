@@ -61,6 +61,7 @@ class TimelineEventType(StrEnum):
     MESSAGE_SENT = "message_sent"
     PHOTO_UPLOADED = "photo_uploaded"
     PHOTO_APPROVED = "photo_approved"
+    PHOTO_REVOKED = "photo_revoked"
     CUSTOMER_LINK_SENT = "customer_link_sent"
     MEMO_ADDED = "memo_added"
 
