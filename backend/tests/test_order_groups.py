@@ -1,6 +1,6 @@
 from fastapi.testclient import TestClient
 
-from app.domain.constants import OrderStatus
+from app.domain.constants import OrderStatus, TimelineEventType
 
 
 def test_create_group_with_multiple_lines(client: TestClient, seed_admin_token: str) -> None:
@@ -191,3 +191,58 @@ def test_partial_cancel_does_not_cancel_other_lines(
     statuses = {line["id"]: line["status"] for line in refreshed["lines"]}
     assert statuses[line_a_id] == OrderStatus.CANCELLED.value
     assert statuses[line_b_id] == OrderStatus.SCHEDULE_CONFIRMED.value
+
+
+def test_admin_detail_exposes_group_notes_and_group_updates_record_line_timeline(
+    client: TestClient,
+    seed_admin_token: str,
+) -> None:
+    headers = {"Authorization": f"Bearer {seed_admin_token}"}
+    group = client.post(
+        "/api/admin/orders/groups",
+        headers=headers,
+        json={
+            "customer_name": "Group Notes Customer",
+            "customer_phone": "010-1000-2000",
+            "customer_address": "Old Address",
+            "notes": "Preserve this group memo",
+            "lines": [
+                {
+                    "status": OrderStatus.NEW.value,
+                    "received_date": "2026-05-18",
+                    "service_name": "line 1",
+                },
+                {
+                    "status": OrderStatus.NEW.value,
+                    "received_date": "2026-05-18",
+                    "service_name": "line 2",
+                },
+            ],
+        },
+    ).json()
+    line_ids = [line["id"] for line in group["lines"]]
+
+    detail = client.get(f"/api/admin/orders/{line_ids[0]}", headers=headers).json()
+    assert detail["group_notes"] == "Preserve this group memo"
+
+    update_response = client.patch(
+        f"/api/admin/orders/groups/{group['id']}",
+        headers=headers,
+        json={"customer_address": "New Address"},
+    )
+    assert update_response.status_code == 200
+
+    for line_id in line_ids:
+        line_detail = client.get(f"/api/admin/orders/{line_id}", headers=headers).json()
+        group_change_events = [
+            event
+            for event in line_detail["timeline"]
+            if event["event_type"] == TimelineEventType.MEMO_ADDED.value
+            and event["event_metadata"]
+            and event["event_metadata"].get("source") == "order_group_update"
+        ]
+        assert group_change_events
+        assert group_change_events[-1]["event_metadata"]["changes"]["customer_address"] == {
+            "from": "Old Address",
+            "to": "New Address",
+        }

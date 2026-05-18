@@ -243,7 +243,7 @@ export function OrderDetailPage({ orderId, onBack, onEdit, onNav, onOpenOrder })
         <button className="btn btn--ghost btn--sm" onClick={orderResource.reload}>
           <Icon name="refresh" size={12}/> 새로고침
         </button>
-        <button className="btn btn--secondary btn--sm" onClick={onEdit}>
+        <button data-testid="order-detail-edit" className="btn btn--secondary btn--sm" onClick={onEdit}>
           수정
         </button>
         <button className="btn btn--ghost btn--sm" onClick={() => onNav?.('calendar')}>

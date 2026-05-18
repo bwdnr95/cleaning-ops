@@ -104,6 +104,7 @@ class AdminOrderRead(OrderLineBase):
     customer_address: str
     source_channel: str | None = None
     customer_visible_payment: bool = False
+    group_notes: str | None = None
     customer_token: str
     created_at: datetime | None = None
     updated_at: datetime | None = None

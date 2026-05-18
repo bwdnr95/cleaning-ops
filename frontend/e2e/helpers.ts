@@ -21,6 +21,7 @@ type AuthSession = {
 type CreatedOrderGroup = {
   id: string;
   customer_token: string;
+  notes?: string | null;
   lines: Array<{ id: string }>;
 };
 
@@ -127,6 +128,7 @@ export async function createMultiLineOrder(
     requested_time?: string;
     size_or_quantity?: string;
   }>,
+  options: { notes?: string } = {},
 ): Promise<{ groupId: string; lineIds: string[]; customerToken: string; phoneSuffix: string }> {
   const adminSession = await loginViaApi(request, 'admin');
   const created = await checkedJson<CreatedOrderGroup>(await request.post(`${backendUrl}/api/admin/orders/groups`, {
@@ -137,6 +139,7 @@ export async function createMultiLineOrder(
       customer_address: 'Seoul R7 Multi-line E2E',
       source_channel: 'E2E',
       customer_visible_payment: false,
+      notes: options.notes ?? null,
       lines: lines.map((line) => ({
         status: '일정확정',
         received_date: '2026-05-05',
@@ -157,6 +160,13 @@ export async function createMultiLineOrder(
     customerToken: created.customer_token,
     phoneSuffix: '3333',
   };
+}
+
+export async function getAdminOrderGroup(request: APIRequestContext, groupId: string): Promise<CreatedOrderGroup> {
+  const adminSession = await loginViaApi(request, 'admin');
+  return checkedJson<CreatedOrderGroup>(await request.get(`${backendUrl}/api/admin/orders/groups/${groupId}`, {
+    headers: authHeaders(adminSession.access_token),
+  }));
 }
 
 export async function openAdminPhotoReview(page: Page, orderId: string) {

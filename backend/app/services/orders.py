@@ -259,8 +259,26 @@ class OrderService:
         if mirror_changes:
             lines = self.db.scalars(select(Order).where(Order.group_id == group_id)).all()
             for line in lines:
+                line_mirror_changes: dict[str, dict[str, object | None]] = {}
                 for key, value in mirror_changes.items():
+                    before = to_timeline_value(getattr(line, key))
+                    after = to_timeline_value(value)
+                    if before != after:
+                        line_mirror_changes[key] = {"from": before, "to": after}
                     setattr(line, key, value)
+                if line_mirror_changes:
+                    self.timeline.record(
+                        order_id=line.id,
+                        actor_user_id=actor_user_id,
+                        event_type=TimelineEventType.MEMO_ADDED,
+                        title="고객 정보 변경",
+                        description="관리자가 그룹 고객 정보를 변경했습니다.",
+                        metadata={
+                            "group_id": group_id,
+                            "source": "order_group_update",
+                            "changes": line_mirror_changes,
+                        },
+                    )
 
         self.db.commit()
         self.db.refresh(group)
@@ -393,6 +411,7 @@ def to_admin_order_dto(
         group.customer_visible_payment if group else bool(order.customer_visible_payment)
     )
     customer_token = group.customer_token if group else order.customer_token
+    group_notes = group.notes if group else None
     return AdminOrderRead(
         id=order.id,
         group_id=order.group_id or "",
@@ -423,6 +442,7 @@ def to_admin_order_dto(
         partner_payment_amount=order.partner_payment_amount,
         partner_payment_status=order.partner_payment_status,
         customer_visible_payment=customer_visible_payment,
+        group_notes=group_notes,
         customer_token=customer_token or "",
         created_at=order.created_at,
         updated_at=order.updated_at,

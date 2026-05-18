@@ -257,7 +257,7 @@ export function OrderFormPage({ mode = 'create', orderId = null, onCancel, onSav
                 />
                 고객 페이지에 결제 금액 노출
               </label>
-              <TextField label="그룹 메모" span={1} multiline value={form.notes} onChange={(value) => setGroupField('notes', value)} />
+              <TextField testId="order-group-notes" label="그룹 메모" span={1} multiline value={form.notes} onChange={(value) => setGroupField('notes', value)} />
             </div>
 
             {error && (
@@ -517,7 +517,7 @@ function toForm(order) {
     customer_address: order.customer_address || '',
     source_channel: order.source_channel || '',
     customer_visible_payment: Boolean(order.customer_visible_payment),
-    notes: order.notes || '',
+    notes: order.group_notes ?? order.notes ?? '',
     lines: [toLineForm(order)],
   };
 }
