@@ -157,50 +157,52 @@ function VerificationGate({
 }
 
 function ReservationContent({ order, onReset }) {
+  const lines = order.lines || [];
+  const primaryLine = lines[0] || null;
+
   return (
     <main data-testid="customer-order-page" className="scroll" style={{ flex: 1, overflow: 'auto' }}>
       <section style={{ padding: '24px 20px 16px' }}>
-        <div style={eyebrowStyle}>{statusHeadline(order.status)}</div>
+        <div style={eyebrowStyle}>{statusHeadline(primaryLine?.status)}</div>
         <h1 style={contentTitleStyle}>
           {order.customer_name} 님<br />
-          <span style={{ color: '#475569', fontWeight: 600 }}>{visitHeadline(order)}</span>
+          <span style={{ color: '#475569', fontWeight: 600 }}>{visitHeadline(primaryLine)}</span>
         </h1>
 
         <div style={{ display: 'flex', gap: 6, marginTop: 14, flexWrap: 'wrap' }}>
-          <Badge tone={customerStatusTone(order.status)} dot>{customerStatusLabel(order.status)}</Badge>
-          <Badge tone="brand">{order.service_name}</Badge>
+          {primaryLine && <Badge tone={customerStatusTone(primaryLine.status)} dot>{customerStatusLabel(primaryLine.status)}</Badge>}
+          <Badge tone="brand">{lines.length}개 라인</Badge>
         </div>
       </section>
 
       <section style={{ padding: '0 16px' }}>
         <div style={summaryCardStyle}>
-          <SummaryBlock title="방문 일시">
-            <div style={{ fontSize: 18, fontWeight: 800, letterSpacing: '-0.02em' }}>{formatKoreanDate(order.scheduled_date)}</div>
-            <div style={{ fontSize: 13, color: '#475569', marginTop: 3 }}>{order.requested_time || '시간 협의 중'}</div>
-          </SummaryBlock>
-
           <CustomerRow icon="mapPin" label="방문지">
             {order.customer_address}
           </CustomerRow>
           <CustomerRow icon="phone" label="예약 연락처">
             <span className="mono" data-testid="customer-visible-phone">{formatPhone(order.customer_phone)}</span>
           </CustomerRow>
-          <CustomerRow icon="package" label="서비스">
-            {order.service_name}
-            {order.size_or_quantity && <span style={mutedInlineStyle}> · {order.size_or_quantity}</span>}
-            {order.service_detail && <div style={mutedLineStyle}>{order.service_detail}</div>}
-          </CustomerRow>
-          <CustomerRow icon="bell" label="요청사항">
-            {order.special_request || '별도 요청사항이 없습니다.'}
-          </CustomerRow>
-          <CustomerRow icon="creditCard" label="결제 안내" last>
-            <PaymentSummary order={order} />
-          </CustomerRow>
         </div>
       </section>
 
       <VisitGuide />
-      <CustomerPhotos photos={order.photos || []} />
+
+      <section style={{ padding: '0 16px 20px', display: 'flex', flexDirection: 'column', gap: 12 }}>
+        {lines.length === 0 ? (
+          <div style={summaryCardStyle}>
+            <SummaryBlock title="예약 정보">예약 정보가 없습니다.</SummaryBlock>
+          </div>
+        ) : (
+          lines.map((line) => (
+            <ReservationLineCard
+              key={line.id}
+              line={line}
+              customerVisiblePayment={order.customer_visible_payment}
+            />
+          ))
+        )}
+      </section>
 
       <section style={{ padding: '0 16px 24px' }}>
         <button style={secondaryButtonStyle} onClick={onReset}>
@@ -210,6 +212,32 @@ function ReservationContent({ order, onReset }) {
 
       <TrustFooter />
     </main>
+  );
+}
+
+function ReservationLineCard({ line, customerVisiblePayment }) {
+  return (
+    <section data-testid={`customer-line-${line.id}`} style={summaryCardStyle}>
+      <SummaryBlock title="방문 일시">
+        <div style={{ fontSize: 18, fontWeight: 800, letterSpacing: '-0.02em' }}>{formatKoreanDate(line.scheduled_date)}</div>
+        <div style={{ fontSize: 13, color: '#475569', marginTop: 3 }}>{line.requested_time || '시간 협의 중'}</div>
+      </SummaryBlock>
+      <CustomerRow icon="package" label="서비스">
+        {line.service_name}
+        {line.size_or_quantity && <span style={mutedInlineStyle}> · {line.size_or_quantity}</span>}
+        {line.service_detail && <div style={mutedLineStyle}>{line.service_detail}</div>}
+      </CustomerRow>
+      <CustomerRow icon="bell" label="진행상황">
+        <Badge tone={customerStatusTone(line.status)} dot>{customerStatusLabel(line.status)}</Badge>
+        {line.special_request && <div style={mutedLineStyle}>{line.special_request}</div>}
+      </CustomerRow>
+      {customerVisiblePayment && (
+        <CustomerRow icon="creditCard" label="결제 안내">
+          <PaymentSummary line={line} />
+        </CustomerRow>
+      )}
+      <CustomerPhotos photos={line.photos || []} />
+    </section>
   );
 }
 
@@ -241,20 +269,20 @@ function CustomerRow({ icon, label, children, last = false }) {
   );
 }
 
-function PaymentSummary({ order }) {
-  if (order.total_amount == null) {
+function PaymentSummary({ line }) {
+  if (line.total_amount == null) {
     return <span style={{ color: '#64748b', fontSize: 12.5 }}>결제 안내는 별도로 안내드립니다.</span>;
   }
 
   return (
     <>
-      <span style={{ fontWeight: 700 }}>{formatWon(order.total_amount)}</span>
+      <span style={{ fontWeight: 700 }}>{formatWon(line.total_amount)}</span>
       <div style={mutedLineStyle}>
-        {order.deposit_amount != null && <>계약금 {formatWon(order.deposit_amount)}</>}
-        {order.deposit_amount != null && order.balance_amount != null && ' · '}
-        {order.balance_amount != null && <>잔금 {formatWon(order.balance_amount)}</>}
+        {line.deposit_amount != null && <>계약금 {formatWon(line.deposit_amount)}</>}
+        {line.deposit_amount != null && line.balance_amount != null && ' · '}
+        {line.balance_amount != null && <>잔금 {formatWon(line.balance_amount)}</>}
       </div>
-      {order.payment_status && <div style={mutedLineStyle}>상태: {paymentStatusLabel(order.payment_status)}</div>}
+      {line.payment_status && <div style={mutedLineStyle}>상태: {paymentStatusLabel(line.payment_status)}</div>}
     </>
   );
 }
@@ -461,7 +489,7 @@ function customerStatusTone(status) {
 }
 
 function visitHeadline(order) {
-  if (!order.scheduled_date) {
+  if (!order || !order.scheduled_date) {
     return '방문 일정은 확정 후 안내드립니다.';
   }
   return `${formatKoreanDate(order.scheduled_date)} 방문 예정입니다`;
