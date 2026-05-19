@@ -1054,6 +1054,16 @@ def test_dashboard_summary_matches_operational_queue_definitions() -> None:
                     scheduled_date=date(2026, 5, 4),
                 ),
                 make_order(
+                    "today-confirmed",
+                    status=OrderStatus.SCHEDULE_CONFIRMED,
+                    scheduled_date=date(2026, 5, 4),
+                ),
+                make_order(
+                    "today-day-before-done",
+                    status=OrderStatus.DAY_BEFORE_NOTICE_DONE,
+                    scheduled_date=date(2026, 5, 4),
+                ),
+                make_order(
                     "today-cancelled",
                     status=OrderStatus.CANCELLED,
                     scheduled_date=date(2026, 5, 4),
@@ -1108,7 +1118,7 @@ def test_dashboard_summary_matches_operational_queue_definitions() -> None:
 
         summary = DashboardService(db).summary(today=date(2026, 5, 4))
 
-    assert summary.today_jobs == 1
+    assert summary.today_jobs == 3
     assert summary.tomorrow_notice_targets == 1
     assert summary.partner_pending == 1
     assert summary.photo_review_pending == 0

@@ -100,7 +100,7 @@ function SimplePill({ kind, value }) {
   );
 }
 
-const TODAY_JOB_STATUSES = ['작업예정', '작업진행', '사진검수대기'];
+const TODAY_JOB_STATUSES = ['일정확정', '전날안내필요', '전날안내완료', '작업예정', '작업진행'];
 const TOMORROW_NOTICE_STATUSES = ['일정확정', '전날안내필요'];
 const REVENUE_RECOGNIZED_STATUSES = ['고객전달완료', '서비스완료'];
 const BULK_MESSAGE_OPTIONS = [

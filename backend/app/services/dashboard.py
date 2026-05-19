@@ -11,6 +11,14 @@ from app.models.order import Order
 from app.models.photo import OrderPhoto
 from app.schemas.dashboard import DashboardRecentActivity, DashboardRecentMessage, DashboardRecentPhoto, DashboardSummary
 
+TODAY_JOB_STATUSES = (
+    OrderStatus.SCHEDULE_CONFIRMED,
+    OrderStatus.DAY_BEFORE_NOTICE_NEEDED,
+    OrderStatus.DAY_BEFORE_NOTICE_DONE,
+    OrderStatus.SCHEDULED,
+    OrderStatus.IN_PROGRESS,
+)
+
 
 class DashboardService:
     def __init__(self, db: Session) -> None:
@@ -27,12 +35,7 @@ class DashboardService:
         return DashboardSummary(
             today_jobs=self._count(
                 Order.scheduled_date == current,
-                Order.status.in_(
-                    [
-                        OrderStatus.SCHEDULED,
-                        OrderStatus.IN_PROGRESS,
-                    ]
-                ),
+                Order.status.in_(TODAY_JOB_STATUSES),
             ),
             tomorrow_notice_targets=self._count(
                 Order.scheduled_date == tomorrow,

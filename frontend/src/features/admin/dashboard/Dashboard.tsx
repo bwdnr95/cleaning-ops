@@ -359,7 +359,7 @@ function toDashJobs(orders, target) {
     .filter((order) => (
       target === 'tomorrow'
         ? ['일정확정', '전날안내필요'].includes(order.status)
-        : ['작업예정', '작업진행', '사진검수대기'].includes(order.status)
+        : ['일정확정', '전날안내필요', '전날안내완료', '작업예정', '작업진행'].includes(order.status)
     ))
     .slice(0, 5)
     .map((order) => ({
