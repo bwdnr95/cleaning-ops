@@ -11,8 +11,10 @@ class OrderRepository(Repository[Order]):
     def __init__(self, db: Session) -> None:
         super().__init__(db, Order)
 
-    def list_orders(self, *, limit: int = 50, offset: int = 0) -> list[Order]:
-        stmt = select(Order).order_by(Order.scheduled_date.asc().nulls_last()).limit(limit).offset(offset)
+    def list_orders(self, *, limit: int | None = None, offset: int = 0) -> list[Order]:
+        stmt = select(Order).order_by(Order.scheduled_date.asc().nulls_last(), Order.id.asc())
+        if limit is not None:
+            stmt = stmt.limit(limit).offset(offset)
         return list(self.db.scalars(stmt))
 
     def list_scheduled_between(

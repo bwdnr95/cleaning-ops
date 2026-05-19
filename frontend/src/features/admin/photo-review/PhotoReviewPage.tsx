@@ -4,6 +4,7 @@ import { sendCustomerPhotoReady } from '../../../api/messages';
 import { listPhotoReviewQueue, revokePhoto } from '../../../api/photos';
 import { toApiAssetUrl } from '../../../api/client';
 import { useApiResource } from '../../../api/useApiResource';
+import { PaginationBar, paginateItems } from '../../../components/common/Pagination';
 import { Badge, Icon } from '../../../components/common/ui';
 
 const FILTERS = [
@@ -15,6 +16,8 @@ const FILTERS = [
 export function PhotoReviewPage({ onOpenOrder, onNav }) {
   const queue = useApiResource(listPhotoReviewQueue);
   const [filter, setFilter] = React.useState('all');
+  const [page, setPage] = React.useState(1);
+  const [pageSize, setPageSize] = React.useState(10);
   const [selectedIdx, setSelectedIdx] = React.useState(0);
   const [selectedOrderId, setSelectedOrderId] = React.useState(null);
   const [activePhotoId, setActivePhotoId] = React.useState(null);
@@ -25,8 +28,12 @@ export function PhotoReviewPage({ onOpenOrder, onNav }) {
 
   const items = queue.data || [];
   const filteredItems = items.filter((item) => filter === 'all' || reviewStage(item).key === filter);
+  const pagedItems = React.useMemo(
+    () => paginateItems(filteredItems, page, pageSize),
+    [filteredItems, page, pageSize],
+  );
   const selectedById = selectedOrderId ? items.find((item) => item.order_id === selectedOrderId) : null;
-  const selected = selectedById || filteredItems[selectedIdx] || filteredItems[0] || null;
+  const selected = selectedById || pagedItems[selectedIdx] || pagedItems[0] || filteredItems[0] || null;
   const photos = selected?.photos || [];
   const pendingPhotos = photos.filter((photo) => !photo.is_customer_visible);
   const approvedPhotos = photos.filter((photo) => photo.is_customer_visible);
@@ -40,9 +47,16 @@ export function PhotoReviewPage({ onOpenOrder, onNav }) {
   const canSendCustomerLink = Boolean(selected?.can_send_customer_link);
 
   React.useEffect(() => {
+    setPage(1);
+    setSelectedIdx(0);
+    setSelectedOrderId(null);
+    setActivePhotoId(null);
+  }, [filter]);
+
+  React.useEffect(() => {
     setSelectedIdx(0);
     setActivePhotoId(null);
-  }, [queue.data, filter]);
+  }, [queue.data]);
 
   const handleRevoke = async (photoId) => {
     setError(null);
@@ -136,7 +150,7 @@ export function PhotoReviewPage({ onOpenOrder, onNav }) {
         <div className="scroll" style={{ flex: 1, overflow: 'auto' }}>
           {filteredItems.length === 0 ? (
             <div style={{ padding: 14, fontSize: 12, color: 'var(--text-tertiary)' }}>해당 상태의 사진 건이 없습니다.</div>
-          ) : filteredItems.map((item, index) => {
+          ) : pagedItems.map((item, index) => {
             const isActive = item.order_id === selected?.order_id;
             const stage = reviewStage(item);
             return (
@@ -169,6 +183,22 @@ export function PhotoReviewPage({ onOpenOrder, onNav }) {
             );
           })}
         </div>
+        {filteredItems.length > 0 && (
+          <PaginationBar
+            testId="photo-review-pagination"
+            totalItems={filteredItems.length}
+            page={page}
+            pageSize={pageSize}
+            onPageChange={(nextPage) => {
+              setPage(nextPage);
+              setSelectedIdx(0);
+              setSelectedOrderId(null);
+              setActivePhotoId(null);
+            }}
+            onPageSizeChange={setPageSize}
+            itemLabel="건"
+          />
+        )}
       </aside>
 
       <main style={{ display: 'flex', flexDirection: 'column', minHeight: 0, background: 'var(--bg-subtle)' }}>

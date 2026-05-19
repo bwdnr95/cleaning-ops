@@ -2,6 +2,7 @@ import React from 'react';
 
 import { getAdminMessageSettings, listAdminMessages, sendAdminMessage } from '../../../api/messages';
 import { DatePicker } from '../../../components/common/DatePicker';
+import { PaginationBar, paginateItems } from '../../../components/common/Pagination';
 import { Badge, Icon } from '../../../components/common/ui';
 import { useApiResource } from '../../../api/useApiResource';
 import { formatPhone } from '../../../domain/phone';
@@ -33,6 +34,8 @@ export function MessagesPage({ onOpenOrder }) {
   const [statusFilter, setStatusFilter] = React.useState('all');
   const [dateStart, setDateStart] = React.useState('');
   const [dateEnd, setDateEnd] = React.useState('');
+  const [page, setPage] = React.useState(1);
+  const [pageSize, setPageSize] = React.useState(20);
   const [isResending, setIsResending] = React.useState(false);
   const [notice, setNotice] = React.useState(null);
   const [error, setError] = React.useState(null);
@@ -43,6 +46,14 @@ export function MessagesPage({ onOpenOrder }) {
     && matchesStatus(message, statusFilter)
     && matchesDate(message, dateStart, dateEnd)
   ));
+  const pagedMessages = React.useMemo(
+    () => paginateItems(filtered, page, pageSize),
+    [filtered, page, pageSize],
+  );
+
+  React.useEffect(() => {
+    setPage(1);
+  }, [query, typeFilter, statusFilter, dateStart, dateEnd]);
 
   const handleResend = async (message) => {
     setNotice(null);
@@ -159,7 +170,7 @@ export function MessagesPage({ onOpenOrder }) {
               {['발송시각', '주문번호', '유형', '수신자', '내용', '채널', 'Provider', '상태', '관리'].map((header) => (
                 <HeaderCell key={header}>{header}</HeaderCell>
               ))}
-              {filtered.map((message) => (
+              {pagedMessages.map((message) => (
                 <React.Fragment key={message.id}>
                   <BodyCell mono>{formatDateTime(message.sent_at || message.created_at)}</BodyCell>
                   <BodyCell>
@@ -219,6 +230,17 @@ export function MessagesPage({ onOpenOrder }) {
                 </React.Fragment>
               ))}
             </div>
+          )}
+          {!messagesResource.isLoading && !messagesResource.error && filtered.length > 0 && (
+            <PaginationBar
+              testId="messages-pagination"
+              totalItems={filtered.length}
+              page={page}
+              pageSize={pageSize}
+              onPageChange={setPage}
+              onPageSizeChange={setPageSize}
+              itemLabel="건"
+            />
           )}
         </section>
       </div>

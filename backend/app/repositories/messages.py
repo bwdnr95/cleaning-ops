@@ -12,13 +12,13 @@ class MessageRepository(Repository[MessageLog]):
     def __init__(self, db: Session) -> None:
         super().__init__(db, MessageLog)
 
-    def list_messages(self, *, limit: int = 100, offset: int = 0) -> list[MessageLog]:
+    def list_messages(self, *, limit: int | None = None, offset: int = 0) -> list[MessageLog]:
         stmt = (
             select(MessageLog)
             .order_by(MessageLog.created_at.desc(), MessageLog.id.desc())
-            .limit(limit)
-            .offset(offset)
         )
+        if limit is not None:
+            stmt = stmt.limit(limit).offset(offset)
         return list(self.db.scalars(stmt))
 
     def list_for_order(self, order_id: str) -> list[MessageLog]:

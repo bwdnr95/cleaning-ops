@@ -9,6 +9,7 @@ import {
   updateServiceCategory,
   updateServiceItem,
 } from '../../../api/admin';
+import { PaginationBar, paginateItems } from '../../../components/common/Pagination';
 import { useApiResource } from '../../../api/useApiResource';
 import { Badge, Icon } from '../../../components/common/ui';
 
@@ -20,6 +21,10 @@ export function ProductsPage() {
   const categories = React.useMemo(() => catalogResource.data || [], [catalogResource.data]);
   const [selectedCategoryId, setSelectedCategoryId] = React.useState('');
   const [selectedItemId, setSelectedItemId] = React.useState('');
+  const [categoryPage, setCategoryPage] = React.useState(1);
+  const [categoryPageSize, setCategoryPageSize] = React.useState(10);
+  const [itemPage, setItemPage] = React.useState(1);
+  const [itemPageSize, setItemPageSize] = React.useState(10);
   const [categoryForm, setCategoryForm] = React.useState(defaultCategoryForm());
   const [itemForm, setItemForm] = React.useState(defaultItemForm());
   const [isSaving, setIsSaving] = React.useState(false);
@@ -27,7 +32,15 @@ export function ProductsPage() {
   const [error, setError] = React.useState('');
 
   const selectedCategory = categories.find((category) => category.id === selectedCategoryId) || categories[0] || null;
-  const items = selectedCategory?.items || [];
+  const items = React.useMemo(() => selectedCategory?.items || [], [selectedCategory]);
+  const pagedCategories = React.useMemo(
+    () => paginateItems(categories, categoryPage, categoryPageSize),
+    [categories, categoryPage, categoryPageSize],
+  );
+  const pagedItems = React.useMemo(
+    () => paginateItems(items, itemPage, itemPageSize),
+    [items, itemPage, itemPageSize],
+  );
   const selectedItem = items.find((item) => item.id === selectedItemId) || null;
   const stats = toCatalogStats(categories);
 
@@ -43,6 +56,7 @@ export function ProductsPage() {
     }
     setCategoryForm(toCategoryForm(selectedCategory));
     setItemForm((current) => ({ ...current, category_id: selectedCategory.id }));
+    setItemPage(1);
     if (selectedItemId && !selectedCategory.items.some((item) => item.id === selectedItemId)) {
       setSelectedItemId('');
     }
@@ -228,7 +242,7 @@ export function ProductsPage() {
             {!catalogResource.isLoading && catalogResource.error && <StateLine text="상품 기준 데이터를 불러오지 못했습니다." tone="danger" />}
             {!catalogResource.isLoading && !catalogResource.error && categories.length === 0 && <StateLine text="등록된 카테고리가 없습니다." />}
             <div className="scroll" style={{ maxHeight: 430, overflow: 'auto' }}>
-              {categories.map((category) => {
+              {pagedCategories.map((category) => {
                 const isSelected = selectedCategory?.id === category.id;
                 return (
                   <button
@@ -261,6 +275,17 @@ export function ProductsPage() {
                 );
               })}
             </div>
+            {!catalogResource.isLoading && !catalogResource.error && categories.length > 0 && (
+              <PaginationBar
+                testId="products-categories-pagination"
+                totalItems={categories.length}
+                page={categoryPage}
+                pageSize={categoryPageSize}
+                onPageChange={setCategoryPage}
+                onPageSizeChange={setCategoryPageSize}
+                itemLabel="개"
+              />
+            )}
           </section>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
@@ -314,7 +339,7 @@ export function ProductsPage() {
               {selectedCategory && items.length > 0 && (
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 72px 100px 80px 172px', fontSize: 12 }}>
                   {['상품명', '단위', '기준가', '상태', '관리'].map((header) => <GridHead key={header}>{header}</GridHead>)}
-                  {items.map((item) => (
+                  {pagedItems.map((item) => (
                     <React.Fragment key={item.id}>
                       <GridCell>
                         <button type="button" onClick={() => setSelectedItemId(item.id)} style={linkButtonStyle}>
@@ -354,6 +379,17 @@ export function ProductsPage() {
                     </React.Fragment>
                   ))}
                 </div>
+              )}
+              {selectedCategory && items.length > 0 && (
+                <PaginationBar
+                  testId="products-items-pagination"
+                  totalItems={items.length}
+                  page={itemPage}
+                  pageSize={itemPageSize}
+                  onPageChange={setItemPage}
+                  onPageSizeChange={setItemPageSize}
+                  itemLabel="개"
+                />
               )}
             </section>
 

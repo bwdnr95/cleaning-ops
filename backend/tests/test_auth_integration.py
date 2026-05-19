@@ -528,6 +528,38 @@ def test_admin_calendar_rejects_partner_access() -> None:
     assert response.json()["detail"] == "admin_required"
 
 
+def test_admin_order_list_returns_more_than_legacy_page_limit() -> None:
+    client = make_test_client()
+    admin_session = login(client, "/api/auth/admin/login", DEV_ADMIN_EMAIL, DEV_ADMIN_PASSWORD)
+    headers = {"Authorization": f"Bearer {admin_session['access_token']}"}
+    created_service_names = set()
+
+    for index in range(55):
+        service_name = f"pagination-check-{index:02d}"
+        created_service_names.add(service_name)
+        create_response = client.post(
+            "/api/admin/orders",
+            headers=headers,
+            json={
+                "status": OrderStatus.NEW.value,
+                "received_date": "2026-05-10",
+                "scheduled_date": "2026-05-25",
+                "service_name": service_name,
+                "customer_name": f"Pagination Customer {index:02d}",
+                "customer_phone": "010-1234-5678",
+                "customer_address": f"Seoul Pagination QA {index:02d}",
+            },
+        )
+        assert create_response.status_code == 201, create_response.text
+
+    list_response = client.get("/api/admin/orders", headers=headers)
+
+    assert list_response.status_code == 200
+    body = list_response.json()
+    assert len(body) >= 56
+    assert created_service_names <= {order["service_name"] for order in body}
+
+
 def test_admin_can_create_order_and_update_operational_fields() -> None:
     client = make_test_client()
     admin_session = login(client, "/api/auth/admin/login", DEV_ADMIN_EMAIL, DEV_ADMIN_PASSWORD)

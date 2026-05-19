@@ -12,6 +12,7 @@ import {
   updateAdminPartner,
   updatePartnerCategory,
 } from '../../../api/admin';
+import { PaginationBar, paginateItems } from '../../../components/common/Pagination';
 import { useApiResource } from '../../../api/useApiResource';
 import { Badge, Icon, StatusBadge } from '../../../components/common/ui';
 import { formatPhone } from '../../../domain/phone';
@@ -28,6 +29,8 @@ export function PartnersPage() {
   const partners = React.useMemo(() => partnersResource.data || [], [partnersResource.data]);
   const categories = React.useMemo(() => categoriesResource.data || [], [categoriesResource.data]);
   const [categoryFilter, setCategoryFilter] = React.useState(ALL_CATEGORY_FILTER);
+  const [partnersPage, setPartnersPage] = React.useState(1);
+  const [partnersPageSize, setPartnersPageSize] = React.useState(20);
   const [selectedCategoryId, setSelectedCategoryId] = React.useState('');
   const [categoryForm, setCategoryForm] = React.useState(defaultCategoryForm());
   const [selectedId, setSelectedId] = React.useState(null);
@@ -47,6 +50,10 @@ export function PartnersPage() {
   const filteredPartners = React.useMemo(
     () => filterPartnersByCategory(partners, categoryFilter),
     [categoryFilter, partners],
+  );
+  const pagedPartners = React.useMemo(
+    () => paginateItems(filteredPartners, partnersPage, partnersPageSize),
+    [filteredPartners, partnersPage, partnersPageSize],
   );
   const selectedCategory = categories.find((category) => category.id === selectedCategoryId) || null;
 
@@ -110,6 +117,7 @@ export function PartnersPage() {
 
   const handleCategoryFilter = (nextFilter) => {
     setCategoryFilter(nextFilter);
+    setPartnersPage(1);
     const nextPartners = filterPartnersByCategory(partners, nextFilter);
     setSelectedId(nextPartners[0]?.id || null);
     if (nextFilter !== ALL_CATEGORY_FILTER) {
@@ -439,7 +447,7 @@ export function PartnersPage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {filteredPartners.map((partner) => {
+                    {pagedPartners.map((partner) => {
                       const isSelected = partner.id === selectedId;
                       return (
                         <tr
@@ -495,6 +503,17 @@ export function PartnersPage() {
                   </tbody>
                 </table>
               </div>
+            )}
+            {!partnersResource.isLoading && !partnersResource.error && filteredPartners.length > 0 && (
+              <PaginationBar
+                testId="partners-pagination"
+                totalItems={filteredPartners.length}
+                page={partnersPage}
+                pageSize={partnersPageSize}
+                onPageChange={setPartnersPage}
+                onPageSizeChange={setPartnersPageSize}
+                itemLabel="개"
+              />
             )}
           </section>
 

@@ -152,6 +152,24 @@ test('admin can filter orders by visit date with the custom date picker', async 
   await expect(page.getByTestId(`admin-order-row-${outsideOrder.id}`)).toBeVisible();
 });
 
+test('admin can page through the full order result set', async ({ page, request }) => {
+  const orders = await createPaginationOrders(request);
+  const lastOrder = orders[orders.length - 1];
+
+  await loginAsAdmin(page);
+  await page.getByTestId('admin-nav-orders').click();
+  await expect(page.getByTestId('admin-orders-page')).toBeVisible();
+  await expect(page.getByTestId('orders-date-preset-all')).toHaveAttribute('aria-pressed', 'true');
+  await page.getByTestId('orders-pagination-page-size').selectOption('10');
+  await expect(page.getByTestId('orders-pagination-next')).toBeEnabled();
+
+  await page.getByTestId('orders-pagination-next').click();
+  await expect(page.getByTestId('orders-pagination-page')).toContainText('2 /');
+
+  await page.getByTestId('orders-pagination-page-size').selectOption('100');
+  await expect(page.getByTestId(`admin-order-row-${lastOrder.id}`)).toBeVisible();
+});
+
 test('admin can run selected order bulk operations from the order list', async ({ page, request }) => {
   const orders = await createBulkActionOrders(request);
 
@@ -502,6 +520,30 @@ async function createDateFilterOrders(request) {
   }));
 
   return { targetOrder, outsideOrder };
+}
+
+async function createPaginationOrders(request) {
+  const adminSession = await loginViaApi(request, 'admin');
+  const adminHeaders = authHeaders(adminSession.access_token);
+  const created = [];
+
+  for (let index = 0; index < 55; index += 1) {
+    created.push(await checkedJson(await request.post(`${backendUrl}/api/admin/orders`, {
+      headers: adminHeaders,
+      data: {
+        received_date: '2026-05-05',
+        scheduled_date: '2026-12-31',
+        requested_time: `${String(9 + index).padStart(2, '0')}:00`,
+        service_name: `Pagination QA ${index + 1}`,
+        customer_name: `Pagination Customer ${index + 1}`,
+        customer_phone: `010-8100-${String(3000 + index)}`,
+        customer_address: `Seoul Pagination QA ${index + 1}`,
+        customer_visible_payment: false,
+      },
+    })));
+  }
+
+  return created;
 }
 
 async function createBulkActionOrders(request) {

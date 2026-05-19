@@ -1,5 +1,6 @@
 import React from 'react';
 import { DatePicker } from '../../../components/common/DatePicker';
+import { PaginationBar, paginateItems } from '../../../components/common/Pagination';
 import { Avatar, Icon } from '../../../components/common/ui';
 import { ORDERS } from '../../../mocks/cleaningOpsData';
 import { listAdminOrders, listPartners, updateAdminOrder } from '../../../api/admin';
@@ -122,6 +123,8 @@ export function OrdersPage({ onOpenOrder, onCreateOrder, onEditOrder, initialTab
   const [dateFilter, setDateFilter] = React.useState(() => createInitialDateFilter(initialTab, initialDatePreset));
   const [partnerFilter, setPartnerFilter] = React.useState('all');
   const [receivedDateFilter, setReceivedDateFilter] = React.useState(() => createDateFilter('all'));
+  const [page, setPage] = React.useState(1);
+  const [pageSize, setPageSize] = React.useState(100);
   const [actionError, setActionError] = React.useState('');
   const [actionNotice, setActionNotice] = React.useState(null);
   const [isSavingAction, setIsSavingAction] = React.useState(false);
@@ -143,7 +146,21 @@ export function OrdersPage({ onOpenOrder, onCreateOrder, onEditOrder, initialTab
   React.useEffect(() => {
     setTab(initialTab);
     setDateFilter(createInitialDateFilter(initialTab, initialDatePreset));
+    setPage(1);
   }, [initialDatePreset, initialTab]);
+
+  React.useEffect(() => {
+    setPage(1);
+  }, [
+    tab,
+    sortBy,
+    query,
+    dateFilter.start,
+    dateFilter.end,
+    partnerFilter,
+    receivedDateFilter.start,
+    receivedDateFilter.end,
+  ]);
 
   const toggleRow = (id) => {
     const next = new Set(selected);
@@ -285,6 +302,10 @@ export function OrdersPage({ onOpenOrder, onCreateOrder, onEditOrder, initialTab
       };
     });
   }, [filtered]);
+  const pagedRows = React.useMemo(
+    () => paginateItems(groupedFiltered, page, pageSize),
+    [groupedFiltered, page, pageSize],
+  );
 
   const setDatePreset = (preset) => {
     setDateFilter(createDateFilter(preset));
@@ -600,7 +621,7 @@ export function OrdersPage({ onOpenOrder, onCreateOrder, onEditOrder, initialTab
             <tr>
               <th style={{ paddingRight: 0 }}>
                 <input type="checkbox" style={{ margin: 0 }} onChange={(e) => {
-                  setSelected(e.target.checked ? new Set(filtered.map((o) => o.id)) : new Set());
+                  setSelected(e.target.checked ? new Set(pagedRows.map((o) => o.id)) : new Set());
                 }}/>
               </th>
               <th>상태</th>
@@ -619,7 +640,7 @@ export function OrdersPage({ onOpenOrder, onCreateOrder, onEditOrder, initialTab
             </tr>
           </thead>
           <tbody>
-            {!ordersResource.isLoading && !ordersResource.error && groupedFiltered.map((o) => {
+            {!ordersResource.isLoading && !ordersResource.error && pagedRows.map((o) => {
               const isUnassigned = o.team === '미배정';
               const isUnpaid = o.paid === 'pending' && o.amount > 0 && !['취소', '신규접수', '상담중'].includes(o.status);
               const isCancelled = o.status === '취소';
@@ -726,20 +747,15 @@ export function OrdersPage({ onOpenOrder, onCreateOrder, onEditOrder, initialTab
         </table>
       </div>
 
-      {/* Footer */}
-      <div style={{
-        padding: '10px 24px',
-        borderTop: '1px solid var(--border)',
-        display: 'flex', alignItems: 'center', gap: 10,
-        fontSize: 11.5, color: 'var(--text-tertiary)',
-        background: 'var(--bg)',
-      }}>
-        <span>{filtered.length}건 표시 · {formatDateFilterSummary(dateFilter)}</span>
-        <div style={{ flex: 1 }}/>
-        <button style={iconBtn}><Icon name="chevronLeft" size={11}/></button>
-        <span style={{ fontVariantNumeric: 'tabular-nums' }}>1 / 4</span>
-        <button style={iconBtn}><Icon name="chevronRight" size={11}/></button>
-      </div>
+      <PaginationBar
+        testId="orders-pagination"
+        totalItems={filtered.length}
+        page={page}
+        pageSize={pageSize}
+        onPageChange={setPage}
+        onPageSizeChange={setPageSize}
+        itemLabel={`건 표시 · ${formatDateFilterSummary(dateFilter)}`}
+      />
     </div>
   );
 }
@@ -1181,12 +1197,3 @@ function datePresetButton(active) {
     whiteSpace: 'nowrap',
   };
 }
-
-const iconBtn = {
-  display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-  width: 24, height: 24, padding: 0,
-  background: 'transparent',
-  border: 'none', borderRadius: 6,
-  color: 'var(--text-tertiary)',
-  cursor: 'pointer',
-};
