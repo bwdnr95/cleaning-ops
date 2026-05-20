@@ -59,12 +59,14 @@ class DashboardService:
         photo_stmt = (
             select(OrderPhoto, Order)
             .join(Order, Order.id == OrderPhoto.order_id)
+            .where(Order.deleted_at.is_(None))
             .order_by(OrderPhoto.created_at.desc(), OrderPhoto.id.desc())
             .limit(limit)
         )
         message_stmt = (
             select(MessageLog, Order)
             .join(Order, Order.id == MessageLog.order_id)
+            .where(Order.deleted_at.is_(None))
             .order_by(MessageLog.created_at.desc(), MessageLog.id.desc())
             .limit(limit)
         )
@@ -105,9 +107,13 @@ class DashboardService:
         )
 
     def _count(self, *conditions) -> int:
-        stmt = select(func.count()).select_from(Order).where(*conditions)
+        stmt = select(func.count()).select_from(Order).where(Order.deleted_at.is_(None), *conditions)
         return int(self.db.scalar(stmt) or 0)
 
     def _sum(self, column, *conditions) -> float:
-        stmt = select(func.coalesce(func.sum(column), 0)).select_from(Order).where(*conditions)
+        stmt = (
+            select(func.coalesce(func.sum(column), 0))
+            .select_from(Order)
+            .where(Order.deleted_at.is_(None), *conditions)
+        )
         return float(self.db.scalar(stmt) or 0)

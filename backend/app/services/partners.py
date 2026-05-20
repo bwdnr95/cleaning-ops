@@ -293,7 +293,7 @@ class PartnerService:
     def _list_recent_jobs(self, partner_id: str) -> list[Order]:
         stmt = (
             select(Order)
-            .where(Order.partner_id == partner_id)
+            .where(Order.partner_id == partner_id, Order.deleted_at.is_(None))
             .order_by(Order.scheduled_date.desc().nulls_last(), Order.id.desc())
             .limit(20)
         )
@@ -313,7 +313,10 @@ class PartnerService:
 
 
 def scalar_count(db: Session, *conditions, model=Order) -> int:
-    stmt = select(func.count()).select_from(model).where(*conditions)
+    stmt = select(func.count()).select_from(model)
+    if model is Order:
+        stmt = stmt.where(Order.deleted_at.is_(None))
+    stmt = stmt.where(*conditions)
     return int(db.scalar(stmt) or 0)
 
 

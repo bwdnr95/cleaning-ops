@@ -31,6 +31,7 @@ class PhotoRepository(Repository[OrderPhoto]):
             select(Order)
             .join(OrderPhoto, OrderPhoto.order_id == Order.id)
             .where(
+                Order.deleted_at.is_(None),
                 or_(
                     OrderPhoto.is_customer_visible.is_(False),
                     Order.status == OrderStatus.CUSTOMER_DELIVERY_NEEDED,

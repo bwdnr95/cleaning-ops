@@ -1,7 +1,9 @@
+from dataclasses import dataclass
+from datetime import UTC, datetime
 from secrets import token_urlsafe
 from uuid import uuid4
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.domain.constants import OrderStatus, TimelineEventType
@@ -44,6 +46,18 @@ PARTNER_JOB_STARTABLE_STATUSES = {
 PARTNER_JOB_COMPLETABLE_STATUSES = {
     OrderStatus.IN_PROGRESS.value,
 }
+
+
+@dataclass(frozen=True)
+class BulkDeleteFailure:
+    order_id: str
+    reason: str
+
+
+@dataclass(frozen=True)
+class BulkDeleteResult:
+    succeeded: list[str]
+    failed: list[BulkDeleteFailure]
 
 
 class OrderService:
@@ -130,7 +144,7 @@ class OrderService:
         *,
         actor_user_id: str | None = None,
     ) -> Order:
-        group = self.db.get(OrderGroup, group_id)
+        group = OrderGroupRepository(self.db).get(group_id)
         if group is None:
             raise ValueError("group_not_found")
         order = self._create_line_internal(group, payload, actor_user_id=actor_user_id)
@@ -239,7 +253,7 @@ class OrderService:
         *,
         actor_user_id: str | None = None,
     ) -> OrderGroup:
-        group = self.db.get(OrderGroup, group_id)
+        group = OrderGroupRepository(self.db).get(group_id)
         if group is None:
             raise ValueError("group_not_found")
 
@@ -259,7 +273,12 @@ class OrderService:
         }
         mirror_changes = {key: changes[key] for key in mirror_fields if key in changes}
         if mirror_changes:
-            lines = self.db.scalars(select(Order).where(Order.group_id == group_id)).all()
+            lines = self.db.scalars(
+                select(Order).where(
+                    Order.group_id == group_id,
+                    Order.deleted_at.is_(None),
+                )
+            ).all()
             for line in lines:
                 line_mirror_changes: dict[str, dict[str, object | None]] = {}
                 for key, value in mirror_changes.items():
@@ -336,7 +355,11 @@ class OrderService:
     ) -> Order:
         order = self.db.execute(
             select(Order)
-            .where(Order.id == order_id, Order.partner_id == partner_id)
+            .where(
+                Order.id == order_id,
+                Order.partner_id == partner_id,
+                Order.deleted_at.is_(None),
+            )
             .with_for_update()
         ).scalar_one_or_none()
         if order is None:
@@ -358,6 +381,61 @@ class OrderService:
         self.db.commit()
         self.db.refresh(order)
         return order
+
+    def delete_order(self, *, order_id: str, actor_user_id: str) -> None:
+        """주문 1건 soft-delete. 마지막 살아있는 line이면 그룹도 soft-delete한다."""
+        order = self.db.execute(
+            select(Order).where(
+                Order.id == order_id,
+                Order.deleted_at.is_(None),
+            )
+        ).scalar_one_or_none()
+        if order is None:
+            raise LookupError(f"order not found or already deleted: {order_id}")
+
+        now = datetime.now(UTC)
+        order.deleted_at = now
+        self.db.flush()
+
+        self.timeline.record(
+            order_id=order.id,
+            event_type=TimelineEventType.ORDER_DELETED,
+            actor_user_id=actor_user_id,
+            title="주문 삭제",
+            description="관리자가 주문 내역을 삭제했습니다.",
+        )
+
+        remaining = self.db.execute(
+            select(func.count(Order.id)).where(
+                Order.group_id == order.group_id,
+                Order.deleted_at.is_(None),
+            )
+        ).scalar_one()
+        if remaining == 0:
+            group = self.db.get(OrderGroup, order.group_id)
+            if group is not None and group.deleted_at is None:
+                group.deleted_at = now
+
+        self.db.flush()
+
+    def bulk_delete_orders(
+        self,
+        *,
+        order_ids: list[str],
+        actor_user_id: str,
+    ) -> BulkDeleteResult:
+        succeeded: list[str] = []
+        failed: list[BulkDeleteFailure] = []
+
+        for order_id in order_ids:
+            try:
+                self.delete_order(order_id=order_id, actor_user_id=actor_user_id)
+            except LookupError:
+                failed.append(BulkDeleteFailure(order_id=order_id, reason="not_found"))
+            else:
+                succeeded.append(order_id)
+
+        return BulkDeleteResult(succeeded=succeeded, failed=failed)
 
     def _change_status(
         self,
