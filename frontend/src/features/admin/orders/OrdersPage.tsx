@@ -3,7 +3,7 @@ import { DatePicker } from '../../../components/common/DatePicker';
 import { PaginationBar, paginateItems } from '../../../components/common/Pagination';
 import { Avatar, Icon } from '../../../components/common/ui';
 import { ORDERS } from '../../../mocks/cleaningOpsData';
-import { listAdminOrders, listPartners, updateAdminOrder } from '../../../api/admin';
+import { bulkDeleteAdminOrders, listAdminOrders, listPartners, updateAdminOrder } from '../../../api/admin';
 import { sendAdminMessage } from '../../../api/messages';
 import { useApiResource } from '../../../api/useApiResource';
 import { ORDER_STATUSES } from '../../../domain/orderStatus';
@@ -128,6 +128,7 @@ export function OrdersPage({ onOpenOrder, onCreateOrder, onEditOrder, initialTab
   const [actionError, setActionError] = React.useState('');
   const [actionNotice, setActionNotice] = React.useState(null);
   const [isSavingAction, setIsSavingAction] = React.useState(false);
+  const [isDeleting, setIsDeleting] = React.useState(false);
   const [bulkAction, setBulkAction] = React.useState(null);
   const [bulkStatus, setBulkStatus] = React.useState('일정확정');
   const [bulkPartnerId, setBulkPartnerId] = React.useState('');
@@ -247,6 +248,33 @@ export function OrdersPage({ onOpenOrder, onCreateOrder, onEditOrder, initialTab
       successLabel: `${option.label}를 발송했습니다.`,
       execute: (orderId) => sendAdminMessage(orderId, option.value, option.recipient),
     });
+  };
+
+  const handleBulkDelete = async () => {
+    if (selected.size === 0) return;
+    if (!window.confirm(`선택한 ${selected.size}건의 주문을 삭제하시겠습니까? 삭제된 주문은 목록에서 사라지지만 운영 기록(타임라인)은 보존됩니다.`)) {
+      return;
+    }
+
+    setActionError('');
+    setActionNotice(null);
+    setIsDeleting(true);
+    try {
+      const result = await bulkDeleteAdminOrders(Array.from(selected));
+      setSelected(new Set());
+      setBulkAction(null);
+      setActionNotice({
+        tone: result.failed.length > 0 ? 'warn' : 'success',
+        text: result.failed.length > 0
+          ? `${result.succeeded.length}건 삭제 완료, ${result.failed.length}건 실패: ${result.failed.map((failure) => shortOrderId(failure.order_id)).join(', ')}`
+          : `${result.succeeded.length}건 삭제 완료`,
+      });
+      ordersResource.reload();
+    } catch (error) {
+      setActionError(`삭제 실패: ${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      setIsDeleting(false);
+    }
   };
 
   const filtered = sortOrders(
@@ -571,6 +599,14 @@ export function OrdersPage({ onOpenOrder, onCreateOrder, onEditOrder, initialTab
           <button data-testid="orders-bulk-status-open" style={bulkActionButton(bulkAction === 'status')} onClick={() => setBulkAction(bulkAction === 'status' ? null : 'status')}>상태 변경</button>
           <button data-testid="orders-bulk-message-open" style={bulkActionButton(bulkAction === 'message')} onClick={() => setBulkAction(bulkAction === 'message' ? null : 'message')}>메시지</button>
           <button data-testid="orders-bulk-partner-open" style={bulkActionButton(bulkAction === 'partner')} onClick={() => setBulkAction(bulkAction === 'partner' ? null : 'partner')}>협력사 배정</button>
+          <button
+            data-testid="orders-bulk-delete"
+            style={{ ...bulkActionButton(false), color: 'var(--danger-fg)' }}
+            disabled={isDeleting}
+            onClick={() => void handleBulkDelete()}
+          >
+            {isDeleting ? '삭제 중' : '삭제'}
+          </button>
           <div style={{ flex: 1 }}/>
           <button style={softGhostBtn} onClick={() => { setSelected(new Set()); setBulkAction(null); }}>해제</button>
         </div>
@@ -620,9 +656,15 @@ export function OrdersPage({ onOpenOrder, onCreateOrder, onEditOrder, initialTab
           <thead>
             <tr>
               <th style={{ paddingRight: 0 }}>
-                <input type="checkbox" style={{ margin: 0 }} onChange={(e) => {
-                  setSelected(e.target.checked ? new Set(pagedRows.map((o) => o.id)) : new Set());
-                }}/>
+                <input
+                  data-testid="orders-select-all"
+                  type="checkbox"
+                  checked={pagedRows.length > 0 && pagedRows.every((order) => selected.has(order.id))}
+                  style={{ margin: 0 }}
+                  onChange={(event) => {
+                    setSelected(event.target.checked ? new Set(pagedRows.map((order) => order.id)) : new Set());
+                  }}
+                />
               </th>
               <th>상태</th>
               <th>주문번호</th>

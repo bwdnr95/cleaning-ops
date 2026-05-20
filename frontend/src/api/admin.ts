@@ -41,6 +41,19 @@ export function updateAdminOrder(orderId, input) {
   });
 }
 
+export function deleteAdminOrder(orderId) {
+  return apiRequest(`/admin/orders/${encodeURIComponent(orderId)}`, {
+    method: 'DELETE',
+  });
+}
+
+export function bulkDeleteAdminOrders(orderIds) {
+  return apiRequest('/admin/orders/bulk-delete', {
+    method: 'POST',
+    body: { order_ids: orderIds },
+  });
+}
+
 export function createOrderGroup(input) {
   return apiRequest('/admin/orders/groups', {
     method: 'POST',
