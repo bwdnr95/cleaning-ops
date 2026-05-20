@@ -48,7 +48,9 @@ def _build_security_headers() -> list[tuple[bytes, bytes]]:
 
 def _build_csp_value() -> str:
     img_sources = {"'self'", "data:", "blob:"}
-    connect_sources = {"'self'"}
+    connect_sources = {"'self'", "https://postcode.map.kakao.com"}
+    script_sources = {"'self'", "https://t1.daumcdn.net"}
+    frame_sources = {"https://postcode.map.kakao.com"}
 
     public_storage = settings.s3_public_base_url.strip()
     if public_storage:
@@ -68,7 +70,8 @@ def _build_csp_value() -> str:
         "default-src 'self'",
         f"img-src {' '.join(sorted(img_sources))}",
         f"connect-src {' '.join(sorted(connect_sources))}",
-        "script-src 'self'",
+        f"script-src {' '.join(sorted(script_sources))}",
+        f"frame-src {' '.join(sorted(frame_sources))}",
         "style-src 'self' 'unsafe-inline'",
         "font-src 'self' data:",
         "object-src 'none'",
