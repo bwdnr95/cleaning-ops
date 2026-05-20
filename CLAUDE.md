@@ -81,6 +81,8 @@ Top-level composition lives in `app/api/router.py` (see `.master/first_demo_code
 
 3. **Every operational mutation writes a timeline event.** Status change, partner assignment, photo upload, photo approval, message send, customer link send, memo — all go through `services/timeline.py` (or the corresponding service that wraps it). If your change does not write a timeline row for a meaningful state transition, it's incomplete.
 
+4. **Soft-delete는 timeline 보존을 위한 합의다.** 주문/그룹 삭제는 `deleted_at` 컬럼을 채우고, 모든 조회 경로는 `deleted_at IS NULL` 필터를 강제한다. 자세한 내용은 `AGENTS.md` § "Delete Policy"를 본다.
+
 ### Photo flow invariant
 Partner upload → `is_customer_visible=true` (자동 공개). **상태는 변경되지 않는다** (협력사가 사진을 여러 번 나눠 올려도 IN_PROGRESS 그대로). timeline에는 `photo_uploaded` + `photo_approved`(system actor)만 기록된다. 협력사가 명시적으로 "작업 완료" 액션을 실행하면 비로소 `IN_PROGRESS → 고객전달필요`로 전환(사진 1장 이상 + IN_PROGRESS 가드 통과 시). 관리자는 잘못 올라온 사진을 `POST /api/admin/photos/{id}/revoke`로 비공개로 되돌릴 수 있고, 이 때 `photo_revoked` 이벤트가 남는다. 마지막 공개 사진이 사라지고 주문이 `고객전달필요` 상태였다면 `작업진행`으로 되돌아간다(`고객전달완료`/`서비스완료`는 유지). 파일 타입은 **byte signature**로 검증한다 (`services/photos.py`).
 

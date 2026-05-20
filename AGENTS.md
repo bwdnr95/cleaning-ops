@@ -104,6 +104,15 @@ DB write는 service/action 계층을 통해 수행하고, 그 안에서 권한 �
 
 트랜잭션이 가능한 환경에서는 주문 변경과 타임라인 기록을 같은 트랜잭션으로 묶는다.
 
+## Delete Policy
+
+- 주문/그룹 삭제는 **soft-delete**다. 모델의 `deleted_at` 컬럼을 채우고 hard-delete는 사용하지 않는다.
+- 모든 list/detail/dashboard/calendar/customer 조회 경로는 `deleted_at IS NULL` 필터를 포함한다.
+- 삭제 시 `order_timeline`에 `order_deleted` 이벤트를 기록한다 (actor=관리자 user_id). photos, message_logs, timeline은 그대로 보존되어 audit trail을 유지한다.
+- 그룹 내 모든 line이 삭제되면 service 단에서 `OrderGroup.deleted_at`도 함께 채운다. 일부만 삭제되면 그룹은 살아있다.
+- 협력사/고객 API는 삭제된 주문에 접근할 수 없다 (`deleted_at IS NULL` 가드 + 404 응답).
+- 복구 기능은 본 정책 범위 밖이다. DB에 직접 접근하여 `deleted_at`을 NULL로 되돌리는 운영 절차로만 처리한다.
+
 ## DTO Rules
 
 API 응답은 역할별 DTO를 분리한다.
