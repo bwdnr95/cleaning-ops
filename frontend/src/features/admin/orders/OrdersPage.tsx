@@ -380,9 +380,6 @@ export function OrdersPage({ onOpenOrder, onCreateOrder, onEditOrder, initialTab
           <button className="btn btn--secondary btn--sm">
             <Icon name="fileText" size={12}/> 내보내기
           </button>
-          <button data-testid="admin-orders-create" className="btn btn--primary btn--sm" onClick={onCreateOrder}>
-            <Icon name="plus" size={12}/> 신규 주문
-          </button>
         </div>
       </div>
 
@@ -471,6 +468,13 @@ export function OrdersPage({ onOpenOrder, onCreateOrder, onEditOrder, initialTab
         <div style={{ flex: 1 }}/>
         <button style={softGhostBtn} onClick={() => setSortBy(sortBy === 'visit' ? 'received' : 'visit')}>
           <Icon name="list" size={11}/> {sortBy === 'visit' ? '방문일순' : '접수일순'}
+        </button>
+        <button
+          data-testid="admin-orders-create"
+          className="btn btn--primary btn--lg"
+          onClick={onCreateOrder}
+        >
+          <Icon name="plus" size={14}/> 신규 주문 등록
         </button>
       </div>
 
