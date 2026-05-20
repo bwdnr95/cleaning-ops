@@ -261,6 +261,13 @@ class OrderService:
         if "customer_phone" in changes and changes["customer_phone"] is not None:
             changes["customer_phone"] = normalize_phone(changes["customer_phone"])
 
+        group_only_changes: dict[str, dict[str, object | None]] = {}
+        if "customer_address_detail" in changes:
+            before = to_timeline_value(group.customer_address_detail)
+            after = to_timeline_value(changes["customer_address_detail"])
+            if before != after:
+                group_only_changes["customer_address_detail"] = {"from": before, "to": after}
+
         for key, value in changes.items():
             setattr(group, key, value)
 
@@ -272,7 +279,7 @@ class OrderService:
             "customer_visible_payment",
         }
         mirror_changes = {key: changes[key] for key in mirror_fields if key in changes}
-        if mirror_changes:
+        if mirror_changes or group_only_changes:
             lines = self.db.scalars(
                 select(Order).where(
                     Order.group_id == group_id,
@@ -280,7 +287,7 @@ class OrderService:
                 )
             ).all()
             for line in lines:
-                line_mirror_changes: dict[str, dict[str, object | None]] = {}
+                line_mirror_changes: dict[str, dict[str, object | None]] = dict(group_only_changes)
                 for key, value in mirror_changes.items():
                     before = to_timeline_value(getattr(line, key))
                     after = to_timeline_value(value)

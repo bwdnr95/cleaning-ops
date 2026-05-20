@@ -515,6 +515,40 @@ def test_admin_calendar_lists_monthly_scheduled_orders_and_partner_filter() -> N
     assert partner_response.json()[0]["partner_id"] == DEV_PARTNER_ID
 
 
+def test_admin_calendar_includes_group_address_detail() -> None:
+    client = make_test_client()
+    admin_session = login(client, "/api/auth/admin/login", DEV_ADMIN_EMAIL, DEV_ADMIN_PASSWORD)
+    headers = {"Authorization": f"Bearer {admin_session['access_token']}"}
+
+    create_response = client.post(
+        "/api/admin/orders/groups",
+        headers=headers,
+        json={
+            "customer_name": "Calendar Detail Customer",
+            "customer_phone": "010-1111-2222",
+            "customer_address": "Seoul Gangnam",
+            "customer_address_detail": "Unit 1204",
+            "lines": [
+                {
+                    "status": OrderStatus.SCHEDULE_CONFIRMED.value,
+                    "received_date": "2026-05-18",
+                    "scheduled_date": "2026-05-22",
+                    "service_name": "calendar detail clean",
+                },
+            ],
+        },
+    )
+    assert create_response.status_code == 201, create_response.text
+    line_id = create_response.json()["lines"][0]["id"]
+
+    response = client.get("/api/admin/calendar?year=2026&month=5", headers=headers)
+
+    assert response.status_code == 200
+    item = next(item for item in response.json() if item["id"] == line_id)
+    assert item["customer_address"] == "Seoul Gangnam"
+    assert item["customer_address_detail"] == "Unit 1204"
+
+
 def test_admin_calendar_rejects_partner_access() -> None:
     client = make_test_client()
     partner_session = login(client, "/api/auth/partner/login", DEV_PARTNER_PHONE, DEV_PARTNER_PASSWORD)

@@ -228,7 +228,7 @@ def test_admin_detail_exposes_group_notes_and_group_updates_record_line_timeline
     update_response = client.patch(
         f"/api/admin/orders/groups/{group['id']}",
         headers=headers,
-        json={"customer_address": "New Address"},
+        json={"customer_address": "New Address", "customer_address_detail": "Unit 1204"},
     )
     assert update_response.status_code == 200
 
@@ -245,4 +245,8 @@ def test_admin_detail_exposes_group_notes_and_group_updates_record_line_timeline
         assert group_change_events[-1]["event_metadata"]["changes"]["customer_address"] == {
             "from": "Old Address",
             "to": "New Address",
+        }
+        assert group_change_events[-1]["event_metadata"]["changes"]["customer_address_detail"] == {
+            "from": None,
+            "to": "Unit 1204",
         }

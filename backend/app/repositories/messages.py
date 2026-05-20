@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 
 from app.domain.constants import MessageStatus, MessageType
 from app.models.message import MessageLog
+from app.models.order import Order
 from app.repositories.base import Repository
 
 
@@ -15,6 +16,8 @@ class MessageRepository(Repository[MessageLog]):
     def list_messages(self, *, limit: int | None = None, offset: int = 0) -> list[MessageLog]:
         stmt = (
             select(MessageLog)
+            .join(Order, MessageLog.order_id == Order.id)
+            .where(Order.deleted_at.is_(None))
             .order_by(MessageLog.created_at.desc(), MessageLog.id.desc())
         )
         if limit is not None:

@@ -1,10 +1,18 @@
 import pytest
 from sqlalchemy import select
 
-from app.domain.constants import TimelineEventType
+from app.domain.constants import (
+    MessageChannel,
+    MessageStatus,
+    MessageType,
+    RecipientType,
+    TimelineEventType,
+)
+from app.models.message import MessageLog
 from app.models.order import Order
 from app.models.order_group import OrderGroup
 from app.models.timeline import OrderTimeline
+from app.repositories.messages import MessageRepository
 from app.repositories.order_groups import OrderGroupRepository
 from app.repositories.orders import OrderRepository
 from app.services.orders import OrderService
@@ -80,6 +88,34 @@ def test_deleted_order_not_in_admin_list(db_session, seed_admin_user, seed_order
 
     ids = [order.id for order in OrderRepository(db_session).list_orders()]
     assert seed_order.id not in ids
+
+
+def test_deleted_order_message_logs_hidden_from_admin_message_list(
+    db_session,
+    seed_admin_user,
+    seed_order,
+):
+    db_session.add(
+        MessageLog(
+            id=f"{seed_order.id}-message-log",
+            order_id=seed_order.id,
+            recipient_type=RecipientType.CUSTOMER,
+            recipient_name=seed_order.customer_name,
+            recipient_phone=seed_order.customer_phone,
+            message_type=MessageType.CUSTOMER_DAY_BEFORE,
+            channel=MessageChannel.SMS,
+            content="message for deleted order",
+            status=MessageStatus.SENT,
+            error_message=None,
+        )
+    )
+    db_session.commit()
+
+    OrderService(db_session).delete_order(order_id=seed_order.id, actor_user_id=seed_admin_user.id)
+    db_session.commit()
+
+    ids = [message.id for message in MessageRepository(db_session).list_messages()]
+    assert f"{seed_order.id}-message-log" not in ids
 
 
 def test_deleted_order_not_visible_to_partner(

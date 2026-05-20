@@ -159,6 +159,7 @@ export function PartnerJobDetail() {
   const canStart = STARTABLE_JOB_STATUSES.includes(job.status);
   const canComplete = COMPLETABLE_JOB_STATUSES.includes(job.status);
   const statusLock = getPartnerStatusLock(job.status);
+  const jobAddress = formatJobAddress(job);
 
   return (
     <div data-testid="partner-job-detail-page" style={{ height: '100%', display: 'flex', flexDirection: 'column', background: '#f4f6f8', overflow: 'hidden' }}>
@@ -187,12 +188,12 @@ export function PartnerJobDetail() {
           </div>
 
           <InfoRow icon="mapPin">
-            {job.customer_address}<br/>
+            {jobAddress}<br/>
             <span style={{ color: 'var(--text-tertiary)' }}>{job.service_detail || '현장 상세 정보 없음'}</span>
           </InfoRow>
 
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
-            <ActionButton icon="mapPin" label="지도 열기" href={`https://map.naver.com/p/search/${encodeURIComponent(job.customer_address)}`} />
+            <ActionButton icon="mapPin" label="지도 열기" href={jobAddress ? `https://map.naver.com/p/search/${encodeURIComponent(jobAddress)}` : undefined} />
             <ActionButton icon="phone" label="고객 전화" href={job.customer_phone ? `tel:${digitsOnly(job.customer_phone)}` : undefined} />
           </div>
         </Panel>
@@ -284,6 +285,10 @@ export function PartnerJobDetail() {
   );
 }
 
+function formatJobAddress(job) {
+  return [job.customer_address, job.customer_address_detail].filter(Boolean).join(' ');
+}
+
 function PartnerJobList({ jobs, onSelect }) {
   if (jobs.length === 0) {
     return <PartnerState text="배정된 작업이 없습니다." />;
@@ -303,7 +308,7 @@ function PartnerJobList({ jobs, onSelect }) {
               <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--text-tertiary)' }}>{formatKoreanDate(job.scheduled_date)}</span>
             </div>
             <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 4 }}>{job.service_name}</div>
-            <div style={{ fontSize: 12.5, color: 'var(--text-secondary)', lineHeight: 1.45 }}>{job.customer_address}</div>
+            <div style={{ fontSize: 12.5, color: 'var(--text-secondary)', lineHeight: 1.45 }}>{formatJobAddress(job)}</div>
             <div style={{ marginTop: 10, display: 'flex', alignItems: 'center', gap: 6, color: 'var(--brand)', fontSize: 12.5, fontWeight: 700 }}>
               상세 보기 <Icon name="chevronRight" size={14}/>
             </div>
