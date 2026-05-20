@@ -9,6 +9,7 @@ import {
   updateAdminOrderGroup,
 } from '../../../api/admin';
 import { useApiResource } from '../../../api/useApiResource';
+import { AddressInput } from '../../../components/AddressInput';
 import { DatePicker } from '../../../components/common/DatePicker';
 import { Icon } from '../../../components/common/ui';
 import { ORDER_STATUSES } from '../../../domain/orderStatus';
@@ -213,7 +214,17 @@ export function OrderFormPage({ mode = 'create', orderId = null, onCancel, onSav
                 <TextField testId="order-customer-name" label="고객명" required value={form.customer_name} onChange={(value) => setGroupField('customer_name', value)} />
                 <TextField testId="order-customer-phone" label="연락처" required value={form.customer_phone} onChange={(value) => setGroupField('customer_phone', value)} placeholder="010-0000-0000" />
                 <TextField label="유입 경로" value={form.source_channel} onChange={(value) => setGroupField('source_channel', value)} />
-                <TextField testId="order-customer-address" label="주소" required span={2} value={form.customer_address} onChange={(value) => setGroupField('customer_address', value)} />
+                <div style={{ gridColumn: 'span 2' }}>
+                  <AddressInput
+                    baseAddress={form.customer_address}
+                    detailAddress={form.customer_address_detail}
+                    required
+                    onChange={({ baseAddress, detailAddress }) => {
+                      setGroupField('customer_address', baseAddress);
+                      setGroupField('customer_address_detail', detailAddress);
+                    }}
+                  />
+                </div>
               </FieldGrid>
             </Section>
 
@@ -474,6 +485,7 @@ function createEmptyGroupForm() {
     customer_name: '',
     customer_phone: '',
     customer_address: '',
+    customer_address_detail: '',
     source_channel: '',
     customer_visible_payment: false,
     notes: '',
@@ -515,6 +527,7 @@ function toForm(order) {
     customer_name: order.customer_name || '',
     customer_phone: order.customer_phone || '',
     customer_address: order.customer_address || '',
+    customer_address_detail: order.customer_address_detail || '',
     source_channel: order.source_channel || '',
     customer_visible_payment: Boolean(order.customer_visible_payment),
     notes: order.group_notes ?? order.notes ?? '',
@@ -562,6 +575,7 @@ function toGroupMetadataPayload(form) {
     customer_name: form.customer_name.trim(),
     customer_phone: form.customer_phone.trim(),
     customer_address: form.customer_address.trim(),
+    customer_address_detail: emptyToNull(form.customer_address_detail.trim()),
     source_channel: emptyToNull(form.source_channel),
     customer_visible_payment: form.customer_visible_payment,
     notes: emptyToNull(form.notes),
