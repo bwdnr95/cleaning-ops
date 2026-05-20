@@ -178,7 +178,7 @@ function ReservationContent({ order, onReset }) {
       <section style={{ padding: '0 16px' }}>
         <div style={summaryCardStyle}>
           <CustomerRow icon="mapPin" label="방문지">
-            {order.customer_address}
+            {[order.customer_address, order.customer_address_detail].filter(Boolean).join(' ')}
           </CustomerRow>
           <CustomerRow icon="phone" label="예약 연락처">
             <span className="mono" data-testid="customer-visible-phone">{formatPhone(order.customer_phone)}</span>

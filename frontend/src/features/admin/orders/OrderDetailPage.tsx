@@ -1,6 +1,6 @@
 import React from 'react';
 
-import { getAdminOrder, listPartners, updateAdminOrder } from '../../../api/admin';
+import { deleteAdminOrder, getAdminOrder, listPartners, updateAdminOrder } from '../../../api/admin';
 import {
   previewAdminMessage,
   sendAdminMessage,
@@ -57,6 +57,7 @@ export function OrderDetailPage({ orderId, onBack, onEdit, onNav, onOpenOrder })
   const [selectedPaymentStatus, setSelectedPaymentStatus] = React.useState('');
   const [selectedPartnerPaymentStatus, setSelectedPartnerPaymentStatus] = React.useState('');
   const [isSaving, setIsSaving] = React.useState(false);
+  const [isDeleting, setIsDeleting] = React.useState(false);
   const [notice, setNotice] = React.useState(null);
   const [error, setError] = React.useState(null);
   const [messageDraft, setMessageDraft] = React.useState(null);
@@ -204,6 +205,27 @@ export function OrderDetailPage({ orderId, onBack, onEdit, onNav, onOpenOrder })
     }
   };
 
+  const handleDelete = async () => {
+    if (!order) return;
+    const ok = window.confirm(
+      `이 주문(${order.id})을 삭제하시겠습니까?\n\n`
+      + '운영 기록(타임라인, 메시지 로그, 사진)은 보존되지만 목록에서는 사라집니다.',
+    );
+    if (!ok) return;
+
+    setError(null);
+    setNotice(null);
+    setIsDeleting(true);
+    try {
+      await deleteAdminOrder(order.id);
+      onBack();
+    } catch (requestError) {
+      setError(`삭제 실패: ${requestError instanceof Error ? requestError.message : String(requestError)}`);
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
   if (orderResource.isLoading) {
     return <DetailState text="주문 상세를 불러오는 중입니다." onBack={onBack} />;
   }
@@ -249,6 +271,15 @@ export function OrderDetailPage({ orderId, onBack, onEdit, onNav, onOpenOrder })
         <button className="btn btn--ghost btn--sm" onClick={() => onNav?.('calendar')}>
           <Icon name="calendar" size={12}/> 일정표
         </button>
+        <button
+          data-testid="order-detail-delete"
+          className="btn btn--ghost btn--sm"
+          style={{ color: 'var(--danger-fg)' }}
+          onClick={() => void handleDelete()}
+          disabled={isDeleting}
+        >
+          <Icon name="x" size={12}/> {isDeleting ? '삭제 중' : '삭제'}
+        </button>
       </div>
 
       <div className="scroll" style={{ flex: 1, overflow: 'auto', padding: 20 }}>
@@ -260,7 +291,11 @@ export function OrderDetailPage({ orderId, onBack, onEdit, onNav, onOpenOrder })
                 <KVItem label="연락처" value={formatPhone(order.customer_phone)} mono/>
                 <KVItem label="유입 경로" value={order.source_channel || '-'}/>
                 <KVItem label="고객 링크 토큰" value={order.customer_token} mono/>
-                <KVItem label="주소" value={order.customer_address} span={2}/>
+                <KVItem
+                  label="주소"
+                  value={[order.customer_address, order.customer_address_detail].filter(Boolean).join(' ')}
+                  span={2}
+                />
                 <KVItem label="요청사항" value={order.special_request || '-'} span={2} multiline/>
               </KV>
             </Section>
