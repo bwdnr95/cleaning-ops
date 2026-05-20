@@ -101,3 +101,51 @@ def test_deleted_group_not_visible_to_customer(db_session, seed_admin_user, seed
     db_session.commit()
 
     assert OrderGroupRepository(db_session).get_by_customer_token(group.customer_token) is None
+
+
+def test_delete_order_api_204(client, seed_admin_token, seed_order_id):
+    response = client.delete(
+        f"/api/admin/orders/{seed_order_id}",
+        headers={"Authorization": f"Bearer {seed_admin_token}"},
+    )
+    assert response.status_code == 204
+
+    response = client.get(
+        f"/api/admin/orders/{seed_order_id}",
+        headers={"Authorization": f"Bearer {seed_admin_token}"},
+    )
+    assert response.status_code == 404
+
+
+def test_delete_order_api_404_for_already_deleted(client, seed_admin_token, seed_order_id):
+    client.delete(
+        f"/api/admin/orders/{seed_order_id}",
+        headers={"Authorization": f"Bearer {seed_admin_token}"},
+    )
+    response = client.delete(
+        f"/api/admin/orders/{seed_order_id}",
+        headers={"Authorization": f"Bearer {seed_admin_token}"},
+    )
+    assert response.status_code == 404
+
+
+def test_delete_order_api_requires_admin(client, seed_partner_token, seed_order_id):
+    response = client.delete(
+        f"/api/admin/orders/{seed_order_id}",
+        headers={"Authorization": f"Bearer {seed_partner_token}"},
+    )
+    assert response.status_code in {401, 403}
+
+
+def test_bulk_delete_orders_api(client, seed_admin_token, seed_order_id):
+    response = client.post(
+        "/api/admin/orders/bulk-delete",
+        headers={"Authorization": f"Bearer {seed_admin_token}"},
+        json={"order_ids": [seed_order_id, "non-existent-id"]},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["succeeded"] == [seed_order_id]
+    assert len(body["failed"]) == 1
+    assert body["failed"][0]["order_id"] == "non-existent-id"
+    assert body["failed"][0]["reason"] == "not_found"

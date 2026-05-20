@@ -1,4 +1,6 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Response, status
+from pydantic import BaseModel
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.api.deps import CurrentUser, get_session, require_admin
@@ -26,6 +28,20 @@ from app.services.orders import (
 )
 
 router = APIRouter()
+
+
+class BulkDeleteRequest(BaseModel):
+    order_ids: list[str]
+
+
+class BulkDeleteFailureItem(BaseModel):
+    order_id: str
+    reason: str
+
+
+class BulkDeleteResponse(BaseModel):
+    succeeded: list[str]
+    failed: list[BulkDeleteFailureItem]
 
 
 @router.get("", response_model=list[AdminOrderRead])
@@ -105,6 +121,50 @@ def add_line(
     except ValueError as exc:
         raise order_http_error(exc) from exc
     return to_admin_order_dto(order, group=OrderGroupRepository(db).get(group_id))
+
+
+@router.post("/bulk-delete", response_model=BulkDeleteResponse)
+def bulk_delete_admin_orders(
+    payload: BulkDeleteRequest,
+    db: Session = Depends(get_session),
+    user: CurrentUser = Depends(require_admin),
+) -> BulkDeleteResponse:
+    try:
+        result = OrderService(db).bulk_delete_orders(
+            order_ids=payload.order_ids,
+            actor_user_id=user.id,
+        )
+        db.commit()
+    except SQLAlchemyError as exc:
+        db.rollback()
+        raise HTTPException(status_code=500, detail="bulk_delete_failed") from exc
+
+    return BulkDeleteResponse(
+        succeeded=result.succeeded,
+        failed=[
+            BulkDeleteFailureItem(order_id=failure.order_id, reason=failure.reason)
+            for failure in result.failed
+        ],
+    )
+
+
+@router.delete("/{order_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_admin_order(
+    order_id: str,
+    db: Session = Depends(get_session),
+    user: CurrentUser = Depends(require_admin),
+) -> Response:
+    try:
+        OrderService(db).delete_order(order_id=order_id, actor_user_id=user.id)
+        db.commit()
+    except LookupError as exc:
+        db.rollback()
+        raise HTTPException(status_code=404, detail="order_not_found") from exc
+    except SQLAlchemyError as exc:
+        db.rollback()
+        raise HTTPException(status_code=500, detail="order_delete_failed") from exc
+
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.get("/{order_id}", response_model=AdminOrderDetailRead)
