@@ -64,6 +64,7 @@ class TimelineEventType(StrEnum):
     PHOTO_REVOKED = "photo_revoked"
     CUSTOMER_LINK_SENT = "customer_link_sent"
     MEMO_ADDED = "memo_added"
+    ORDER_DELETED = "order_deleted"
 
 
 class AuditEventType(StrEnum):

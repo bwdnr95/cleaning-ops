@@ -60,6 +60,7 @@ class OrderService:
                 customer_name=payload.customer_name,
                 customer_phone=payload.customer_phone,
                 customer_address=payload.customer_address,
+                customer_address_detail=payload.customer_address_detail,
                 source_channel=payload.source_channel,
                 customer_visible_payment=payload.customer_visible_payment,
                 notes=None,
@@ -109,6 +110,7 @@ class OrderService:
             customer_name=payload.customer_name,
             customer_phone=normalize_phone(payload.customer_phone),
             customer_address=payload.customer_address,
+            customer_address_detail=payload.customer_address_detail,
             source_channel=payload.source_channel,
             customer_visible_payment=payload.customer_visible_payment,
             notes=payload.notes,
@@ -388,6 +390,7 @@ def to_admin_group_dto(group: OrderGroup, *, lines: list[Order] | None = None) -
         customer_name=group.customer_name,
         customer_phone=group.customer_phone,
         customer_address=group.customer_address,
+        customer_address_detail=group.customer_address_detail,
         source_channel=group.source_channel,
         customer_visible_payment=group.customer_visible_payment,
         notes=group.notes,
@@ -406,6 +409,7 @@ def to_admin_order_dto(
     customer_name = group.customer_name if group else order.customer_name
     customer_phone = group.customer_phone if group else order.customer_phone
     customer_address = group.customer_address if group else order.customer_address
+    customer_address_detail = group.customer_address_detail if group else None
     source_channel = group.source_channel if group else order.source_channel
     customer_visible_payment = (
         group.customer_visible_payment if group else bool(order.customer_visible_payment)
@@ -431,6 +435,7 @@ def to_admin_order_dto(
         customer_name=customer_name or "",
         customer_phone=customer_phone or "",
         customer_address=customer_address or "",
+        customer_address_detail=customer_address_detail,
         total_amount=order.total_amount,
         deposit_amount=order.deposit_amount,
         balance_amount=order.balance_amount,
@@ -482,7 +487,16 @@ def to_admin_photo_dto(photo: OrderPhoto) -> PhotoRead:
     )
 
 
-def to_partner_job_dto(order: Order, *, photos: list[OrderPhoto] | None = None) -> PartnerJobRead:
+def to_partner_job_dto(
+    order: Order,
+    *,
+    group: OrderGroup | None = None,
+    photos: list[OrderPhoto] | None = None,
+) -> PartnerJobRead:
+    customer_name = group.customer_name if group else order.customer_name
+    customer_phone = group.customer_phone if group else order.customer_phone
+    customer_address = group.customer_address if group else order.customer_address
+    customer_address_detail = group.customer_address_detail if group else None
     return PartnerJobRead(
         id=order.id,
         status=order.status,
@@ -492,9 +506,10 @@ def to_partner_job_dto(order: Order, *, photos: list[OrderPhoto] | None = None) 
         size_or_quantity=order.size_or_quantity,
         service_detail=order.service_detail,
         special_request=order.special_request,
-        customer_name=order.customer_name,
-        customer_phone=order.customer_phone,
-        customer_address=order.customer_address,
+        customer_name=customer_name or "",
+        customer_phone=customer_phone or "",
+        customer_address=customer_address or "",
+        customer_address_detail=customer_address_detail,
         photos=[to_partner_photo_dto(photo) for photo in photos or []],
     )
 
@@ -522,6 +537,7 @@ def to_customer_group_dto(
         customer_name=group.customer_name,
         customer_phone=group.customer_phone,
         customer_address=group.customer_address,
+        customer_address_detail=group.customer_address_detail,
         customer_visible_payment=group.customer_visible_payment,
         lines=[
             _to_customer_line_dto(
@@ -564,6 +580,7 @@ def to_customer_order_dto(order: Order, *, photos: list[OrderPhoto] | None = Non
         customer_name=order.customer_name or "",
         customer_phone=order.customer_phone or "",
         customer_address=order.customer_address or "",
+        customer_address_detail=None,
         customer_visible_payment=payment_visible,
         lines=[_to_customer_line_dto(order, photos or [], payment_visible=payment_visible)],
     )

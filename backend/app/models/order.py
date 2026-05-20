@@ -1,6 +1,6 @@
-from datetime import date
+from datetime import date, datetime
 
-from sqlalchemy import Boolean, Date, ForeignKey, Numeric, String, Text
+from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Numeric, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.domain.constants import OrderStatus
@@ -42,3 +42,8 @@ class Order(TimestampMixin, Base):
     # R7 deprecated: see OrderGroup. Drop in R7.5.
     customer_token: Mapped[str | None] = mapped_column(String(80), index=True, nullable=True)
     customer_visible_payment: Mapped[bool | None] = mapped_column(Boolean, default=False, nullable=True)
+    deleted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        index=True,
+    )

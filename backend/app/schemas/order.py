@@ -12,6 +12,7 @@ class OrderGroupBase(ApiModel):
     customer_name: str
     customer_phone: str
     customer_address: str
+    customer_address_detail: str | None = None
     source_channel: str | None = None
     customer_visible_payment: bool = False
     notes: str | None = None
@@ -25,6 +26,7 @@ class OrderGroupUpdate(ApiModel):
     customer_name: str | None = None
     customer_phone: str | None = None
     customer_address: str | None = None
+    customer_address_detail: str | None = None
     source_channel: str | None = None
     customer_visible_payment: bool | None = None
     notes: str | None = None
@@ -67,6 +69,7 @@ class OrderCreate(OrderLineBase):
     customer_name: str
     customer_phone: str
     customer_address: str
+    customer_address_detail: str | None = None
     source_channel: str | None = None
     customer_visible_payment: bool = False
 
@@ -102,6 +105,7 @@ class AdminOrderRead(OrderLineBase):
     customer_name: str
     customer_phone: str
     customer_address: str
+    customer_address_detail: str | None = None
     source_channel: str | None = None
     customer_visible_payment: bool = False
     group_notes: str | None = None
@@ -145,6 +149,7 @@ class AdminCalendarOrderRead(ApiModel):
     size_or_quantity: str | None = None
     customer_name: str
     customer_address: str
+    customer_address_detail: str | None = None
 
 
 class PartnerJobRead(ApiModel):
@@ -159,6 +164,7 @@ class PartnerJobRead(ApiModel):
     customer_name: str
     customer_phone: str
     customer_address: str
+    customer_address_detail: str | None = None
     photos: list[PartnerPhotoRead] = Field(default_factory=list)
 
 
@@ -190,6 +196,7 @@ class CustomerOrderGroupRead(ApiModel):
     customer_name: str
     customer_phone: str
     customer_address: str
+    customer_address_detail: str | None = None
     customer_visible_payment: bool = False
     lines: list[CustomerOrderLineRead] = Field(default_factory=list)
 

@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.api.deps import CurrentUser, ensure_partner_scope, get_session, require_partner
 from app.domain.constants import PhotoType
+from app.repositories.order_groups import OrderGroupRepository
 from app.repositories.orders import OrderRepository
 from app.repositories.photos import PhotoRepository
 from app.schemas.order import PartnerJobRead
@@ -22,8 +23,13 @@ def list_my_jobs(
 ) -> list[PartnerJobRead]:
     partner_id = ensure_partner_scope(user)
     photo_repo = PhotoRepository(db)
+    group_repo = OrderGroupRepository(db)
     return [
-        to_partner_job_dto(order, photos=photo_repo.list_for_order(order.id))
+        to_partner_job_dto(
+            order,
+            group=group_repo.get(order.group_id),
+            photos=photo_repo.list_for_order(order.id),
+        )
         for order in OrderRepository(db).list_for_partner(partner_id)
     ]
 
@@ -40,7 +46,8 @@ def get_my_job(
     except ValueError as exc:
         raise HTTPException(status_code=404, detail="order_not_found") from exc
     photos = PhotoRepository(db).list_for_order(order.id)
-    return to_partner_job_dto(order, photos=photos)
+    group = OrderGroupRepository(db).get(order.group_id)
+    return to_partner_job_dto(order, group=group, photos=photos)
 
 
 @router.post("/{order_id}/start", response_model=PartnerJobRead)
@@ -61,7 +68,8 @@ def start_my_job(
             raise HTTPException(status_code=409, detail="invalid_status_transition") from exc
         raise HTTPException(status_code=404, detail="order_not_found") from exc
     photos = PhotoRepository(db).list_for_order(order.id)
-    return to_partner_job_dto(order, photos=photos)
+    group = OrderGroupRepository(db).get(order.group_id)
+    return to_partner_job_dto(order, group=group, photos=photos)
 
 
 @router.post("/{order_id}/complete", response_model=PartnerJobRead)
@@ -84,7 +92,8 @@ def complete_my_job(
             raise HTTPException(status_code=422, detail="photo_required_for_completion") from exc
         raise HTTPException(status_code=404, detail="order_not_found") from exc
     photos = PhotoRepository(db).list_for_order(order.id)
-    return to_partner_job_dto(order, photos=photos)
+    group = OrderGroupRepository(db).get(order.group_id)
+    return to_partner_job_dto(order, group=group, photos=photos)
 
 
 @router.post("/{order_id}/photos", response_model=PartnerPhotoRead)
