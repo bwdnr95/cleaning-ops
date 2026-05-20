@@ -54,6 +54,7 @@ export async function apiRequest(path, requestOptions = undefined) {
     try {
       session = await refreshWithRotation(authHandlers.getRefreshToken() ?? '');
     } catch (error) {
+      console.warn('[auth] refresh_failed - session will be cleared', error);
       authHandlers.onUnauthorized();
       throw error;
     }
@@ -61,6 +62,7 @@ export async function apiRequest(path, requestOptions = undefined) {
     authHandlers.onRefresh(session);
     const retryResponse = await request(path, options);
     if (retryResponse.status === 401) {
+      console.warn('[auth] retry_still_unauthorized - clearing session');
       authHandlers.onUnauthorized();
     }
     return parseResponse(retryResponse);

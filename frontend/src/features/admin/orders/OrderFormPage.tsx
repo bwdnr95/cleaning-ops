@@ -15,6 +15,7 @@ import { Icon } from '../../../components/common/ui';
 import { ORDER_STATUSES } from '../../../domain/orderStatus';
 import { PARTNER_PAYMENT_STATUSES, PAYMENT_STATUSES } from '../../../domain/paymentStatus';
 import { getAppTodayValue } from '../../../domain/time';
+import { useOrderFormDraft } from './useOrderFormDraft';
 
 export function OrderFormPage({ mode = 'create', orderId = null, onCancel, onSaved }) {
   const partners = useApiResource(listPartners);
@@ -23,6 +24,7 @@ export function OrderFormPage({ mode = 'create', orderId = null, onCancel, onSav
   const [isLoadingOrder, setIsLoadingOrder] = React.useState(mode === 'edit');
   const [isSaving, setIsSaving] = React.useState(false);
   const [error, setError] = React.useState(null);
+  const draft = useOrderFormDraft(form, { enabled: mode === 'create' });
   const activeServiceCategories = React.useMemo(
     () => (serviceCatalog.data || []).filter((category) => category.is_active),
     [serviceCatalog.data],
@@ -61,6 +63,25 @@ export function OrderFormPage({ mode = 'create', orderId = null, onCancel, onSav
       isCurrent = false;
     };
   }, [mode, orderId]);
+
+  React.useEffect(() => {
+    if (mode !== 'create') return;
+    const restored = draft.loadDraft();
+    if (!restored) return;
+    if (form.customer_name === '' && form.customer_phone === '' && form.lines.every((line) => !line.scheduled_date)) {
+      if (window.confirm('이전 작성 중이던 신규 주문 임시 저장 데이터가 있습니다. 불러올까요?')) {
+        setForm(restored);
+      } else {
+        draft.clearDraft();
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode]);
+
+  const handleCancel = React.useCallback(() => {
+    draft.clearDraft();
+    onCancel?.();
+  }, [draft, onCancel]);
 
   const setGroupField = (key, value) => {
     setForm((current) => ({ ...current, [key]: value }));
@@ -167,9 +188,11 @@ export function OrderFormPage({ mode = 'create', orderId = null, onCancel, onSav
       if (mode === 'edit' && orderId) {
         await updateAdminOrderGroup(form.group_id, toGroupMetadataPayload(form));
         const saved = await updateAdminOrder(orderId, toLinePayload(form.lines[0]));
+        draft.clearDraft();
         onSaved?.(saved);
       } else {
         const savedGroup = await createOrderGroup(toGroupCreatePayload(form));
+        draft.clearDraft();
         onSaved?.(savedGroup.lines?.[0] || savedGroup);
       }
     } catch (requestError) {
@@ -180,7 +203,7 @@ export function OrderFormPage({ mode = 'create', orderId = null, onCancel, onSav
   };
 
   if (isLoadingOrder) {
-    return <FormState text="주문 입력 정보를 불러오는 중입니다." onCancel={onCancel} />;
+    return <FormState text="주문 입력 정보를 불러오는 중입니다." onCancel={handleCancel} />;
   }
 
   return (
@@ -193,7 +216,7 @@ export function OrderFormPage({ mode = 'create', orderId = null, onCancel, onSav
         alignItems: 'center',
         gap: 10,
       }}>
-        <button type="button" className="btn btn--ghost btn--sm" onClick={onCancel}>
+        <button type="button" className="btn btn--ghost btn--sm" onClick={handleCancel}>
           <Icon name="chevronLeft" size={13}/> 취소
         </button>
         <span style={{ width: 1, height: 16, background: 'var(--border)' }}/>

@@ -42,6 +42,11 @@ export function AuthProvider({ children }) {
   }, []);
 
   const clearAuth = React.useCallback((role = undefined) => {
+    try {
+      localStorage.removeItem('cleaning_ops_draft_order_form_v1');
+    } catch {
+      // ignore
+    }
     setState((current) => {
       const targetRole = ROLES.includes(role) ? role : current.activeRole;
       const nextState = {
