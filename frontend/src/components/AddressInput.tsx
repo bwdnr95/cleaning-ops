@@ -40,12 +40,12 @@ export function AddressInput({
 
       <div style={{ display: 'flex', gap: 6 }}>
         <input
-          data-testid={`${testIdPrefix}-base`}
+          data-testid={testIdPrefix}
           className="input"
           style={{ flex: 1 }}
           value={baseAddress}
           placeholder="검색 버튼을 눌러 우편번호 / 도로명을 선택하세요"
-          readOnly
+          onChange={(event) => onChange({ baseAddress: event.target.value, detailAddress })}
         />
         <button
           type="button"
