@@ -15,7 +15,7 @@ class Settings(BaseSettings):
     cors_origins: list[str] = ["http://localhost:5173"]
     secret_key: str = "change-me-in-production"
     jwt_algorithm: str = "HS256"
-    access_token_ttl_minutes: int = 15
+    access_token_ttl_minutes: int = 60
     admin_refresh_token_ttl_days: int = 3
     partner_refresh_token_ttl_days: int = 7
     login_max_attempts: int = 10
