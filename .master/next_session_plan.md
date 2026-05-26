@@ -5,6 +5,10 @@
 
 최신 업데이트:
 
+- `R13 Operational Reporting` 완료
+  - 매출/협력사/서비스/정산 4 보고서 + CSV/xlsx export
+  - xlsx 일괄 주문 등록 (group_key 묶음) + 행별 부분 성공
+  - Python aggregation (DB dialect 무관)
 - `R6 Photo Auto Publish + Revoke` 완료 후 race-condition hotfix까지 반영됐다.
 - `R7 Multi-line Orders` 완료.
 - `R8 Ops UX Hardening` 완료.
