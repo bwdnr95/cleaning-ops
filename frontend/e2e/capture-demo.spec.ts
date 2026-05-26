@@ -6,7 +6,7 @@
  *
  * Outputs to: ../.master/cleanjob_demo_handoff/images/
  */
-import { expect, test, type Page, type Locator } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
 import * as path from 'path';
 import * as fs from 'fs';
 
@@ -43,9 +43,6 @@ test('capture all demo screens', async ({ page }) => {
     `;
     document.documentElement.appendChild(style);
   });
-
-  await page.goto('/');
-  await expect(page.getByTestId('app-mode-admin')).toBeVisible();
 
   // ───────────────────────── ADMIN ─────────────────────────
   await loginAsAdmin(page);
@@ -100,7 +97,7 @@ test('capture all demo screens', async ({ page }) => {
   await captureFrame(page, 'desktop', '11-admin-messages.png');
 
   // ───────────────────────── PARTNER ─────────────────────────
-  await page.getByTestId('app-mode-partner').click();
+  await page.goto('/partner');
   await expect(page.getByTestId('partner-login-form')).toBeVisible();
   await page.getByTestId('partner-login-identifier').fill(PARTNER_PHONE);
   await page.getByTestId('partner-login-password').fill(PARTNER_PASSWORD);
@@ -118,7 +115,7 @@ test('capture all demo screens', async ({ page }) => {
   await captureFrame(page, 'phone', '06-partner-job-detail.png');
 
   // ───────────────────────── CUSTOMER ─────────────────────────
-  await page.getByTestId('app-mode-customer').click();
+  await page.goto(`/c/${SEED_CUSTOMER_TOKEN}`);
   await expect(page.getByTestId('customer-verify-form')).toBeVisible();
   await page.waitForTimeout(300);
 
@@ -142,7 +139,7 @@ test('capture all demo screens', async ({ page }) => {
 });
 
 async function loginAsAdmin(page: Page) {
-  await page.getByTestId('app-mode-admin').click();
+  await page.goto('/');
   if (await page.getByTestId('admin-login-form').isVisible().catch(() => false)) {
     await page.getByTestId('admin-login-identifier').fill(ADMIN_EMAIL);
     await page.getByTestId('admin-login-password').fill(ADMIN_PASSWORD);
@@ -152,9 +149,9 @@ async function loginAsAdmin(page: Page) {
 }
 
 async function captureFrame(page: Page, kind: 'desktop' | 'phone', filename: string) {
-  const selector = kind === 'desktop' ? '.desktop-frame' : '.phone-frame';
-  const frame: Locator = page.locator(selector).first();
-  await expect(frame).toBeVisible();
-  await frame.screenshot({ path: path.join(OUT_DIR, filename) });
+  await page.setViewportSize(kind === 'desktop' ? { width: 1600, height: 1000 } : { width: 390, height: 844 });
+  const main = page.locator('main').first();
+  await expect(main).toBeVisible();
+  await main.screenshot({ path: path.join(OUT_DIR, filename) });
   console.log(`  · ${filename}`);
 }

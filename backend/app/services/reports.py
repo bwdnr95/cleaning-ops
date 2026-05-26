@@ -103,14 +103,17 @@ class ReportService:
             if partner is None:
                 continue
             total_amounts = [Decimal(str(order.total_amount or 0)) for order in orders]
-            pending_count = sum(
-                1
+            pending_orders = [
+                order
                 for order in orders
-                if order.partner_payment_status is None
-                or order.partner_payment_status in PARTNER_SETTLEMENT_PENDING_STATUSES
-            )
+                if order.status == OrderStatus.COMPLETED
+                and (
+                    order.partner_payment_status is None
+                    or order.partner_payment_status in PARTNER_SETTLEMENT_PENDING_STATUSES
+                )
+            ]
             expected_settlement = sum(
-                (Decimal(str(order.partner_payment_amount or 0)) for order in orders),
+                (Decimal(str(order.partner_payment_amount or 0)) for order in pending_orders),
                 Decimal("0"),
             )
             rows.append(
@@ -123,7 +126,7 @@ class ReportService:
                         if total_amounts
                         else Decimal("0")
                     ),
-                    pending_settlement_count=pending_count,
+                    pending_settlement_count=len(pending_orders),
                     expected_settlement_amount=expected_settlement,
                 )
             )

@@ -27,7 +27,6 @@ type CreatedOrderGroup = {
 
 export async function adminLogin(page: Page) {
   await page.goto('/');
-  await page.getByTestId('app-mode-admin').click();
   await page.getByTestId('admin-login-identifier').fill(ADMIN_EMAIL);
   await page.getByTestId('admin-login-password').fill(ADMIN_PASSWORD);
   await page.getByTestId('admin-login-submit').click();
@@ -36,8 +35,7 @@ export async function adminLogin(page: Page) {
 }
 
 export async function partnerLogin(page: Page) {
-  await page.goto('/');
-  await page.getByTestId('app-mode-partner').click();
+  await page.goto('/partner');
   await page.getByTestId('partner-login-identifier').fill(PARTNER_PHONE);
   await page.getByTestId('partner-login-password').fill(PARTNER_PASSWORD);
   await page.getByTestId('partner-login-submit').click();

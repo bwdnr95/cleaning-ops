@@ -55,7 +55,6 @@ test('partner uploads job photos and customer sees auto-published photos except 
   await expect(partnerPage.getByTestId('partner-complete-job')).toHaveCount(0);
 
   await partnerPage.reload();
-  await partnerPage.getByTestId('app-mode-partner').click();
   await expect(partnerPage.getByTestId('partner-jobs-page')).toBeVisible();
   await partnerPage.getByTestId(`partner-job-row-${flow.orderId}`).click();
   await expect(partnerPage.getByRole('img', { name: 'before-partner-r2.png' })).toBeVisible();
@@ -127,8 +126,7 @@ test('partner uploads job photos and customer sees auto-published photos except 
 });
 
 async function loginAsPartner(page) {
-  await page.goto('/');
-  await page.getByTestId('app-mode-partner').click();
+  await page.goto('/partner');
   await page.getByTestId('partner-login-identifier').fill(PARTNER_PHONE);
   await page.getByTestId('partner-login-password').fill(PARTNER_PASSWORD);
   await page.getByTestId('partner-login-submit').click();

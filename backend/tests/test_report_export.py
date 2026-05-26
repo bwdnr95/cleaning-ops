@@ -53,6 +53,21 @@ def test_export_unsupported_format_returns_400(client, seed_admin_token):
     assert res.status_code in {400, 422}
 
 
+def test_revenue_export_invalid_range_returns_400(client, seed_admin_token):
+    res = client.get(
+        "/api/admin/reports/revenue/export",
+        params={
+            "granularity": "month",
+            "start_date": "2026-12-31",
+            "end_date": "2026-01-01",
+            "format": "csv",
+        },
+        headers={"Authorization": f"Bearer {seed_admin_token}"},
+    )
+    assert res.status_code == 400
+    assert res.json()["detail"] == "invalid_range"
+
+
 def test_export_requires_admin(client):
     res = client.get(
         "/api/admin/reports/revenue/export",

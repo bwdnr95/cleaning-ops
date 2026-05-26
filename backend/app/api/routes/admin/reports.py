@@ -51,13 +51,16 @@ def revenue_export(
     db: Session = Depends(get_session),
     _: CurrentUser = Depends(require_admin),
 ) -> Response:
-    report = ReportService(db).revenue(
-        granularity=granularity,
-        start_date=start_date,
-        end_date=end_date,
-        partner_id=partner_id,
-        service_item_id=service_item_id,
-    )
+    try:
+        report = ReportService(db).revenue(
+            granularity=granularity,
+            start_date=start_date,
+            end_date=end_date,
+            partner_id=partner_id,
+            service_item_id=service_item_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     rows = [[bucket.period, bucket.completed_count, bucket.revenue] for bucket in report.buckets]
     return _export_response(
         "revenue",

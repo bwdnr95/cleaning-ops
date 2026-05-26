@@ -143,6 +143,35 @@ def test_partner_performance_excludes_cancelled(db_session, seed_order_assigned_
         assert rows_for_partner[0].job_count == 0
 
 
+def test_partner_performance_settlement_pending_only_counts_completed_orders(
+    db_session,
+    seed_order_assigned_to_partner,
+    make_extra_line,
+):
+    completed_order = seed_order_assigned_to_partner
+    completed_order.status = OrderStatus.COMPLETED
+    completed_order.scheduled_date = date(2031, 5, 15)
+    completed_order.partner_payment_status = PartnerPaymentStatus.UNPAID
+    completed_order.partner_payment_amount = Decimal("120000")
+
+    not_completed_order = make_extra_line(completed_order.group_id)
+    not_completed_order.partner_id = completed_order.partner_id
+    not_completed_order.status = OrderStatus.NEW
+    not_completed_order.scheduled_date = date(2031, 5, 16)
+    not_completed_order.partner_payment_status = None
+    not_completed_order.partner_payment_amount = Decimal("990000")
+    db_session.flush()
+
+    report = ReportService(db_session).partners(
+        start_date=date(2031, 1, 1),
+        end_date=date(2031, 12, 31),
+    )
+    row = next(item for item in report.rows if item.partner_id == completed_order.partner_id)
+    assert row.job_count == 2
+    assert row.pending_settlement_count == 1
+    assert row.expected_settlement_amount == Decimal("120000")
+
+
 def test_services_includes_null_service_item_id_fallback(db_session, seed_order):
     seed_order.status = OrderStatus.COMPLETED
     seed_order.scheduled_date = date(2026, 5, 15)

@@ -61,7 +61,7 @@ def import_orders_from_xlsx(
         ws = wb.active
         rows_iter = ws.iter_rows(values_only=True)
         headers = list(next(rows_iter, []) or [])
-        header_to_idx = {str(header): idx for idx, header in enumerate(headers) if header is not None}
+        header_to_idx = {str(header).strip(): idx for idx, header in enumerate(headers) if header is not None}
         missing = [header for header in REQUIRED_HEADERS if header not in header_to_idx]
         if missing:
             return OrderImportResult(
@@ -176,7 +176,6 @@ def import_orders_from_xlsx(
                     )
                 )
 
-    db.commit()
     failed.sort(key=lambda failure: failure.row_index)
     return OrderImportResult(
         succeeded_groups=succeeded_groups,

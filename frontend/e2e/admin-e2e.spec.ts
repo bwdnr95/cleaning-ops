@@ -40,21 +40,21 @@ test('admin can log in, navigate operational pages, and open order creation from
   await expect(page.getByTestId('admin-order-form')).toBeVisible();
 });
 
-test('admin and partner sessions stay active across app mode tabs', async ({ page }) => {
+test('admin and partner sessions stay active across role routes', async ({ page }) => {
   await loginAsAdmin(page);
 
-  await page.getByTestId('app-mode-partner').click();
+  await page.goto('/partner');
   await expect(page.getByTestId('partner-login-form')).toBeVisible();
   await page.getByTestId('partner-login-identifier').fill(PARTNER_PHONE);
   await page.getByTestId('partner-login-password').fill(PARTNER_PASSWORD);
   await page.getByTestId('partner-login-submit').click();
   await expect(page.getByTestId('partner-jobs-page')).toBeVisible();
 
-  await page.getByTestId('app-mode-admin').click();
+  await page.goto('/');
   await expect(page.getByTestId('admin-dashboard-page')).toBeVisible();
   await expect(page.getByTestId('admin-login-form')).toHaveCount(0);
 
-  await page.getByTestId('app-mode-partner').click();
+  await page.goto('/partner');
   await expect(page.getByTestId('partner-jobs-page')).toBeVisible();
   await expect(page.getByTestId('partner-login-form')).toHaveCount(0);
 });

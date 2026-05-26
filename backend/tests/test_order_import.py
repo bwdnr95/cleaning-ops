@@ -4,20 +4,25 @@ from openpyxl import Workbook
 
 
 def _make_xlsx(rows: list[list]) -> bytes:
+    return _make_xlsx_with_headers(
+        [
+            "group_key",
+            "customer_name",
+            "customer_phone",
+            "customer_address",
+            "scheduled_date",
+            "service_name",
+            "total_amount",
+        ],
+        rows,
+    )
+
+
+def _make_xlsx_with_headers(headers: list[str], rows: list[list]) -> bytes:
     wb = Workbook()
     try:
         ws = wb.active
-        ws.append(
-            [
-                "group_key",
-                "customer_name",
-                "customer_phone",
-                "customer_address",
-                "scheduled_date",
-                "service_name",
-                "total_amount",
-            ]
-        )
+        ws.append(headers)
         for row in rows:
             ws.append(row)
         buffer = io.BytesIO()
@@ -161,6 +166,36 @@ def test_order_import_rejects_invalid_file_type(client, seed_admin_token):
         headers={"Authorization": f"Bearer {seed_admin_token}"},
     )
     assert res.status_code in {400, 415}
+
+
+def test_order_import_trims_header_names(client, seed_admin_token):
+    data = _make_xlsx_with_headers(
+        [
+            "group_key ",
+            " customer_name",
+            "customer_phone",
+            "customer_address",
+            "scheduled_date",
+            "service_name",
+            "total_amount",
+        ],
+        [["G1", "Customer A", "010-1111-2222", "Gangnam", "2026-06-01", "Aircon", 100000]],
+    )
+    res = client.post(
+        "/api/admin/orders/import",
+        files={
+            "file": (
+                "orders.xlsx",
+                data,
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            )
+        },
+        headers={"Authorization": f"Bearer {seed_admin_token}"},
+    )
+    body = res.json()
+    assert res.status_code == 200
+    assert body["succeeded_groups"] == 1
+    assert body["failed"] == []
 
 
 def test_order_import_requires_admin(client, seed_partner_token):
