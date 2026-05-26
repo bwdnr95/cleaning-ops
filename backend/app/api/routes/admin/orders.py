@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi import APIRouter, Depends, File, HTTPException, Response, UploadFile, status
 from pydantic import BaseModel
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
@@ -20,6 +20,8 @@ from app.schemas.order import (
     OrderLineCreate,
     OrderUpdate,
 )
+from app.schemas.report import OrderImportResult
+from app.services.order_import import import_orders_from_xlsx, is_xlsx_upload
 from app.services.orders import (
     OrderService,
     to_admin_group_dto,
@@ -146,6 +148,27 @@ def bulk_delete_admin_orders(
             for failure in result.failed
         ],
     )
+
+
+@router.post("/import", response_model=OrderImportResult)
+async def import_orders(
+    file: UploadFile = File(...),
+    db: Session = Depends(get_session),
+    user: CurrentUser = Depends(require_admin),
+) -> OrderImportResult:
+    data = await file.read()
+    if not is_xlsx_upload(file.filename, file.content_type):
+        raise HTTPException(status_code=400, detail=f"unsupported_content_type:{file.content_type}")
+    try:
+        return import_orders_from_xlsx(
+            file_bytes=data,
+            filename=file.filename,
+            content_type=file.content_type,
+            db=db,
+            actor_user_id=user.id,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.delete("/{order_id}", status_code=status.HTTP_204_NO_CONTENT)
