@@ -71,6 +71,55 @@ export async function apiRequest(path, requestOptions = undefined) {
   return parseResponse(response);
 }
 
+export async function downloadBlob(path: string, suggestedFilename: string): Promise<void> {
+  const response = await fetchBlobWithRefresh(path);
+  const blob = await response.blob();
+  const url = URL.createObjectURL(blob);
+  try {
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = suggestedFilename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
+async function fetchBlobWithRefresh(path: string): Promise<Response> {
+  let response = await blobRequest(path);
+  if (response.status === 401 && authHandlers?.getRefreshToken()) {
+    try {
+      const session = await refreshWithRotation(authHandlers.getRefreshToken() ?? '');
+      authHandlers.onRefresh(session);
+      response = await blobRequest(path);
+      if (response.status === 401) {
+        authHandlers.onUnauthorized();
+        throw await toApiError(response);
+      }
+    } catch (error) {
+      authHandlers?.onUnauthorized();
+      throw error;
+    }
+  }
+
+  if (!response.ok) {
+    throw await toApiError(response);
+  }
+  return response;
+}
+
+async function blobRequest(path: string): Promise<Response> {
+  const headers = new Headers();
+  headers.set('X-Request-ID', createRequestId());
+  const accessToken = authHandlers?.getAccessToken();
+  if (accessToken) {
+    headers.set('Authorization', `Bearer ${accessToken}`);
+  }
+  return fetch(toApiUrl(path), { headers, credentials: 'include' });
+}
+
 async function request(path, options) {
   const headers = new Headers(options.headers);
   const requestId = createRequestId();
