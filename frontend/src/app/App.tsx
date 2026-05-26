@@ -1,6 +1,5 @@
 import React from 'react';
 
-import { DesktopFrame, PhoneFrame } from '../components/frames/DeviceFrames';
 import { AdminShell, Topbar } from '../components/layout/AdminShell';
 import { getDashboardSummary } from '../api/admin';
 import { useApiResource } from '../api/useApiResource';
@@ -67,14 +66,13 @@ const DEFAULT_ORDERS_VIEW = { tab: 'all', datePreset: 'all' };
 export function App() {
   const auth = useAuth();
   const isStandaloneCustomerLink = isCustomerLinkRoute();
-  const [mode, setMode] = React.useState(() => auth.activeRole || 'admin');
-  const [theme, setTheme] = React.useState('light');
+  const isStandalonePartnerLink = isPartnerLinkRoute();
+  const mode = isStandalonePartnerLink ? 'partner' : 'admin';
   const [detailOrderId, setDetailOrderId] = React.useState(null);
   const [orderForm, setOrderForm] = React.useState(null);
   const [ordersView, setOrdersView] = React.useState(DEFAULT_ORDERS_VIEW);
   const adminSession = auth.getSession('admin');
   const partnerSession = auth.getSession('partner');
-  const activeModeSession = ['admin', 'partner'].includes(mode) ? auth.getSession(mode) : null;
   const adminSummaryLoader = React.useCallback(() => {
     if (mode !== 'admin' || adminSession.user?.role !== 'admin') {
       return Promise.resolve(null);
@@ -85,69 +83,23 @@ export function App() {
   const navBadges = toAdminNavBadges(adminSummary.data);
 
   React.useEffect(() => {
-    document.documentElement.dataset.theme = theme;
-  }, [theme]);
-
-  const handleModeChange = (nextMode) => {
-    setMode(nextMode);
-    if (nextMode === 'admin' || nextMode === 'partner') {
-      auth.setActiveRole(nextMode);
+    if (auth.activeRole !== mode) {
+      auth.setActiveRole(mode);
     }
-  };
+  }, [auth, mode]);
 
   if (isStandaloneCustomerLink) {
     return (
-      <div style={{ minHeight: '100vh', height: '100vh', background: '#f7f6f3' }}>
+      <main style={{ minHeight: '100vh', height: '100vh', width: '100vw', background: '#f7f6f3' }}>
         <CustomerReservation />
-      </div>
+      </main>
     );
   }
 
   return (
-    <div className="app-root">
-      <div className="app-toolbar">
-        <div>
-          <div className="app-eyebrow">클린잡 · 운영 시스템</div>
-          <h1>운영 컨트롤 센터</h1>
-        </div>
-        <div className="app-toolbar-actions">
-          {activeModeSession?.user && (
-            <div className="app-session">
-              <span>{activeModeSession.user.name}</span>
-              <button className="app-tab" onClick={() => void auth.logout(mode)}>
-                로그아웃
-              </button>
-            </div>
-          )}
-          {[
-            ['admin', '관리자'],
-            ['partner', '협력사'],
-            ['customer', '고객'],
-          ].map(([key, label]) => (
-            <button
-              key={key}
-              data-testid={`app-mode-${key}`}
-              className={mode === key ? 'app-tab is-active' : 'app-tab'}
-              onClick={() => handleModeChange(key)}
-            >
-              {label}
-              {key !== 'customer' && auth.isRoleAuthenticated(key) && (
-                <span className="app-tab-status" aria-label={`${label} 로그인됨`} />
-              )}
-            </button>
-          ))}
-          <button
-            className="app-tab"
-            onClick={() => setTheme((current) => (current === 'light' ? 'dark' : 'light'))}
-          >
-            {theme === 'light' ? '다크' : '라이트'}
-          </button>
-        </div>
-      </div>
-
-      <main className="app-preview">
+    <main style={{ height: '100vh', width: '100vw', overflow: 'hidden', background: 'var(--bg)' }}>
         {mode === 'admin' && (
-          <DesktopFrame>
+          <>
             {adminSession.user?.role === 'admin' ? (
               <AdminShell
                 initialPage="dashboard"
@@ -263,22 +215,13 @@ export function App() {
             ) : (
               <AdminLoginPage />
             )}
-          </DesktopFrame>
+          </>
         )}
 
         {mode === 'partner' && (
-          <PhoneFrame>
-            {partnerSession.user?.role === 'partner' ? <PartnerJobDetail /> : <PartnerLoginPage />}
-          </PhoneFrame>
+          <>{partnerSession.user?.role === 'partner' ? <PartnerJobDetail /> : <PartnerLoginPage />}</>
         )}
-
-        {mode === 'customer' && (
-          <PhoneFrame time="9:14">
-            <CustomerReservation />
-          </PhoneFrame>
-        )}
-      </main>
-    </div>
+    </main>
   );
 }
 
@@ -337,4 +280,8 @@ function toAdminNavBadges(summary) {
 
 function isCustomerLinkRoute() {
   return /^\/(?:c|customer)(?:\/|$)/.test(window.location.pathname);
+}
+
+function isPartnerLinkRoute() {
+  return /^\/partner(?:\/|$)/.test(window.location.pathname);
 }

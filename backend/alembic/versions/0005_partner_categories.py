@@ -26,7 +26,7 @@ def timestamp_columns() -> list[sa.Column]:
 def upgrade() -> None:
     op.create_table(
         "partner_categories",
-        sa.Column("id", sa.String(length=36), primary_key=True),
+        sa.Column("id", sa.String(length=80), primary_key=True),
         sa.Column("name", sa.String(length=120), nullable=False),
         sa.Column("description", sa.Text()),
         sa.Column("is_active", sa.Boolean(), nullable=False, server_default=sa.true()),
@@ -36,7 +36,7 @@ def upgrade() -> None:
     op.create_index("ix_partner_categories_name", "partner_categories", ["name"])
 
     with op.batch_alter_table("partners") as batch_op:
-        batch_op.add_column(sa.Column("partner_category_id", sa.String(length=36)))
+        batch_op.add_column(sa.Column("partner_category_id", sa.String(length=80)))
         batch_op.create_foreign_key(
             "fk_partners_partner_category_id_partner_categories",
             "partner_categories",
