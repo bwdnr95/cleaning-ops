@@ -9,6 +9,7 @@ import { useApiResource } from '../../../api/useApiResource';
 import { ORDER_STATUSES } from '../../../domain/orderStatus';
 import { isPaymentCheckNeeded } from '../../../domain/paymentStatus';
 import { formatPhone } from '../../../domain/phone';
+import { OrderImportDialog } from './OrderImportDialog';
 import {
   addDays,
   formatDateValue,
@@ -133,6 +134,7 @@ export function OrdersPage({ onOpenOrder, onCreateOrder, onEditOrder, initialTab
   const [bulkStatus, setBulkStatus] = React.useState('일정확정');
   const [bulkPartnerId, setBulkPartnerId] = React.useState('');
   const [bulkMessageType, setBulkMessageType] = React.useState('customer_schedule_confirmed');
+  const [isImportOpen, setImportOpen] = React.useState(false);
   const statusTabs = getStatusTabs(orders);
   const isDateFilterActive = dateFilter.start !== '' || dateFilter.end !== '';
   const isReceivedDateFilterActive = receivedDateFilter.start !== '' || receivedDateFilter.end !== '';
@@ -379,6 +381,13 @@ export function OrdersPage({ onOpenOrder, onCreateOrder, onEditOrder, initialTab
         <div style={{ display: 'flex', gap: 6 }}>
           <button className="btn btn--secondary btn--sm">
             <Icon name="fileText" size={12}/> 내보내기
+          </button>
+          <button
+            data-testid="admin-orders-import"
+            className="btn btn--secondary btn--sm"
+            onClick={() => setImportOpen(true)}
+          >
+            <Icon name="upload" size={12}/> 일괄 등록
           </button>
         </div>
       </div>
@@ -802,6 +811,14 @@ export function OrdersPage({ onOpenOrder, onCreateOrder, onEditOrder, initialTab
         onPageSizeChange={setPageSize}
         itemLabel={`건 표시 · ${formatDateFilterSummary(dateFilter)}`}
       />
+      {isImportOpen && (
+        <OrderImportDialog
+          onClose={() => setImportOpen(false)}
+          onImported={() => {
+            ordersResource.reload();
+          }}
+        />
+      )}
     </div>
   );
 }

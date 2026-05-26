@@ -23,6 +23,23 @@ export function listAdminOrders() {
   return apiRequest('/admin/orders');
 }
 
+export interface ImportFailure {
+  row_index: number;
+  reason: string;
+}
+
+export interface ImportResult {
+  succeeded_groups: number;
+  succeeded_lines: number;
+  failed: ImportFailure[];
+}
+
+export function importOrders(file: File): Promise<ImportResult> {
+  const form = new FormData();
+  form.append('file', file);
+  return apiRequest('/admin/orders/import', { method: 'POST', body: form });
+}
+
 export function createAdminOrder(input) {
   return apiRequest('/admin/orders', {
     method: 'POST',
