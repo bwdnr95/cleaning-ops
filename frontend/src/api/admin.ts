@@ -161,6 +161,25 @@ export function listServiceCatalog({ includeInactive = false } = {}) {
   return apiRequest(`/admin/services${query ? `?${query}` : ''}`);
 }
 
+export interface ServiceItemSummary {
+  id: string;
+  name: string;
+}
+
+interface ServiceCategoryWithItems {
+  id: string;
+  name: string;
+  items?: ServiceItemSummary[];
+}
+
+export function listServiceItems(): Promise<ServiceItemSummary[]> {
+  return (listServiceCatalog() as Promise<ServiceCategoryWithItems[]>).then((categories) =>
+    categories.flatMap((category) =>
+      (category.items ?? []).map((item) => ({ id: item.id, name: item.name })),
+    ),
+  );
+}
+
 export function createServiceCategory(input) {
   return apiRequest('/admin/services/categories', {
     method: 'POST',

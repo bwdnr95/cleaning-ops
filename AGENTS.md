@@ -113,6 +113,15 @@ DB write는 service/action 계층을 통해 수행하고, 그 안에서 권한 �
 - 협력사/고객 API는 삭제된 주문에 접근할 수 없다 (`deleted_at IS NULL` 가드 + 404 응답).
 - 복구 기능은 본 정책 범위 밖이다. DB에 직접 접근하여 `deleted_at`을 NULL로 되돌리는 운영 절차로만 처리한다.
 
+## Reporting / Export Rules
+
+- 모든 보고서 endpoint는 `require_admin` 가드와 `Order.deleted_at IS NULL` 필터를 강제한다.
+- **매출 정의는 `status IN (CUSTOMER_DELIVERY_DONE, COMPLETED)` 합계**다. `DashboardService.monthly_revenue`와 정확히 동일하게 유지한다. 화면마다 매출이 달라지면 운영자는 회사 매출을 믿을 수 없다.
+- 정산 대기는 `OrderStatus.COMPLETED` + `partner_payment_status`가 `PARTNER_SETTLEMENT_PENDING_STATUSES` 또는 NULL인 주문이다.
+- 집계는 SQLAlchemy의 `case`/`date_trunc` 같은 DB 방언 함수 대신 Python aggregation (`itertools.groupby` + `Decimal`)으로 구현한다. 운영 데이터량(수십~수백 건) 수준에서 성능 영향 없음 + dialect 무관.
+- Export는 화면의 현재 필터/기간을 query string으로 묶어 호출하고 backend가 content-disposition으로 다운로드시킨다. 파일명은 ASCII (`revenue.csv`).
+- 주문 import는 행별 validate + `group_key` 컬럼으로 묶어 OrderGroup 단위 commit. 한 group 안의 line 하나라도 실패하면 그 group 전체를 rollback한다.
+
 ## DTO Rules
 
 API 응답은 역할별 DTO를 분리한다.
