@@ -14,6 +14,7 @@ import { OrdersPage } from '../features/admin/orders/OrdersPage';
 import { PartnersPage } from '../features/admin/partners/PartnersPage';
 import { PhotoReviewPage } from '../features/admin/photo-review/PhotoReviewPage';
 import { ProductsPage } from '../features/admin/products/ProductsPage';
+import { ReportsPage } from '../features/admin/reports/ReportsPage';
 import { CustomerReservation } from '../features/customer/CustomerReservation';
 import { PartnerJobDetail } from '../features/partner/PartnerJobDetail';
 import { useAuth } from '../store/authStore';
@@ -53,6 +54,11 @@ const ADMIN_PAGE_META = {
     title: '협력사관리',
     subtitle: '계정 / 배정 현황',
     breadcrumb: ['운영', '협력사관리'],
+  },
+  reports: {
+    title: '보고서',
+    subtitle: '매출 / 협력사 / 서비스 / 정산',
+    breadcrumb: ['운영', '보고서'],
   },
 };
 
@@ -241,12 +247,13 @@ export function App() {
                       )}
                       {page === 'products' && <ProductsPage />}
                       {page === 'partners' && <PartnersPage />}
+                      {page === 'reports' && <ReportsPage />}
                       {page === 'sends' && (
                         <MessagesPage
                           onOpenOrder={(orderId) => setDetailOrderId(orderId)}
                         />
                       )}
-                      {!['dashboard', 'orders', 'calendar', 'photos', 'products', 'partners', 'sends'].includes(page) && (
+                      {!['dashboard', 'orders', 'calendar', 'photos', 'products', 'partners', 'reports', 'sends'].includes(page) && (
                         <ComingSoon page={page} />
                       )}
                     </>
