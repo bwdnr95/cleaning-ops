@@ -5,6 +5,7 @@ import {
   getAdminOrder,
   listPartners,
   listServiceCatalog,
+  sendOrderQuote,
   updateAdminOrder,
   updateAdminOrderGroup,
 } from '../../../api/admin';
@@ -23,7 +24,9 @@ export function OrderFormPage({ mode = 'create', orderId = null, onCancel, onSav
   const [form, setForm] = React.useState(() => createEmptyGroupForm());
   const [isLoadingOrder, setIsLoadingOrder] = React.useState(mode === 'edit');
   const [isSaving, setIsSaving] = React.useState(false);
+  const [isSendingQuote, setIsSendingQuote] = React.useState(false);
   const [error, setError] = React.useState(null);
+  const [notice, setNotice] = React.useState('');
   const draft = useOrderFormDraft(form, { enabled: mode === 'create' });
   const activeServiceCategories = React.useMemo(
     () => (serviceCatalog.data || []).filter((category) => category.is_active),
@@ -90,7 +93,11 @@ export function OrderFormPage({ mode = 'create', orderId = null, onCancel, onSav
   const setLineField = (lineIndex, key, value) => {
     setForm((current) => {
       const nextLines = current.lines.slice();
-      nextLines[lineIndex] = { ...nextLines[lineIndex], [key]: value };
+      let nextLine = { ...nextLines[lineIndex], [key]: value };
+      if (key === 'size_or_quantity') {
+        nextLine = recalculateLine(nextLine, { source: 'quantity' });
+      }
+      nextLines[lineIndex] = nextLine;
       return { ...current, lines: nextLines };
     });
   };
@@ -112,11 +119,10 @@ export function OrderFormPage({ mode = 'create', orderId = null, onCancel, onSav
     const formattedValue = formatMoneyInput(value);
     setForm((current) => {
       const nextLines = current.lines.slice();
-      const nextLine = { ...nextLines[lineIndex], [key]: formattedValue };
-
-      if (key === 'total_amount' || key === 'deposit_amount') {
-        nextLine.balance_amount = calculateBalanceAmount(nextLine.total_amount, nextLine.deposit_amount);
-      }
+      const previousLine = nextLines[lineIndex];
+      let nextLine = { ...previousLine, [key]: formattedValue };
+      nextLine = applyMoneyTouch(nextLine, key, formattedValue);
+      nextLine = recalculateLine(nextLine, { source: key, previousLine });
 
       nextLines[lineIndex] = nextLine;
       return { ...current, lines: nextLines };
@@ -128,7 +134,7 @@ export function OrderFormPage({ mode = 'create', orderId = null, onCancel, onSav
     setForm((current) => {
       const nextLines = current.lines.slice();
       nextLines[lineIndex] = {
-        ...nextLines[lineIndex],
+        ...recalculateLine(nextLines[lineIndex], { source: 'partner' }),
         partner_id: partnerId,
         team_name: partner?.name || '',
       };
@@ -143,6 +149,8 @@ export function OrderFormPage({ mode = 'create', orderId = null, onCancel, onSav
         ...nextLines[lineIndex],
         service_category_id: categoryId,
         service_item_id: '',
+        base_unit_price: '',
+        partner_unit_price: '',
       };
       return { ...current, lines: nextLines };
     });
@@ -155,32 +163,29 @@ export function OrderFormPage({ mode = 'create', orderId = null, onCancel, onSav
     setForm((current) => {
       const nextLines = current.lines.slice();
       const currentLine = nextLines[lineIndex];
-      const totalAmount = option && currentLine.total_amount === ''
-        ? formatMoneyInput(Math.round(Number(option.base_price || 0)))
-        : currentLine.total_amount;
-      const nextLine = {
+      const nextLine = recalculateLine({
         ...currentLine,
         service_item_id: serviceItemId,
         service_name: option?.name || currentLine.service_name,
-        total_amount: totalAmount,
-      };
-      nextLine.balance_amount = calculateBalanceAmount(nextLine.total_amount, nextLine.deposit_amount);
+        base_unit_price: option ? String(option.base_price || 0) : '',
+        partner_unit_price: option ? String(option.partner_base_price || 0) : '',
+      }, { source: 'service_item' });
       nextLines[lineIndex] = nextLine;
       return { ...current, lines: nextLines };
     });
   };
 
-  const handleSubmit = async (event) => {
-    event.preventDefault();
+  const saveForm = async () => {
     setError(null);
+    setNotice('');
 
     if (!form.customer_name.trim() || !form.customer_phone.trim() || !form.customer_address.trim()) {
       setError('고객명, 연락처, 주소는 필수입니다.');
-      return;
+      return null;
     }
     if (form.lines.some((line) => !line.service_name.trim())) {
       setError('모든 라인의 상품명은 필수입니다.');
-      return;
+      return null;
     }
 
     setIsSaving(true);
@@ -189,16 +194,54 @@ export function OrderFormPage({ mode = 'create', orderId = null, onCancel, onSav
         await updateAdminOrderGroup(form.group_id, toGroupMetadataPayload(form));
         const saved = await updateAdminOrder(orderId, toLinePayload(form.lines[0]));
         draft.clearDraft();
-        onSaved?.(saved);
+        return saved;
       } else {
         const savedGroup = await createOrderGroup(toGroupCreatePayload(form));
         draft.clearDraft();
-        onSaved?.(savedGroup.lines?.[0] || savedGroup);
+        return savedGroup.lines?.[0] || savedGroup;
       }
     } catch (requestError) {
       setError(requestError?.message || '주문을 저장하지 못했습니다.');
+      return null;
     } finally {
       setIsSaving(false);
+    }
+  };
+
+  const handleSubmit = async (event) => {
+    event.preventDefault();
+    const saved = await saveForm();
+    if (saved) {
+      onSaved?.(saved);
+    }
+  };
+
+  const hasPartnerPriceWarning = form.lines.some((line) => {
+    const total = parseMoneyInput(line.total_amount) || 0;
+    const partnerPrice = parseMoneyInput(line.partner_payment_amount) || 0;
+    return total > 0 && partnerPrice > total;
+  });
+
+  const handleQuoteSend = async () => {
+    if (hasPartnerPriceWarning) {
+      setError('도급가가 소비자가보다 큰 주문은 견적서를 발송할 수 없습니다.');
+      return;
+    }
+    setIsSendingQuote(true);
+    setError(null);
+    setNotice('');
+    try {
+      const saved = await saveForm();
+      if (!saved?.id) {
+        return;
+      }
+      await sendOrderQuote(saved.id, 'kakao');
+      setNotice('견적서 발송 요청을 보냈습니다. 도급가 변수는 알림톡 템플릿에 포함되지 않습니다.');
+      onSaved?.(saved);
+    } catch (requestError) {
+      setError(requestError?.message || '견적서 발송에 실패했습니다.');
+    } finally {
+      setIsSendingQuote(false);
     }
   };
 
@@ -224,13 +267,22 @@ export function OrderFormPage({ mode = 'create', orderId = null, onCancel, onSav
           {mode === 'edit' ? '주문 수정' : '신규 주문 등록'}
         </h2>
         <div style={{ flex: 1 }}/>
+        <button
+          type="button"
+          data-testid="order-send-quote"
+          className="btn btn--secondary btn--sm"
+          disabled={isSaving || isSendingQuote || hasPartnerPriceWarning}
+          onClick={() => void handleQuoteSend()}
+        >
+          <Icon name="send" size={13}/> {isSendingQuote ? '발송 중' : '견적서 발송 (카카오톡)'}
+        </button>
         <button type="submit" data-testid="order-save" className="btn btn--primary btn--sm" disabled={isSaving}>
           <Icon name="check" size={13}/> {isSaving ? '저장 중' : '저장'}
         </button>
       </div>
 
       <div className="scroll" style={{ flex: 1, overflow: 'auto', padding: 20 }}>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 300px', gap: 16, maxWidth: 1260, margin: '0 auto' }}>
+        <div className="page-shell" style={{ display: 'grid', gridTemplateColumns: '1fr 300px', gap: 16 }}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
             <Section title="고객 정보">
               <FieldGrid>
@@ -299,11 +351,22 @@ export function OrderFormPage({ mode = 'create', orderId = null, onCancel, onSav
                 {error}
               </div>
             )}
+            {notice && (
+              <div style={{ padding: 10, borderRadius: 6, background: 'var(--success-bg)', color: 'var(--success-fg)', fontSize: 12 }}>
+                {notice}
+              </div>
+            )}
+            {hasPartnerPriceWarning && (
+              <div style={{ padding: 10, borderRadius: 6, background: 'var(--warn-bg)', color: 'var(--warn-fg)', fontSize: 12 }}>
+                도급가가 소비자가보다 큰 라인이 있습니다. 저장은 가능하지만 정산 금액을 확인해주세요.
+              </div>
+            )}
 
             <div className="card" style={{ padding: 14 }}>
               <div style={{ fontSize: 11, color: 'var(--text-tertiary)', fontWeight: 600, letterSpacing: 0, marginBottom: 8 }}>저장 시 처리</div>
               <div style={{ fontSize: 12, lineHeight: 1.55, color: 'var(--text-secondary)' }}>
                 신규 주문 저장 시 고객 확인 링크가 생성됩니다. 상태와 협력사 변경은 타임라인에 함께 기록됩니다.
+                견적서 알림톡에는 소비자가와 계약금/잔금만 포함되고 도급가는 포함되지 않습니다.
               </div>
             </div>
           </aside>
@@ -384,7 +447,7 @@ function LineEditor({
               <option value="">직접 입력</option>
               {serviceItems.map((item) => (
                 <option key={item.id} value={item.id}>
-                  {item.name} · {formatWon(item.base_price)}
+                  {item.name} · 소비자가 {formatWon(item.base_price)} · 도급가 {formatWon(item.partner_base_price)}
                 </option>
               ))}
             </select>
@@ -403,11 +466,13 @@ function LineEditor({
           <TextField label="요청사항" span={2} multiline value={line.special_request} onChange={(value) => onFieldChange(lineIndex, 'special_request', value)} />
         </FieldGrid>
 
+        <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-tertiary)' }}>결제 / 정산</div>
         <FieldGrid>
-          <TextField testId={`order-line-${lineIndex}-total-amount`} label="총 금액" inputMode="numeric" value={line.total_amount} onChange={(value) => onMoneyChange(lineIndex, 'total_amount', value)} />
-          <TextField label="계약금" inputMode="numeric" value={line.deposit_amount} onChange={(value) => onMoneyChange(lineIndex, 'deposit_amount', value)} />
+          <TextField testId={`order-line-${lineIndex}-total-amount`} label="소비자가 (VAT 포함)" inputMode="numeric" value={line.total_amount} onChange={(value) => onMoneyChange(lineIndex, 'total_amount', value)} />
+          <TextField testId={`order-line-${lineIndex}-discount-amount`} label="할인가" inputMode="numeric" value={line.discount_amount} onChange={(value) => onMoneyChange(lineIndex, 'discount_amount', value)} />
+          <TextField testId={`order-line-${lineIndex}-deposit-amount`} label="계약금" inputMode="numeric" value={line.deposit_amount} onChange={(value) => onMoneyChange(lineIndex, 'deposit_amount', value)} />
           <TextField label="잔금" inputMode="numeric" value={line.balance_amount} onChange={(value) => onMoneyChange(lineIndex, 'balance_amount', value)} />
-          <TextField label="현장 추가" inputMode="numeric" value={line.onsite_extra_amount} onChange={(value) => onMoneyChange(lineIndex, 'onsite_extra_amount', value)} />
+          <TextField testId={`order-line-${lineIndex}-onsite-extra-amount`} label="현장 추가" inputMode="numeric" value={line.onsite_extra_amount} onChange={(value) => onMoneyChange(lineIndex, 'onsite_extra_amount', value)} />
           <Field label="결제 상태">
             <select className="input" value={line.payment_status} onChange={(event) => onFieldChange(lineIndex, 'payment_status', event.target.value)}>
               <option value="">미입력</option>
@@ -416,10 +481,15 @@ function LineEditor({
               ))}
             </select>
           </Field>
-          <TextField label="VAT" value={line.vat_type} onChange={(value) => onFieldChange(lineIndex, 'vat_type', value)} />
+          <Field label="VAT">
+            <select className="input" data-testid={`order-line-${lineIndex}-vat-type`} value={line.vat_type} onChange={(event) => onFieldChange(lineIndex, 'vat_type', event.target.value)}>
+              <option value="included">포함</option>
+              <option value="excluded">별도</option>
+            </select>
+          </Field>
           <TextField label="결제 메모" span={2} multiline value={line.payment_memo} onChange={(value) => onFieldChange(lineIndex, 'payment_memo', value)} />
           <TextField label="증빙 메모" span={2} multiline value={line.evidence_memo} onChange={(value) => onFieldChange(lineIndex, 'evidence_memo', value)} />
-          <TextField label="협력사 지급액" inputMode="numeric" value={line.partner_payment_amount} onChange={(value) => onMoneyChange(lineIndex, 'partner_payment_amount', value)} />
+          <TextField testId={`order-line-${lineIndex}-partner-payment-amount`} label="도급가" inputMode="numeric" value={line.partner_payment_amount} onChange={(value) => onMoneyChange(lineIndex, 'partner_payment_amount', value)} />
           <Field label="협력사 정산 상태">
             <select className="input" value={line.partner_payment_status} onChange={(event) => onFieldChange(lineIndex, 'partner_payment_status', event.target.value)}>
               <option value="">미입력</option>
@@ -532,15 +602,23 @@ function createEmptyLineForm() {
     service_detail: '',
     special_request: '',
     total_amount: '',
+    discount_amount: '',
     deposit_amount: '',
     balance_amount: '',
     onsite_extra_amount: '',
-    vat_type: '',
+    vat_type: 'included',
     payment_status: '',
     payment_memo: '',
     evidence_memo: '',
     partner_payment_amount: '',
     partner_payment_status: '',
+    partner_settled_at: null,
+    base_unit_price: '',
+    partner_unit_price: '',
+    total_amount_touched: false,
+    deposit_amount_touched: false,
+    balance_amount_touched: false,
+    partner_payment_amount_touched: false,
   };
 }
 
@@ -574,15 +652,17 @@ function toLineForm(order) {
     service_detail: order.service_detail || '',
     special_request: order.special_request || '',
     total_amount: toInputNumber(order.total_amount),
+    discount_amount: toInputNumber(order.discount_amount),
     deposit_amount: toInputNumber(order.deposit_amount),
     balance_amount: toInputNumber(order.balance_amount),
     onsite_extra_amount: toInputNumber(order.onsite_extra_amount),
-    vat_type: order.vat_type || '',
+    vat_type: order.vat_type || 'included',
     payment_status: order.payment_status || '',
     payment_memo: order.payment_memo || '',
     evidence_memo: order.evidence_memo || '',
     partner_payment_amount: toInputNumber(order.partner_payment_amount),
     partner_payment_status: order.partner_payment_status || '',
+    partner_settled_at: order.partner_settled_at || null,
   };
 }
 
@@ -620,6 +700,7 @@ function toLinePayload(line) {
     service_detail: emptyToNull(line.service_detail),
     special_request: emptyToNull(line.special_request),
     total_amount: numberOrNull(line.total_amount),
+    discount_amount: numberOrNull(line.discount_amount) || 0,
     deposit_amount: numberOrNull(line.deposit_amount),
     balance_amount: numberOrNull(line.balance_amount),
     onsite_extra_amount: numberOrNull(line.onsite_extra_amount),
@@ -685,6 +766,76 @@ function calculateBalanceAmount(totalAmount, depositAmount) {
   }
 
   return formatMoneyInput(Math.max(total - deposit, 0));
+}
+
+function applyMoneyTouch(line, key, formattedValue) {
+  const touchMap = {
+    total_amount: 'total_amount_touched',
+    deposit_amount: 'deposit_amount_touched',
+    balance_amount: 'balance_amount_touched',
+    partner_payment_amount: 'partner_payment_amount_touched',
+  };
+  const touchKey = touchMap[key];
+  if (!touchKey) {
+    return line;
+  }
+  return { ...line, [touchKey]: formattedValue !== '' };
+}
+
+function recalculateLine(line, { source, previousLine = null }) {
+  const quantity = parseQuantity(line.size_or_quantity);
+  const baseUnitPrice = Number(line.base_unit_price || 0);
+  const partnerUnitPrice = Number(line.partner_unit_price || 0);
+  const discount = parseMoneyInput(line.discount_amount) || 0;
+  const onsiteExtra = parseMoneyInput(line.onsite_extra_amount) || 0;
+  const calculatedTotal = Math.max(Math.round(baseUnitPrice * quantity) - discount + onsiteExtra, 0);
+  const calculatedPartnerPrice = Math.max(Math.round(partnerUnitPrice * quantity), 0);
+  const next = { ...line };
+
+  if (source === 'onsite_extra_amount' && next.total_amount_touched) {
+    const previousExtra = parseMoneyInput(previousLine?.onsite_extra_amount) || 0;
+    const previousTotal = parseMoneyInput(previousLine?.total_amount);
+    if (previousTotal !== null) {
+      next.total_amount = formatMoneyInput(Math.max(previousTotal + onsiteExtra - previousExtra, 0));
+    }
+  } else if (baseUnitPrice > 0 && (!next.total_amount_touched || next.total_amount === '')) {
+    next.total_amount = formatMoneyInput(calculatedTotal);
+    next.total_amount_touched = false;
+  }
+
+  if (partnerUnitPrice > 0 && (!next.partner_payment_amount_touched || next.partner_payment_amount === '')) {
+    next.partner_payment_amount = formatMoneyInput(calculatedPartnerPrice);
+    next.partner_payment_amount_touched = false;
+  }
+
+  if (next.total_amount !== '' && (!next.deposit_amount_touched || next.deposit_amount === '')) {
+    const total = parseMoneyInput(next.total_amount) || 0;
+    next.deposit_amount = formatMoneyInput(Math.round(total * 0.3));
+    next.deposit_amount_touched = false;
+  }
+
+  if (
+    !next.balance_amount_touched
+    || next.balance_amount === ''
+    || source === 'total_amount'
+    || source === 'deposit_amount'
+    || source === 'discount_amount'
+    || source === 'onsite_extra_amount'
+  ) {
+    next.balance_amount = calculateBalanceAmount(next.total_amount, next.deposit_amount);
+    next.balance_amount_touched = false;
+  }
+
+  return next;
+}
+
+function parseQuantity(value) {
+  const match = String(value || '').replace(/,/g, '').match(/\d+(?:\.\d+)?/);
+  if (!match) {
+    return 1;
+  }
+  const parsed = Number(match[0]);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 1;
 }
 
 function formatWon(value) {

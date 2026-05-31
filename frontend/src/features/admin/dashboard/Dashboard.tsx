@@ -22,7 +22,7 @@ export function Dashboard({ onOpenOrder, onNav, onCreateOrder }) {
 
   return (
     <div data-testid="admin-dashboard-page" className="scroll" style={{ flex: 1, overflow: 'auto', padding: 20, background: 'var(--bg)' }}>
-      <div style={{ maxWidth: 1320, margin: '0 auto' }}>
+      <div className="page-shell">
 
         {/* Greeting */}
         <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', marginBottom: 14 }}>

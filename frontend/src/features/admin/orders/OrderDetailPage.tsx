@@ -283,7 +283,7 @@ export function OrderDetailPage({ orderId, onBack, onEdit, onNav, onOpenOrder })
       </div>
 
       <div className="scroll" style={{ flex: 1, overflow: 'auto', padding: 20 }}>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 320px', gap: 16, maxWidth: 1320, margin: '0 auto' }}>
+        <div className="page-shell" style={{ display: 'grid', gridTemplateColumns: '1fr 320px', gap: 16 }}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
             <Section title="고객 정보" icon="user">
               <KV col={2}>
@@ -311,8 +311,9 @@ export function OrderDetailPage({ orderId, onBack, onEdit, onNav, onOpenOrder })
             </Section>
 
             <Section title="금액 / 결제" icon="creditCard">
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 0 }}>
-                <Money label="총 금액" value={order.total_amount}/>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 0 }}>
+                <Money label="소비자가" value={order.consumer_price ?? order.total_amount}/>
+                <Money label="할인가" value={order.discount_amount}/>
                 <Money label="계약금" value={order.deposit_amount}/>
                 <Money label="잔금" value={order.balance_amount}/>
                 <Money label="현장 추가" value={order.onsite_extra_amount}/>
@@ -334,6 +335,9 @@ export function OrderDetailPage({ orderId, onBack, onEdit, onNav, onOpenOrder })
                   <div style={{ fontSize: 13, fontWeight: 600 }}>{order.team_name || selectedPartner?.name || '미배정'}</div>
                   <div style={{ fontSize: 11.5, color: 'var(--text-tertiary)', marginTop: 2 }}>
                     협력사 ID: {order.partner_id || '-'} · 정산 상태: {partnerPaymentStatusLabel(order.partner_payment_status)}
+                  </div>
+                  <div style={{ fontSize: 11.5, color: 'var(--text-tertiary)', marginTop: 2 }}>
+                    도급가 {formatWon(order.partner_price ?? order.partner_payment_amount)} · 정산일 {order.partner_settled_at ? formatDateTime(order.partner_settled_at) : '-'}
                   </div>
                 </div>
                 <Badge tone={order.partner_id ? 'success' : 'warn'} dot>
@@ -877,6 +881,8 @@ function messageTypeLabel(type) {
   if (type === 'customer_day_before') return '전날안내';
   if (type === 'partner_assignment') return '협력사배정';
   if (type === 'customer_photo_ready') return '사진전달';
+  if (type === 'customer_quote') return '견적서';
+  if (type === 'partner_customer_info') return '협력사 고객정보';
   return type;
 }
 

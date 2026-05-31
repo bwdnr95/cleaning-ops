@@ -1,9 +1,10 @@
-from fastapi import APIRouter, Depends, File, HTTPException, Response, UploadFile, status
+from fastapi import APIRouter, Depends, File, HTTPException, Query, Response, UploadFile, status
 from pydantic import BaseModel
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.api.deps import CurrentUser, get_session, require_admin
+from app.domain.constants import MessageChannel, MessageType, RecipientType
 from app.repositories.messages import MessageRepository
 from app.repositories.order_groups import OrderGroupRepository
 from app.repositories.orders import OrderRepository
@@ -20,7 +21,9 @@ from app.schemas.order import (
     OrderLineCreate,
     OrderUpdate,
 )
+from app.schemas.message import MessageLogRead, MessageSendRequest
 from app.schemas.report import OrderImportResult
+from app.services.messages import MessageService
 from app.services.order_import import import_orders_from_xlsx, is_xlsx_upload
 from app.services.orders import (
     OrderService,
@@ -46,15 +49,25 @@ class BulkDeleteResponse(BaseModel):
     failed: list[BulkDeleteFailureItem]
 
 
+class OrderMessageSendRequest(BaseModel):
+    channel: str = "kakao"
+    memo: str | None = None
+
+
 @router.get("", response_model=list[AdminOrderRead])
 def list_orders(
+    sort: str = Query(default="visit_asc", pattern="^(visit_asc|visit_desc|received_asc|received_desc)$"),
+    include_past_paid: bool = False,
     db: Session = Depends(get_session),
     _: CurrentUser = Depends(require_admin),
 ) -> list:
     group_repo = OrderGroupRepository(db)
     return [
         to_admin_order_dto(order, group=group_repo.get(order.group_id))
-        for order in OrderRepository(db).list_orders()
+        for order in OrderRepository(db).list_orders(
+            sort=sort,
+            include_past_paid=include_past_paid,
+        )
     ]
 
 
@@ -190,6 +203,50 @@ def delete_admin_order(
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
+@router.post("/{order_id}/quote/send", response_model=MessageLogRead)
+def send_quote_message(
+    order_id: str,
+    payload: OrderMessageSendRequest | None = None,
+    db: Session = Depends(get_session),
+    user: CurrentUser = Depends(require_admin),
+) -> MessageLogRead:
+    try:
+        return MessageService(db).send(
+            MessageSendRequest(
+                order_id=order_id,
+                message_type=MessageType.CUSTOMER_QUOTE,
+                recipient_type=RecipientType.CUSTOMER,
+                channel=to_message_channel(payload.channel if payload else "kakao"),
+                memo=payload.memo if payload else None,
+            ),
+            actor_user_id=user.id,
+        )
+    except ValueError as exc:
+        raise order_message_http_error(exc) from exc
+
+
+@router.post("/{order_id}/notify-partner-unpaid", response_model=MessageLogRead)
+def send_partner_unpaid_notice(
+    order_id: str,
+    payload: OrderMessageSendRequest | None = None,
+    db: Session = Depends(get_session),
+    user: CurrentUser = Depends(require_admin),
+) -> MessageLogRead:
+    try:
+        return MessageService(db).send(
+            MessageSendRequest(
+                order_id=order_id,
+                message_type=MessageType.PARTNER_CUSTOMER_INFO,
+                recipient_type=RecipientType.PARTNER,
+                channel=to_message_channel(payload.channel if payload else "kakao"),
+                memo=payload.memo if payload else None,
+            ),
+            actor_user_id=user.id,
+        )
+    except ValueError as exc:
+        raise order_message_http_error(exc) from exc
+
+
 @router.get("/{order_id}", response_model=AdminOrderDetailRead)
 def get_order(
     order_id: str,
@@ -241,3 +298,27 @@ def order_http_error(exc: ValueError) -> HTTPException:
     detail = str(exc)
     status_code = 404 if detail in {"order_not_found", "group_not_found"} else 400
     return HTTPException(status_code=status_code, detail=detail)
+
+
+def to_message_channel(channel: str) -> MessageChannel:
+    if channel == "kakao":
+        return MessageChannel.ALIMTALK
+    if channel == "sms":
+        return MessageChannel.SMS
+    if channel == "lms":
+        return MessageChannel.LMS
+    raise HTTPException(status_code=422, detail="unsupported_message_channel")
+
+
+def order_message_http_error(exc: ValueError) -> HTTPException:
+    detail = str(exc)
+    if detail == "order_not_found":
+        return HTTPException(status_code=404, detail=detail)
+    if detail in {
+        "partner_not_assigned",
+        "partner_not_found",
+        "invalid_recipient_type",
+        "missing_recipient",
+    }:
+        return HTTPException(status_code=400, detail=detail)
+    raise HTTPException(status_code=400, detail=detail)

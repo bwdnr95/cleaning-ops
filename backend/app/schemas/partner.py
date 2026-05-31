@@ -45,6 +45,8 @@ class PartnerAdminRead(PartnerRead):
     scheduled_job_count: int = 0
     active_job_count: int = 0
     completed_job_count: int = 0
+    unpaid_partner_amount_total: float = 0
+    unpaid_partner_order_count: int = 0
     user_id: str | None = None
     login_phone: str | None = None
     user_is_active: bool | None = None
@@ -60,6 +62,40 @@ class PartnerAssignedOrderRead(ApiModel):
     size_or_quantity: str | None = None
     customer_name: str
     customer_address: str
+    consumer_price: float | None = None
+    partner_price: float | None = None
+    partner_payment_status: str | None = None
+    settled_at: datetime | None = None
+
+
+class PartnerSettlementItemRead(ApiModel):
+    order_id: str
+    status: OrderStatus
+    scheduled_date: date | None = None
+    service_name: str
+    customer_name: str
+    address_short: str
+    consumer_price: float | None = None
+    partner_price: float | None = None
+    partner_payment_status: str | None = None
+    settled_at: datetime | None = None
+
+
+class PartnerSettlementListRead(ApiModel):
+    items: list[PartnerSettlementItemRead]
+    total_partner_price: float
+    total_consumer_price: float
+    count: int
+
+
+class PartnerSettlementActionRequest(ApiModel):
+    order_ids: list[str] = Field(min_length=1)
+    memo: str | None = None
+
+
+class PartnerSettlementActionResult(ApiModel):
+    updated_order_ids: list[str]
+    skipped_order_ids: list[str] = Field(default_factory=list)
 
 
 class PartnerDetailRead(PartnerAdminRead):

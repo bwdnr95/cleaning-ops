@@ -60,6 +60,34 @@ KAKAO_TEMPLATE_DEFINITIONS: dict[MessageType, KakaoTemplateDefinition] = {
             KakaoTemplateVariable("#{고객링크}", "customer_link"),
         ),
     ),
+    MessageType.CUSTOMER_QUOTE: KakaoTemplateDefinition(
+        message_type=MessageType.CUSTOMER_QUOTE,
+        template_id_setting="solapi_kakao_template_customer_quote",
+        variables=(
+            KakaoTemplateVariable("#{고객명}", "customer_name"),
+            KakaoTemplateVariable("#{서비스명}", "service_name"),
+            KakaoTemplateVariable("#{수량}", "size_or_quantity"),
+            KakaoTemplateVariable("#{소비자가}", "consumer_price"),
+            KakaoTemplateVariable("#{할인가}", "discount_amount"),
+            KakaoTemplateVariable("#{총금액}", "total_amount"),
+            KakaoTemplateVariable("#{계약금}", "deposit_amount"),
+            KakaoTemplateVariable("#{잔금}", "balance_amount"),
+            KakaoTemplateVariable("#{VAT_표기}", "vat_label"),
+            KakaoTemplateVariable("#{방문예정일}", "schedule"),
+            KakaoTemplateVariable("#{회사명}", "company_name"),
+        ),
+    ),
+    MessageType.PARTNER_CUSTOMER_INFO: KakaoTemplateDefinition(
+        message_type=MessageType.PARTNER_CUSTOMER_INFO,
+        template_id_setting="solapi_kakao_template_partner_customer_info",
+        variables=(
+            KakaoTemplateVariable("#{협력사담당자}", "partner_manager_name"),
+            KakaoTemplateVariable("#{고객명}", "customer_name"),
+            KakaoTemplateVariable("#{연락처마스킹}", "masked_customer_phone"),
+            KakaoTemplateVariable("#{방문일}", "schedule"),
+            KakaoTemplateVariable("#{주소}", "customer_address"),
+        ),
+    ),
 }
 
 

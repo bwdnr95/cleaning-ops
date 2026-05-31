@@ -75,7 +75,10 @@ export async function partnerUploadPhoto(
   }
 }
 
-export async function createAssignedOrder(request: APIRequestContext) {
+export async function createAssignedOrder(
+  request: APIRequestContext,
+  options: { status?: string } = {},
+) {
   const adminSession = await loginViaApi(request, 'admin');
   const created = await checkedJson<CreatedOrderGroup>(await request.post(`${backendUrl}/api/admin/orders/groups`, {
     headers: authHeaders(adminSession.access_token),
@@ -87,7 +90,7 @@ export async function createAssignedOrder(request: APIRequestContext) {
       customer_visible_payment: false,
       lines: [
         {
-          status: '일정확정',
+          status: options.status ?? '일정확정',
           received_date: '2026-05-05',
           scheduled_date: '2026-05-14',
           requested_time: '09:30',

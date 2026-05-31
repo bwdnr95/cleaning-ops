@@ -9,6 +9,7 @@ test('admin can delete a single order from detail page', async ({ browser, reque
 
   await page.getByTestId('admin-nav-orders').click();
   await expect(page.getByTestId('admin-orders-page')).toBeVisible();
+  await page.getByTestId('orders-date-preset-all').click();
   await page.getByTestId(`admin-order-row-${flow.orderId}`).click();
 
   await expect(page.getByTestId('admin-order-detail-page')).toBeVisible();
@@ -31,6 +32,7 @@ test('admin can bulk-delete selected orders from list page', async ({ browser, r
 
   await page.getByTestId('admin-nav-orders').click();
   await expect(page.getByTestId('admin-orders-page')).toBeVisible();
+  await page.getByTestId('orders-date-preset-all').click();
 
   await page.locator(`[data-testid="admin-order-row-${flow1.orderId}"] input[type="checkbox"]`).check();
   await page.locator(`[data-testid="admin-order-row-${flow2.orderId}"] input[type="checkbox"]`).check();

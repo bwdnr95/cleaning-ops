@@ -1,4 +1,5 @@
 from datetime import date, datetime
+from decimal import Decimal
 
 from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Numeric, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
@@ -29,16 +30,23 @@ class Order(TimestampMixin, Base):
     customer_name: Mapped[str | None] = mapped_column(String(80), index=True, nullable=True)
     customer_phone: Mapped[str | None] = mapped_column(String(30), index=True, nullable=True)
     customer_address: Mapped[str | None] = mapped_column(Text, nullable=True)
-    total_amount: Mapped[float | None] = mapped_column(Numeric(12, 2))
-    deposit_amount: Mapped[float | None] = mapped_column(Numeric(12, 2))
-    balance_amount: Mapped[float | None] = mapped_column(Numeric(12, 2))
-    onsite_extra_amount: Mapped[float | None] = mapped_column(Numeric(12, 2))
+    total_amount: Mapped[Decimal | None] = mapped_column(Numeric(12, 2))
+    discount_amount: Mapped[Decimal] = mapped_column(
+        Numeric(12, 2),
+        nullable=False,
+        default=0,
+        server_default="0",
+    )
+    deposit_amount: Mapped[Decimal | None] = mapped_column(Numeric(12, 2))
+    balance_amount: Mapped[Decimal | None] = mapped_column(Numeric(12, 2))
+    onsite_extra_amount: Mapped[Decimal | None] = mapped_column(Numeric(12, 2))
     vat_type: Mapped[str | None] = mapped_column(String(20))
     payment_status: Mapped[str | None] = mapped_column(String(40), index=True)
     payment_memo: Mapped[str | None] = mapped_column(Text)
     evidence_memo: Mapped[str | None] = mapped_column(Text)
-    partner_payment_amount: Mapped[float | None] = mapped_column(Numeric(12, 2))
+    partner_payment_amount: Mapped[Decimal | None] = mapped_column(Numeric(12, 2))
     partner_payment_status: Mapped[str | None] = mapped_column(String(40))
+    partner_settled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     # R7 deprecated: see OrderGroup. Drop in R7.5.
     customer_token: Mapped[str | None] = mapped_column(String(80), index=True, nullable=True)
     customer_visible_payment: Mapped[bool | None] = mapped_column(Boolean, default=False, nullable=True)

@@ -11,6 +11,7 @@ class MessageSendRequest(ApiModel):
     message_type: MessageType
     recipient_type: RecipientType
     channel: MessageChannel = MessageChannel.SMS
+    memo: str | None = None
 
 
 class MessageLogRead(ApiModel):

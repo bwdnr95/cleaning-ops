@@ -674,7 +674,11 @@ class MessageService:
         recipient_type, recipient_name, recipient_phone = self._resolve_recipient(order, payload)
         partner = self.partners.get(order.partner_id) if order.partner_id else None
         customer_link = self._build_customer_link(order.customer_token)
-        context = self._build_template_context(order, partner, customer_link)
+        context = self._build_template_context(
+            order,
+            partner,
+            customer_link,
+        )
         content = self._render_content(
             payload,
             order=order,
@@ -714,7 +718,11 @@ class MessageService:
         recipient_type, recipient_name, recipient_phone = self._resolve_recipient(order, payload)
         partner = self.partners.get(order.partner_id) if order.partner_id else None
         customer_link = self._build_customer_link(order.customer_token)
-        context = self._build_template_context(order, partner, customer_link)
+        context = self._build_template_context(
+            order,
+            partner,
+            customer_link,
+        )
         content = self._render_content(
             payload,
             order=order,
@@ -926,7 +934,10 @@ class MessageService:
             )
 
     def _resolve_recipient(self, order: Order, payload: MessageSendRequest) -> tuple[RecipientType, str, str]:
-        if payload.message_type == MessageType.PARTNER_ASSIGNMENT:
+        if payload.message_type in {
+            MessageType.PARTNER_ASSIGNMENT,
+            MessageType.PARTNER_CUSTOMER_INFO,
+        }:
             if not order.partner_id:
                 raise ValueError("partner_not_assigned")
             partner = self.partners.get(order.partner_id)
@@ -982,6 +993,26 @@ class MessageService:
             # 정책 변경(2026-05-18): 사진 링크 발송은 메시지/timeline만 남기고
             # 주문 상태는 자동 advance 하지 않는다. 재전송 가능성을 보장하기 위함.
             self._record_customer_link_sent(order, payload, log, actor_user_id=actor_user_id)
+            return
+
+        if payload.message_type == MessageType.CUSTOMER_QUOTE:
+            self.timeline.record(
+                order_id=order.id,
+                actor_user_id=actor_user_id,
+                event_type=TimelineEventType.QUOTE_SENT,
+                title="견적서 발송",
+                metadata={"message_log_id": log.id, "channel": payload.channel},
+            )
+            return
+
+        if payload.message_type == MessageType.PARTNER_CUSTOMER_INFO:
+            self.timeline.record(
+                order_id=order.id,
+                actor_user_id=actor_user_id,
+                event_type=TimelineEventType.PARTNER_UNPAID_NOTICE_SENT,
+                title="협력사 고객정보 전송",
+                metadata={"message_log_id": log.id, "channel": payload.channel},
+            )
             return
 
     def _advance_status(
@@ -1057,11 +1088,21 @@ class MessageService:
         return {
             "customer_name": order.customer_name,
             "service_name": format_service_name(order),
+            "size_or_quantity": order.size_or_quantity or "-",
             "schedule": format_schedule(order),
             "customer_address": order.customer_address,
             "customer_link": customer_link,
             "partner_name": partner.name if partner else "",
+            "partner_manager_name": partner.manager_name or partner.name if partner else "",
             "special_request": order.special_request or "-",
+            "consumer_price": format_money(order.total_amount),
+            "discount_amount": format_money(order.discount_amount),
+            "total_amount": format_money(order.total_amount),
+            "deposit_amount": format_money(order.deposit_amount),
+            "balance_amount": format_money(order.balance_amount),
+            "vat_label": format_vat_label(order.vat_type),
+            "company_name": settings.app_name,
+            "masked_customer_phone": mask_phone_last4(order.customer_phone),
         }
 
     def _build_kakao_template(
@@ -1152,6 +1193,24 @@ class MessageService:
                 f"주소: {order.customer_address}\n"
                 f"요청사항: {order.special_request or '-'}"
             )
+        if payload.message_type == MessageType.CUSTOMER_QUOTE:
+            return (
+                f"[클린잡] {order.customer_name}님 견적 안내드립니다.\n"
+                f"서비스: {format_service_name(order)}\n"
+                f"소비자가(VAT {format_vat_label(order.vat_type)}): {format_money(order.total_amount)}\n"
+                f"할인가: {format_money(order.discount_amount)}\n"
+                f"계약금: {format_money(order.deposit_amount)} / 잔금: {format_money(order.balance_amount)}\n"
+                f"방문: {schedule}"
+            )
+        if payload.message_type == MessageType.PARTNER_CUSTOMER_INFO:
+            partner_name = partner.manager_name or partner.name if partner else "협력사"
+            return (
+                f"[클린잡] {partner_name}님, 미입금 고객 정보를 전달드립니다.\n"
+                f"고객: {order.customer_name} ({mask_phone_last4(order.customer_phone)})\n"
+                f"방문: {schedule}\n"
+                f"주소: {order.customer_address}\n"
+                f"요청사항: {order.special_request or '-'}"
+            )
         return f"[클린잡] {payload.message_type.value}: {format_service_name(order)}"
 
     def _build_customer_link(self, customer_token: str) -> str:
@@ -1163,6 +1222,8 @@ class MessageService:
             MessageType.CUSTOMER_DAY_BEFORE: "고객 전날 안내",
             MessageType.PARTNER_ASSIGNMENT: "협력사 배정 안내",
             MessageType.CUSTOMER_PHOTO_READY: "고객 사진 확인 안내",
+            MessageType.CUSTOMER_QUOTE: "고객 견적서",
+            MessageType.PARTNER_CUSTOMER_INFO: "협력사 고객정보",
         }.get(message_type, message_type.value)
         return f"{label} 발송 결과: {status.value}"
 
@@ -1201,3 +1262,19 @@ def format_schedule(order: Order) -> str:
     if order.requested_time:
         return f"{date_text} {order.requested_time}"
     return date_text
+
+
+def format_money(value: object) -> str:
+    amount = int(float(value or 0))
+    return f"{amount:,}원"
+
+
+def format_vat_label(value: object) -> str:
+    return "별도" if value == "excluded" else "포함"
+
+
+def mask_phone_last4(value: str | None) -> str:
+    digits = "".join(ch for ch in str(value or "") if ch.isdigit())
+    if len(digits) < 4:
+        return "***-****-****"
+    return f"***-****-{digits[-4:]}"

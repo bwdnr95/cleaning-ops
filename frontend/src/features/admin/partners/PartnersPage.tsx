@@ -8,15 +8,21 @@ import {
   getAdminPartner,
   listAdminPartners,
   listPartnerCategories,
+  listPartnerSettlements,
+  notifyPartnerUnpaid,
+  revertPartnerOrders,
   resetAdminPartnerPassword,
+  settlePartnerOrders,
+  type SettlementStatusFilter,
   updateAdminPartner,
   updatePartnerCategory,
 } from '../../../api/admin';
 import { PaginationBar, paginateItems } from '../../../components/common/Pagination';
+import { DatePicker } from '../../../components/common/DatePicker';
 import { useApiResource } from '../../../api/useApiResource';
 import { Badge, Icon, StatusBadge } from '../../../components/common/ui';
 import { formatPhone } from '../../../domain/phone';
-import { formatAppDateTime, parseDateValue } from '../../../domain/time';
+import { addDays, formatAppDateTime, formatDateValue, getAppTodayDate, parseDateValue } from '../../../domain/time';
 
 const ALL_CATEGORY_FILTER = 'all';
 const UNCLASSIFIED_CATEGORY_FILTER = 'unclassified';
@@ -44,6 +50,13 @@ export function PartnersPage() {
   const [isResetting, setIsResetting] = React.useState(false);
   const [resetPassword, setResetPassword] = React.useState('');
   const [resetLoginPhone, setResetLoginPhone] = React.useState('');
+  const [settlementStatusFilter, setSettlementStatusFilter] = React.useState<SettlementStatusFilter>('unpaid');
+  const [settlementDateRange, setSettlementDateRange] = React.useState(() => defaultSettlementDateRange());
+  const [settlements, setSettlements] = React.useState(null);
+  const [settlementsLoading, setSettlementsLoading] = React.useState(false);
+  const [settlementSelection, setSettlementSelection] = React.useState(new Set());
+  const [notifyTarget, setNotifyTarget] = React.useState(null);
+  const [settlementMemo, setSettlementMemo] = React.useState('');
   const [notice, setNotice] = React.useState('');
   const [error, setError] = React.useState('');
 
@@ -80,6 +93,7 @@ export function PartnersPage() {
   React.useEffect(() => {
     if (!selectedId) {
       setDetail(null);
+      setSettlements(null);
       return;
     }
 
@@ -112,6 +126,39 @@ export function PartnersPage() {
       isCurrent = false;
     };
   }, [selectedId]);
+
+  React.useEffect(() => {
+    if (!selectedId) {
+      return;
+    }
+    let isCurrent = true;
+    setSettlementsLoading(true);
+    listPartnerSettlements(selectedId, {
+      status: settlementStatusFilter,
+      from: settlementDateRange.from,
+      to: settlementDateRange.to,
+    })
+      .then((result) => {
+        if (isCurrent) {
+          setSettlements(result);
+          setSettlementSelection(new Set());
+        }
+      })
+      .catch(() => {
+        if (isCurrent) {
+          setSettlements(null);
+          setError('협력사 정산 목록을 불러오지 못했습니다.');
+        }
+      })
+      .finally(() => {
+        if (isCurrent) {
+          setSettlementsLoading(false);
+        }
+      });
+    return () => {
+      isCurrent = false;
+    };
+  }, [selectedId, settlementStatusFilter, settlementDateRange.from, settlementDateRange.to]);
 
   const stats = toPartnerStats(partners);
 
@@ -339,9 +386,89 @@ export function PartnersPage() {
     }
   };
 
+  const reloadSelectedPartner = React.useCallback(() => {
+    if (!selectedId) {
+      return;
+    }
+    getAdminPartner(selectedId).then((partner) => {
+      setDetail(partner);
+      setForm(toPartnerForm(partner));
+    }).catch(() => {});
+    listPartnerSettlements(selectedId, {
+      status: settlementStatusFilter,
+      from: settlementDateRange.from,
+      to: settlementDateRange.to,
+    }).then((result) => {
+      setSettlements(result);
+      setSettlementSelection(new Set());
+    }).catch(() => {});
+    partnersResource.reload();
+  }, [partnersResource, selectedId, settlementDateRange.from, settlementDateRange.to, settlementStatusFilter]);
+
+  const toggleSettlementSelection = (orderId) => {
+    setSettlementSelection((current) => {
+      const next = new Set(current);
+      if (next.has(orderId)) next.delete(orderId); else next.add(orderId);
+      return next;
+    });
+  };
+
+  const handleSettle = async (orderIds) => {
+    if (!detail || orderIds.length === 0) {
+      return;
+    }
+    if (!window.confirm(`선택한 ${orderIds.length}건을 정산 완료로 처리합니까?`)) {
+      return;
+    }
+    setError('');
+    setNotice('');
+    try {
+      await settlePartnerOrders(detail.id, orderIds, settlementMemo);
+      setSettlementMemo('');
+      setNotice('정산 완료로 처리했습니다.');
+      reloadSelectedPartner();
+    } catch (requestError) {
+      setError(partnerErrorMessage(requestError, '정산 처리에 실패했습니다.'));
+    }
+  };
+
+  const handleRevertSettlement = async (orderIds) => {
+    if (!detail || orderIds.length === 0) {
+      return;
+    }
+    if (!window.confirm(`선택한 ${orderIds.length}건의 정산을 되돌릴까요?`)) {
+      return;
+    }
+    setError('');
+    setNotice('');
+    try {
+      await revertPartnerOrders(detail.id, orderIds);
+      setNotice('정산 상태를 되돌렸습니다.');
+      reloadSelectedPartner();
+    } catch (requestError) {
+      setError(partnerErrorMessage(requestError, '정산 되돌리기에 실패했습니다.'));
+    }
+  };
+
+  const handleNotifyPartner = async () => {
+    if (!notifyTarget) {
+      return;
+    }
+    setError('');
+    setNotice('');
+    try {
+      await notifyPartnerUnpaid(notifyTarget.order_id, 'kakao', settlementMemo);
+      setNotifyTarget(null);
+      setSettlementMemo('');
+      setNotice('협력사에 고객정보 전송 요청을 보냈습니다.');
+    } catch (requestError) {
+      setError(partnerErrorMessage(requestError, '협력사 고객정보 전송에 실패했습니다.'));
+    }
+  };
+
   return (
     <div data-testid="admin-partners-page" style={{ flex: 1, minHeight: 0, overflow: 'auto', background: 'var(--bg)' }}>
-      <div style={{ padding: 20, maxWidth: 1280, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 12 }}>
+      <div className="page-shell" style={{ padding: 20, display: 'flex', flexDirection: 'column', gap: 12 }}>
         <section className="card" style={{ padding: 0, overflow: 'hidden' }}>
           <SectionHeader
             icon="list"
@@ -442,6 +569,7 @@ export function PartnersPage() {
                       <Th>상태</Th>
                       <Th>협력사</Th>
                       <Th>작업</Th>
+                      <Th>미정산 합계</Th>
                       <Th>계정</Th>
                       <Th>관리</Th>
                     </tr>
@@ -474,6 +602,15 @@ export function PartnersPage() {
                           <Td>
                             <span className="mono" style={{ color: 'var(--text-secondary)' }}>{partner.active_job_count}</span>
                             <span style={{ color: 'var(--text-tertiary)' }}> / {partner.scheduled_job_count}</span>
+                          </Td>
+                          <Td>
+                            {Number(partner.unpaid_partner_amount_total || 0) > 0 ? (
+                              <span className="mono" style={{ color: 'var(--settlement-unpaid-fg)', fontWeight: 700 }}>
+                                {formatWon(partner.unpaid_partner_amount_total)}
+                              </span>
+                            ) : (
+                              <span style={{ color: 'var(--text-quaternary)' }}>—</span>
+                            )}
                           </Td>
                           <Td>
                             {partner.login_phone ? (
@@ -598,11 +735,25 @@ export function PartnersPage() {
                   <aside style={{ padding: 14, display: 'flex', flexDirection: 'column', gap: 14 }}>
                     <div>
                       <div style={labelStyle}>운영 지표</div>
-                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 6 }}>
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 6 }}>
                         <MiniMetric label="예정" value={detail.scheduled_job_count} />
                         <MiniMetric label="진행" value={detail.active_job_count} />
                         <MiniMetric label="완료" value={detail.completed_job_count} />
+                        <MiniMetric label="미정산" value={`${detail.unpaid_partner_order_count || 0}건`} />
                       </div>
+                      <div style={{ marginTop: 8, padding: 8, borderRadius: 6, background: 'var(--settlement-unpaid-bg)', color: 'var(--settlement-unpaid-fg)', fontSize: 12, fontWeight: 700 }}>
+                        미정산 도급가 합계 {formatWon(detail.unpaid_partner_amount_total)}
+                      </div>
+                      <button
+                        type="button"
+                        data-testid="partner-settle-selected"
+                        className="btn btn--secondary btn--sm"
+                        disabled={settlementSelection.size === 0}
+                        onClick={() => void handleSettle(Array.from(settlementSelection))}
+                        style={{ marginTop: 8 }}
+                      >
+                        선택 {settlementSelection.size}건 정산
+                      </button>
                     </div>
 
                     <div>
@@ -631,25 +782,72 @@ export function PartnersPage() {
 
             {detail && (
               <section className="card" style={{ padding: 0, overflow: 'hidden' }}>
-                <SectionHeader icon="list" title="최근 배정 작업" />
-                {detail.jobs.length === 0 ? (
-                  <StateLine text="최근 배정된 작업이 없습니다." />
+                <SectionHeader
+                  icon="list"
+                  title="배정 작업 / 정산"
+                  right={(
+                    <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                      <DatePicker compact testId="partner-settlement-from" value={settlementDateRange.from} onChange={(value) => setSettlementDateRange((current) => ({ ...current, from: value }))} />
+                      <span style={{ color: 'var(--text-quaternary)', fontSize: 12 }}>~</span>
+                      <DatePicker compact testId="partner-settlement-to" value={settlementDateRange.to} onChange={(value) => setSettlementDateRange((current) => ({ ...current, to: value }))} />
+                      <select className="input" data-testid="partner-settlement-status" value={settlementStatusFilter} onChange={(event) => setSettlementStatusFilter(event.target.value as SettlementStatusFilter)} style={{ height: 28 }}>
+                        <option value="all">전체</option>
+                        <option value="unpaid">미정산</option>
+                        <option value="paid">정산완료</option>
+                      </select>
+                    </div>
+                  )}
+                />
+                {settlementsLoading ? (
+                  <StateLine text="정산 목록을 불러오는 중입니다." />
+                ) : !settlements || settlements.items.length === 0 ? (
+                  <StateLine text="조건에 맞는 배정 작업이 없습니다." />
                 ) : (
-                  <div style={{ display: 'grid', gridTemplateColumns: '100px 110px 1fr 90px', fontSize: 12 }}>
-                    {['방문일', '상태', '작업', '고객'].map((header) => <GridHead key={header}>{header}</GridHead>)}
-                    {detail.jobs.map((job) => (
-                      <React.Fragment key={job.id}>
-                        <GridCell mono>{formatDate(job.scheduled_date)} {job.requested_time || ''}</GridCell>
+                  <div className="scroll" style={{ overflowX: 'auto' }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: '34px 100px 110px 1fr 90px 110px 110px 120px 210px', minWidth: 1090, fontSize: 12 }}>
+                    {['', '방문일', '상태', '작업', '고객', '소비자가', '도급가', '정산상태', '액션'].map((header) => <GridHead key={header}>{header}</GridHead>)}
+                    {settlements.items.map((job) => {
+                      const isPaid = job.partner_payment_status === 'paid';
+                      return (
+                      <React.Fragment key={job.order_id}>
+                        <GridCell testId={`partner-settlement-row-${job.order_id}`}>
+                          <input data-testid={`partner-settlement-select-${job.order_id}`} type="checkbox" checked={settlementSelection.has(job.order_id)} onChange={() => toggleSettlementSelection(job.order_id)} />
+                        </GridCell>
+                        <GridCell mono>{formatDate(job.scheduled_date)}</GridCell>
                         <GridCell><StatusBadge status={job.status} /></GridCell>
                         <GridCell>
                           <div style={{ minWidth: 0 }}>
-                            <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{job.service_name} {job.size_or_quantity || ''}</div>
-                            <div style={{ marginTop: 2, color: 'var(--text-tertiary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{job.customer_address}</div>
+                            <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{job.service_name}</div>
+                            <div style={{ marginTop: 2, color: 'var(--text-tertiary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{job.address_short}</div>
                           </div>
                         </GridCell>
                         <GridCell>{job.customer_name}</GridCell>
+                        <GridCell mono>{formatWon(job.consumer_price)}</GridCell>
+                        <GridCell mono>{formatWon(job.partner_price)}</GridCell>
+                        <GridCell>
+                          <SettlementPill paid={isPaid} settledAt={job.settled_at} />
+                        </GridCell>
+                        <GridCell>
+                          <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                            {isPaid ? (
+                              <button type="button" data-testid={`partner-settlement-revert-${job.order_id}`} className="btn btn--secondary btn--sm" onClick={() => void handleRevertSettlement([job.order_id])}>되돌리기</button>
+                            ) : (
+                              <button type="button" data-testid={`partner-settlement-settle-${job.order_id}`} className="btn btn--secondary btn--sm" onClick={() => void handleSettle([job.order_id])}>정산</button>
+                            )}
+                            <button type="button" data-testid={`partner-settlement-notify-${job.order_id}`} className="btn btn--ghost btn--sm" onClick={() => setNotifyTarget(job)}>고객정보 전송</button>
+                          </div>
+                        </GridCell>
                       </React.Fragment>
-                    ))}
+                    );})}
+                    </div>
+                  </div>
+                )}
+                {settlementSelection.size > 0 && (
+                  <div style={{ padding: 12, borderTop: '1px solid var(--divider)', display: 'flex', gap: 8, alignItems: 'center' }}>
+                    <input className="input" placeholder="정산 메모" value={settlementMemo} onChange={(event) => setSettlementMemo(event.target.value)} style={{ flex: 1 }} />
+                    <button type="button" className="btn btn--primary btn--sm" onClick={() => void handleSettle(Array.from(settlementSelection))}>
+                      선택 {settlementSelection.size}건 정산
+                    </button>
                   </div>
                 )}
               </section>
@@ -666,6 +864,46 @@ export function PartnersPage() {
             color: error ? 'var(--danger-fg)' : 'var(--success-fg)',
           }}>
             {error || notice}
+          </div>
+        )}
+        {notifyTarget && (
+          <div
+            data-testid="partner-notify-modal"
+            style={{
+              position: 'fixed',
+              inset: 0,
+              background: 'rgba(15, 23, 42, 0.38)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              zIndex: 100,
+            }}
+            onClick={() => setNotifyTarget(null)}
+          >
+            <div className="card" style={{ width: 460, maxWidth: '92vw', padding: 16 }} onClick={(event) => event.stopPropagation()}>
+              <h3 style={{ margin: '0 0 10px', fontSize: 15 }}>협력사에 고객정보 전송</h3>
+              <div style={{ fontSize: 12, lineHeight: 1.6, color: 'var(--text-secondary)' }}>
+                <div>채널: 카카오 알림톡</div>
+                <div>고객: {notifyTarget.customer_name}</div>
+                <div>방문일: {formatDate(notifyTarget.scheduled_date)}</div>
+                <div>주소: {notifyTarget.address_short}</div>
+                <div>미수금: {formatWon(notifyTarget.consumer_price)}</div>
+                <div style={{ marginTop: 8, color: 'var(--warn-fg)' }}>
+                  연락처는 백엔드 템플릿에서 마지막 4자리만 남기고 마스킹합니다.
+                </div>
+              </div>
+              <textarea
+                className="input"
+                value={settlementMemo}
+                onChange={(event) => setSettlementMemo(event.target.value)}
+                placeholder="운영 메모"
+                style={{ marginTop: 10, width: '100%', minHeight: 72, padding: 8 }}
+              />
+              <div style={{ marginTop: 12, display: 'flex', justifyContent: 'flex-end', gap: 6 }}>
+                <button type="button" data-testid="partner-notify-cancel" className="btn btn--secondary btn--sm" onClick={() => setNotifyTarget(null)}>취소</button>
+                <button type="button" data-testid="partner-notify-send" className="btn btn--primary btn--sm" onClick={() => void handleNotifyPartner()}>전송</button>
+              </div>
+            </div>
           </div>
         )}
       </div>
@@ -855,9 +1093,9 @@ function GridHead({ children }) {
   );
 }
 
-function GridCell({ children, mono = false }) {
+function GridCell({ children, mono = false, testId = undefined }) {
   return (
-    <div style={{
+    <div data-testid={testId} style={{
       minWidth: 0,
       minHeight: 46,
       padding: '9px 12px',
@@ -1019,6 +1257,35 @@ function partnerErrorMessage(error, fallback) {
     partner_category_not_found: '협력사 대분류를 찾을 수 없습니다.',
   };
   return messages[error?.message] || fallback;
+}
+
+function SettlementPill({ paid, settledAt }) {
+  return (
+    <span style={{
+      display: 'inline-flex',
+      flexDirection: 'column',
+      gap: 2,
+      color: paid ? 'var(--settlement-paid-fg)' : 'var(--settlement-unpaid-fg)',
+      fontSize: 11.5,
+      fontWeight: 700,
+    }}>
+      <span>{paid ? '정산 완료' : '정산 대기'}</span>
+      {paid && settledAt && <span style={{ color: 'var(--text-tertiary)', fontWeight: 500 }}>{formatDateTime(settledAt)}</span>}
+    </span>
+  );
+}
+
+function defaultSettlementDateRange() {
+  const today = getAppTodayDate();
+  return {
+    from: formatDateValue(addDays(today, -30)),
+    to: formatDateValue(today),
+  };
+}
+
+function formatWon(value) {
+  const amount = Number(value || 0);
+  return `₩${Math.round(amount).toLocaleString()}`;
 }
 
 function formatDate(value) {

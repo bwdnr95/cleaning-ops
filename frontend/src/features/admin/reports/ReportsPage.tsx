@@ -49,6 +49,7 @@ export function ReportsPage() {
       style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0, background: 'var(--bg)' }}
     >
       <div
+        className="page-shell"
         style={{
           padding: '12px 20px',
           display: 'flex',
@@ -107,10 +108,12 @@ export function ReportsPage() {
       </div>
 
       <div style={{ flex: 1, overflow: 'auto', padding: 20 }}>
-        {tab === 'revenue' && <RevenueView range={range} granularity={granularity} />}
-        {tab === 'partners' && <PartnersView range={range} />}
-        {tab === 'services' && <ServicesView range={range} />}
-        {tab === 'settlements' && <SettlementsView />}
+        <div className="page-shell">
+          {tab === 'revenue' && <RevenueView range={range} granularity={granularity} />}
+          {tab === 'partners' && <PartnersView range={range} />}
+          {tab === 'services' && <ServicesView range={range} />}
+          {tab === 'settlements' && <SettlementsView />}
+        </div>
       </div>
     </div>
   );

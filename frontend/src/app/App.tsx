@@ -61,7 +61,7 @@ const ADMIN_PAGE_META = {
   },
 };
 
-const DEFAULT_ORDERS_VIEW = { tab: 'all', datePreset: 'all' };
+const DEFAULT_ORDERS_VIEW = { tab: 'all', datePreset: 'upcoming' };
 
 export function App() {
   const auth = useAuth();
@@ -81,6 +81,7 @@ export function App() {
   }, [adminSession.user?.role, mode]);
   const adminSummary = useApiResource(adminSummaryLoader, `${mode}:${adminSession.accessToken || 'guest'}`);
   const navBadges = toAdminNavBadges(adminSummary.data);
+  const isSwitchingRole = auth.activeRole !== mode;
 
   React.useEffect(() => {
     if (auth.activeRole !== mode) {
@@ -100,13 +101,19 @@ export function App() {
     <main style={{ height: '100vh', width: '100vw', overflow: 'hidden', background: 'var(--bg)' }}>
         {mode === 'admin' && (
           <>
-            {adminSession.user?.role === 'admin' ? (
+            {isSwitchingRole ? (
+              <RouteState text="화면을 전환하는 중입니다." />
+            ) : adminSession.user?.role === 'admin' ? (
               <AdminShell
                 initialPage="dashboard"
                 onNav={() => {
                   setDetailOrderId(null);
                   setOrderForm(null);
                   setOrdersView(DEFAULT_ORDERS_VIEW);
+                }}
+                onCreateOrder={() => {
+                  setDetailOrderId(null);
+                  setOrderForm({ mode: 'create', orderId: null });
                 }}
                 navBadges={navBadges}
               >
@@ -219,9 +226,17 @@ export function App() {
         )}
 
         {mode === 'partner' && (
-          <>{partnerSession.user?.role === 'partner' ? <PartnerJobDetail /> : <PartnerLoginPage />}</>
+          <>{isSwitchingRole ? <RouteState text="화면을 전환하는 중입니다." /> : partnerSession.user?.role === 'partner' ? <PartnerJobDetail /> : <PartnerLoginPage />}</>
         )}
     </main>
+  );
+}
+
+function RouteState({ text }) {
+  return (
+    <div style={{ minHeight: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-tertiary)', fontSize: 13 }}>
+      {text}
+    </div>
   );
 }
 

@@ -44,6 +44,8 @@ class Settings(BaseSettings):
     solapi_kakao_template_customer_day_before: str = ""
     solapi_kakao_template_partner_assignment: str = ""
     solapi_kakao_template_customer_photo_ready: str = ""
+    solapi_kakao_template_customer_quote: str = ""
+    solapi_kakao_template_partner_customer_info: str = ""
     solapi_alimtalk_fallback_sms: bool = True
     sentry_dsn: str = ""
     sentry_environment: str = ""

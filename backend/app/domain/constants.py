@@ -28,11 +28,18 @@ class PhotoType(StrEnum):
     ETC = "etc"
 
 
+class VatType(StrEnum):
+    INCLUDED = "included"
+    EXCLUDED = "excluded"
+
+
 class MessageType(StrEnum):
     CUSTOMER_SCHEDULE_CONFIRMED = "customer_schedule_confirmed"
     CUSTOMER_DAY_BEFORE = "customer_day_before"
     PARTNER_ASSIGNMENT = "partner_assignment"
     CUSTOMER_PHOTO_READY = "customer_photo_ready"
+    CUSTOMER_QUOTE = "customer_quote"
+    PARTNER_CUSTOMER_INFO = "partner_customer_info"
 
 
 class MessageChannel(StrEnum):
@@ -65,6 +72,10 @@ class TimelineEventType(StrEnum):
     CUSTOMER_LINK_SENT = "customer_link_sent"
     MEMO_ADDED = "memo_added"
     ORDER_DELETED = "order_deleted"
+    PARTNER_SETTLED = "partner_settled"
+    PARTNER_SETTLEMENT_REVERTED = "partner_settlement_reverted"
+    QUOTE_SENT = "quote_sent"
+    PARTNER_UNPAID_NOTICE_SENT = "partner_unpaid_notice_sent"
 
 
 class AuditEventType(StrEnum):

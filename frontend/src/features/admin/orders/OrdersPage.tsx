@@ -3,7 +3,7 @@ import { DatePicker } from '../../../components/common/DatePicker';
 import { PaginationBar, paginateItems } from '../../../components/common/Pagination';
 import { Avatar, Icon } from '../../../components/common/ui';
 import { ORDERS } from '../../../mocks/cleaningOpsData';
-import { bulkDeleteAdminOrders, listAdminOrders, listPartners, updateAdminOrder } from '../../../api/admin';
+import { bulkDeleteAdminOrders, listAdminOrders, listPartners, updateAdminOrder, type AdminOrderSort } from '../../../api/admin';
 import { sendAdminMessage } from '../../../api/messages';
 import { useApiResource } from '../../../api/useApiResource';
 import { ORDER_STATUSES } from '../../../domain/orderStatus';
@@ -14,6 +14,7 @@ import {
   addDays,
   formatDateValue,
   getAppTodayDate,
+  getAppTodayValue,
   isRelativeAppDateValue,
   parseDateValue,
   startOfWeek,
@@ -44,6 +45,8 @@ function StatusDot({ status }) {
     <span style={{
       display: 'inline-flex', alignItems: 'center', gap: 6,
       fontSize: 12, fontWeight: 500, color: 'var(--text-secondary)',
+      maxWidth: '100%',
+      minWidth: 0,
       whiteSpace: 'nowrap',
     }}>
       <span style={{
@@ -51,17 +54,17 @@ function StatusDot({ status }) {
         background: color, flexShrink: 0,
         boxShadow: `0 0 0 3px ${color}1a`,
       }}/>
-      {status}
+      <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>{status}</span>
     </span>
   );
 }
 
 function PaidPill({ paid, isUnpaid }) {
   const map = {
-    paid:    { label: '완납',   color: '#059669' },
-    partial: { label: '계약금', color: '#0891b2' },
-    pending: { label: isUnpaid ? '미수' : '대기', color: isUnpaid ? '#dc2626' : '#94a3b8' },
-    refund:  { label: '환불',   color: '#dc2626' },
+    paid:    { label: '완납',   color: 'var(--paid-fg)' },
+    partial: { label: '계약금', color: 'var(--deposit-fg)' },
+    pending: { label: isUnpaid ? '미수' : '대기', color: isUnpaid ? 'var(--unpaid-fg)' : 'var(--text-quaternary)' },
+    refund:  { label: '환불',   color: 'var(--danger-fg)' },
   };
   const c = map[paid];
   if (!c) return <span style={{ color: 'var(--text-quaternary)' }}>—</span>;
@@ -102,6 +105,82 @@ function SimplePill({ kind, value }) {
   );
 }
 
+function DateSortHeader({ sortBy, onSortChange }) {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 4, minWidth: 0 }}>
+      <DateSortLine label="방문" asc="visit_asc" desc="visit_desc" sortBy={sortBy} onSortChange={onSortChange} />
+      <DateSortLine label="접수" asc="received_asc" desc="received_desc" sortBy={sortBy} onSortChange={onSortChange} />
+    </div>
+  );
+}
+
+function DateSortLine({ label, asc, desc, sortBy, onSortChange }) {
+  return (
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3, whiteSpace: 'nowrap' }}>
+      <span style={{ minWidth: 24 }}>{label}</span>
+      <SortArrowButton
+        active={sortBy === asc}
+        icon="chevronUp"
+        label={`${label} 오름차순`}
+        onClick={() => onSortChange(asc)}
+      />
+      <SortArrowButton
+        active={sortBy === desc}
+        icon="chevronDown"
+        label={`${label} 내림차순`}
+        onClick={() => onSortChange(desc)}
+      />
+    </span>
+  );
+}
+
+function SortArrowButton({ active, icon, label, onClick }) {
+  return (
+    <button
+      type="button"
+      aria-label={label}
+      title={label}
+      onClick={(event) => {
+        event.stopPropagation();
+        onClick();
+      }}
+      style={{
+        width: 18,
+        height: 18,
+        display: 'inline-flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: 0,
+        border: 'none',
+        borderRadius: 4,
+        background: active ? 'var(--brand-bg)' : 'transparent',
+        color: active ? 'var(--brand)' : 'var(--text-quaternary)',
+        cursor: 'pointer',
+      }}
+    >
+      <Icon name={icon} size={10} />
+    </button>
+  );
+}
+
+function ResizableTh({ columnKey, children, onResizeStart, isResizing = false, style = {} }) {
+  return (
+    <th data-testid={`orders-column-${columnKey}`} style={style}>
+      <div className="orders-table-th-content">
+        {children}
+      </div>
+      <button
+        type="button"
+        data-testid={`orders-column-resizer-${columnKey}`}
+        className={`orders-table-resizer${isResizing ? ' is-active' : ''}`}
+        aria-label={`${columnKey} 열 너비 조정`}
+        title="열 너비 조정"
+        onMouseDown={(event) => onResizeStart(event, columnKey)}
+      />
+    </th>
+  );
+}
+
 const TODAY_JOB_STATUSES = ['일정확정', '전날안내필요', '전날안내완료', '작업예정', '작업진행'];
 const TOMORROW_NOTICE_STATUSES = ['일정확정', '전날안내필요'];
 const REVENUE_RECOGNIZED_STATUSES = ['고객전달완료', '서비스완료'];
@@ -111,15 +190,31 @@ const BULK_MESSAGE_OPTIONS = [
   { value: 'partner_assignment', label: '협력사 배정 안내', recipient: 'partner' },
   { value: 'customer_photo_ready', label: '고객 사진 확인 안내', recipient: 'customer' },
 ];
+const ORDER_TABLE_COLUMN_STORAGE_KEY = 'cleaning.ops.orders.columnWidths.v1';
+const ORDER_TABLE_COLUMNS = [
+  { key: 'select', width: 2.4, min: 2 },
+  { key: 'status', width: 8, min: 5.5 },
+  { key: 'date', width: 9, min: 7 },
+  { key: 'service', width: 12, min: 7 },
+  { key: 'address', width: 16, min: 10 },
+  { key: 'customer', width: 12, min: 8 },
+  { key: 'team', width: 9, min: 6 },
+  { key: 'amount', width: 11, min: 8 },
+  { key: 'payment', width: 6, min: 4 },
+  { key: 'progress', width: 6, min: 4.5 },
+  { key: 'actions', width: 8.6, min: 6 },
+];
+const ORDER_TABLE_DEFAULT_WIDTHS = ORDER_TABLE_COLUMNS.reduce((widths, column) => {
+  widths[column.key] = column.width;
+  return widths;
+}, {});
 
 export function OrdersPage({ onOpenOrder, onCreateOrder, onEditOrder, initialTab = 'all', initialDatePreset = undefined }) {
-  const ordersResource = useApiResource(listAdminOrders);
-  const partnersResource = useApiResource(listPartners);
-  const orders = ordersResource.data ? ordersResource.data.map(toOrderRow) : ORDERS.map(toMockOrderRow);
+  const tableScrollRef = React.useRef(null);
   const [tab, setTab] = React.useState(initialTab);
   const [selected, setSelected] = React.useState(new Set());
   const [hoverRow, setHoverRow] = React.useState(null);
-  const [sortBy, setSortBy] = React.useState('visit');
+  const [sortBy, setSortBy] = React.useState<AdminOrderSort>('visit_asc');
   const [query, setQuery] = React.useState('');
   const [dateFilter, setDateFilter] = React.useState(() => createInitialDateFilter(initialTab, initialDatePreset));
   const [partnerFilter, setPartnerFilter] = React.useState('all');
@@ -135,6 +230,15 @@ export function OrdersPage({ onOpenOrder, onCreateOrder, onEditOrder, initialTab
   const [bulkPartnerId, setBulkPartnerId] = React.useState('');
   const [bulkMessageType, setBulkMessageType] = React.useState('customer_schedule_confirmed');
   const [isImportOpen, setImportOpen] = React.useState(false);
+  const [columnWidths, setColumnWidths] = React.useState(getInitialOrderTableColumnWidths);
+  const [resizingColumn, setResizingColumn] = React.useState(null);
+  const loadOrders = React.useCallback(() => listAdminOrders({
+    sort: sortBy,
+    includePastPaid: tab === 'all',
+  }), [sortBy, tab]);
+  const ordersResource = useApiResource(loadOrders, `${sortBy}:${tab === 'all'}`);
+  const partnersResource = useApiResource(listPartners);
+  const orders = ordersResource.data ? ordersResource.data.map(toOrderRow) : ORDERS.map(toMockOrderRow);
   const statusTabs = getStatusTabs(orders);
   const isDateFilterActive = dateFilter.start !== '' || dateFilter.end !== '';
   const isReceivedDateFilterActive = receivedDateFilter.start !== '' || receivedDateFilter.end !== '';
@@ -153,6 +257,13 @@ export function OrdersPage({ onOpenOrder, onCreateOrder, onEditOrder, initialTab
   }, [initialDatePreset, initialTab]);
 
   React.useEffect(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+    window.localStorage.setItem(ORDER_TABLE_COLUMN_STORAGE_KEY, JSON.stringify(columnWidths));
+  }, [columnWidths]);
+
+  React.useEffect(() => {
     setPage(1);
   }, [
     tab,
@@ -164,6 +275,38 @@ export function OrdersPage({ onOpenOrder, onCreateOrder, onEditOrder, initialTab
     receivedDateFilter.start,
     receivedDateFilter.end,
   ]);
+
+  const handleColumnResizeStart = React.useCallback((event, columnKey) => {
+    event.preventDefault();
+    event.stopPropagation();
+
+    const columnIndex = ORDER_TABLE_COLUMNS.findIndex((column) => column.key === columnKey);
+    const currentColumn = ORDER_TABLE_COLUMNS[columnIndex];
+    const nextColumn = ORDER_TABLE_COLUMNS[columnIndex + 1];
+    if (!currentColumn || !nextColumn) {
+      return;
+    }
+
+    const tableWidth = tableScrollRef.current?.clientWidth || 1;
+    const startX = event.clientX;
+    const startWidths = columnWidths;
+    setResizingColumn(columnKey);
+    document.body.classList.add('orders-column-resizing');
+
+    const handleMouseMove = (moveEvent) => {
+      const delta = ((moveEvent.clientX - startX) / tableWidth) * 100;
+      setColumnWidths(resizeOrderTableColumnPair(startWidths, currentColumn, nextColumn, delta));
+    };
+    const handleMouseUp = () => {
+      setResizingColumn(null);
+      document.body.classList.remove('orders-column-resizing');
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+    };
+
+    window.addEventListener('mousemove', handleMouseMove);
+    window.addEventListener('mouseup', handleMouseUp);
+  }, [columnWidths]);
 
   const toggleRow = (id) => {
     const next = new Set(selected);
@@ -296,18 +439,14 @@ export function OrdersPage({ onOpenOrder, onCreateOrder, onEditOrder, initialTab
         if (tab === 'cancel') return o.status === '취소';
         return true;
       })
-      .filter((o) => matchesDateFilter(o.scheduledDate, dateFilter))
+      .filter((o) => matchesVisitDateFilter(o.scheduledDate, dateFilter))
       .filter((o) => matchesReceivedDateFilter(o.receivedRaw, receivedDateFilter))
       .filter((o) => matchesPartnerFilter(o, partnerFilter))
       .filter((o) => matchesOrderQuery(o, query)),
     sortBy,
   );
   const groupedFiltered = React.useMemo(() => {
-    const sorted = [...filtered].sort((a, b) => {
-      const aKey = `${a.groupId || a.id}|${a.scheduledDate || ''}|${a.id}`;
-      const bKey = `${b.groupId || b.id}|${b.scheduledDate || ''}|${b.id}`;
-      return aKey.localeCompare(bKey);
-    });
+    const sorted = [...filtered];
     const groupStatusMap = new Map();
     for (const row of sorted) {
       const key = row.groupId || row.id;
@@ -358,10 +497,10 @@ export function OrdersPage({ onOpenOrder, onCreateOrder, onEditOrder, initialTab
   };
 
   return (
-    <div data-testid="admin-orders-page" style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0, background: 'var(--bg)' }}>
+    <div data-testid="admin-orders-page" className="page-shell" style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0, background: 'var(--bg)', maxWidth: 'none' }}>
       {/* Insight line — typographic, no card chrome */}
       <div style={{
-        padding: '18px 24px 14px',
+        padding: '12px 10px 10px',
         background: 'var(--bg)',
         display: 'flex', alignItems: 'center', gap: 24,
       }}>
@@ -394,7 +533,7 @@ export function OrdersPage({ onOpenOrder, onCreateOrder, onEditOrder, initialTab
 
       {/* Toolbar — real search, visit-date filtering, and sort */}
       <div style={{
-        padding: '0 24px 12px',
+        padding: '0 10px 8px',
         background: 'var(--bg)',
         display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap',
       }}>
@@ -410,7 +549,7 @@ export function OrdersPage({ onOpenOrder, onCreateOrder, onEditOrder, initialTab
           <input
             value={query}
             onChange={(event) => setQuery(event.target.value)}
-            placeholder="주문번호, 고객, 주소 검색"
+            placeholder="고객/주소/연락처 검색"
             aria-label="주문 검색"
             style={{
               flex: 1,
@@ -434,6 +573,7 @@ export function OrdersPage({ onOpenOrder, onCreateOrder, onEditOrder, initialTab
             <Icon name="calendar" size={12}/> 방문일
           </span>
           {[
+            ['upcoming', '오늘부터'],
             ['all', '전체'],
             ['today', '오늘'],
             ['tomorrow', '내일'],
@@ -475,9 +615,6 @@ export function OrdersPage({ onOpenOrder, onCreateOrder, onEditOrder, initialTab
           )}
         </div>
         <div style={{ flex: 1 }}/>
-        <button style={softGhostBtn} onClick={() => setSortBy(sortBy === 'visit' ? 'received' : 'visit')}>
-          <Icon name="list" size={11}/> {sortBy === 'visit' ? '방문일순' : '접수일순'}
-        </button>
         <button
           data-testid="admin-orders-create"
           className="btn btn--primary btn--lg"
@@ -488,7 +625,7 @@ export function OrdersPage({ onOpenOrder, onCreateOrder, onEditOrder, initialTab
       </div>
 
       {/* 협력사 탭 */}
-      <div style={{ padding: '0 24px 8px', background: 'var(--bg)', display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+      <div style={{ padding: '0 10px 8px', background: 'var(--bg)', display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
         <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, color: 'var(--text-tertiary)', fontSize: 12, fontWeight: 600, whiteSpace: 'nowrap' }}>
           <Icon name="user" size={12}/> 협력사
         </span>
@@ -516,7 +653,7 @@ export function OrdersPage({ onOpenOrder, onCreateOrder, onEditOrder, initialTab
       </div>
 
       {/* 접수일 필터 */}
-      <div style={{ padding: '0 24px 12px', background: 'var(--bg)', display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+      <div style={{ padding: '0 10px 8px', background: 'var(--bg)', display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
         <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, color: 'var(--text-tertiary)', fontSize: 12, fontWeight: 600, whiteSpace: 'nowrap' }}>
           <Icon name="calendar" size={12}/> 접수일
         </span>
@@ -564,7 +701,7 @@ export function OrdersPage({ onOpenOrder, onCreateOrder, onEditOrder, initialTab
 
       {/* Tabs — minimal underline */}
       <div style={{
-        padding: '0 24px',
+        padding: '0 10px',
         borderBottom: '1px solid var(--border)',
         display: 'flex', gap: 2,
       }}>
@@ -602,7 +739,7 @@ export function OrdersPage({ onOpenOrder, onCreateOrder, onEditOrder, initialTab
       {/* Selection bar */}
       {selected.size > 0 && (
         <div style={{
-          padding: '8px 24px',
+          padding: '8px 10px',
           background: 'var(--bg)',
           borderBottom: '1px solid var(--border)',
           display: 'flex', alignItems: 'center', gap: 10, fontSize: 12,
@@ -643,32 +780,26 @@ export function OrdersPage({ onOpenOrder, onCreateOrder, onEditOrder, initialTab
       )}
 
       {/* Table — airy, no inner borders, hover float */}
-      <div className="scroll" style={{ flex: 1, overflow: 'auto', padding: '4px 12px 20px' }}>
+      <div ref={tableScrollRef} data-testid="orders-table-scroll" className="scroll" style={{ flex: 1, overflowY: 'auto', overflowX: 'hidden', padding: '4px 4px 20px' }}>
         {actionError && <ListNotice text={actionError} tone="danger" />}
         {actionNotice && <ListNotice testId="orders-bulk-notice" text={actionNotice.text} tone={actionNotice.tone} />}
         {ordersResource.isLoading && <ListNotice text="주문 목록을 불러오는 중입니다." />}
         {!ordersResource.isLoading && ordersResource.error && <ListNotice text="주문 목록을 불러오지 못했습니다." tone="danger" />}
         {!ordersResource.isLoading && !ordersResource.error && filtered.length === 0 && <ListNotice text="표시할 주문이 없습니다." />}
-        <table className="table-modern" style={{ minWidth: 1500 }}>
+        <table className="table-modern orders-table" style={{ width: 'calc(100% - 12px)', tableLayout: 'fixed' }}>
           <colgroup>
-            <col style={{ width: 36 }}/>
-            <col style={{ width: 130 }}/>
-            <col style={{ width: 100 }}/>
-            <col style={{ width: 150 }}/>
-            <col/>
-            <col/>
-            <col style={{ width: 80 }}/>
-            <col style={{ width: 110 }}/>
-            <col style={{ width: 120 }}/>
-            <col style={{ width: 110, textAlign: 'right' }}/>
-            <col style={{ width: 70 }}/>
-            <col style={{ width: 70 }}/>
-            <col style={{ width: 80 }}/>
-            <col style={{ width: 132 }}/>
+            {ORDER_TABLE_COLUMNS.map((column) => (
+              <col key={column.key} style={{ width: `${columnWidths[column.key]}%` }} />
+            ))}
           </colgroup>
           <thead>
             <tr>
-              <th style={{ paddingRight: 0 }}>
+              <ResizableTh
+                columnKey="select"
+                onResizeStart={handleColumnResizeStart}
+                isResizing={resizingColumn === 'select'}
+                style={{ paddingRight: 0 }}
+              >
                 <input
                   data-testid="orders-select-all"
                   type="checkbox"
@@ -678,20 +809,17 @@ export function OrdersPage({ onOpenOrder, onCreateOrder, onEditOrder, initialTab
                     setSelected(event.target.checked ? new Set(pagedRows.map((order) => order.id)) : new Set());
                   }}
                 />
-              </th>
-              <th>상태</th>
-              <th>주문번호</th>
-              <th>방문일</th>
-              <th>상품</th>
-              <th>주소</th>
-              <th>고객</th>
-              <th>연락처</th>
-              <th>담당팀</th>
-              <th style={{ textAlign: 'right' }}>금액</th>
-              <th>결제</th>
-              <th>사진</th>
-              <th>고객전달</th>
-              <th>관리</th>
+              </ResizableTh>
+              <ResizableTh columnKey="status" onResizeStart={handleColumnResizeStart} isResizing={resizingColumn === 'status'}>상태</ResizableTh>
+              <ResizableTh columnKey="date" onResizeStart={handleColumnResizeStart} isResizing={resizingColumn === 'date'}><DateSortHeader sortBy={sortBy} onSortChange={setSortBy} /></ResizableTh>
+              <ResizableTh columnKey="service" onResizeStart={handleColumnResizeStart} isResizing={resizingColumn === 'service'}>상품</ResizableTh>
+              <ResizableTh columnKey="address" onResizeStart={handleColumnResizeStart} isResizing={resizingColumn === 'address'}>주소</ResizableTh>
+              <ResizableTh columnKey="customer" onResizeStart={handleColumnResizeStart} isResizing={resizingColumn === 'customer'}>고객</ResizableTh>
+              <ResizableTh columnKey="team" onResizeStart={handleColumnResizeStart} isResizing={resizingColumn === 'team'}>담당</ResizableTh>
+              <ResizableTh columnKey="amount" onResizeStart={handleColumnResizeStart} isResizing={resizingColumn === 'amount'} style={{ textAlign: 'right' }}>금액</ResizableTh>
+              <ResizableTh columnKey="payment" onResizeStart={handleColumnResizeStart} isResizing={resizingColumn === 'payment'}>결제</ResizableTh>
+              <ResizableTh columnKey="progress" onResizeStart={handleColumnResizeStart} isResizing={resizingColumn === 'progress'}>진행</ResizableTh>
+              <th data-testid="orders-column-actions">관리</th>
             </tr>
           </thead>
           <tbody>
@@ -704,6 +832,7 @@ export function OrdersPage({ onOpenOrder, onCreateOrder, onEditOrder, initialTab
                   data-testid={`admin-order-row-${o.id}`}
                   className={[
                     selected.has(o.id) ? 'is-selected' : '',
+                    isUnpaid ? 'is-flagged' : '',
                     isCancelled ? 'is-muted' : '',
                   ].join(' ')}
                   onMouseEnter={() => setHoverRow(o.id)}
@@ -734,43 +863,86 @@ export function OrdersPage({ onOpenOrder, onCreateOrder, onEditOrder, initialTab
                       )}
                     </span>
                   </td>
-                  <td className="mono" style={{ fontSize: 11.5, color: 'var(--text-tertiary)' }}>{o.id}</td>
                   <td style={{ fontWeight: 500 }}>
-                    {o.visit === '미정'
-                      ? <span style={{ color: 'var(--text-quaternary)', fontWeight: 400 }}>미정</span>
-                      : <span style={{ display: 'inline-flex', alignItems: 'baseline', gap: 6, whiteSpace: 'nowrap' }}>
-                          <span>{o.visit}</span>
-                          <span style={{ color: 'var(--text-quaternary)', fontWeight: 400, fontSize: 11 }}>{o.timeWindow}</span>
-                        </span>}
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}>
+                      {o.visit === '미정'
+                        ? <span style={{ color: 'var(--text-quaternary)', fontWeight: 400 }}>미정</span>
+                        : <span style={{ display: 'inline-flex', alignItems: 'baseline', gap: 5, whiteSpace: 'nowrap' }}>
+                            <span>{o.visit}</span>
+                            <span style={{ color: 'var(--text-quaternary)', fontWeight: 400, fontSize: 10.5 }}>{o.timeWindow}</span>
+                          </span>}
+                      <span style={{ color: 'var(--text-quaternary)', fontSize: 10.5, fontWeight: 400, whiteSpace: 'nowrap' }}>
+                        접수 {o.received || '-'}
+                      </span>
+                    </div>
                   </td>
                   <td>
-                    <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'block' }}>{o.product}</span>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}>
+                      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'block' }}>{o.serviceName}</span>
+                      {o.sizeOrQuantity && (
+                        <span style={{ color: 'var(--text-quaternary)', fontSize: 10.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {o.sizeOrQuantity}
+                        </span>
+                      )}
+                    </div>
                   </td>
-                  <td style={{ color: 'var(--text-tertiary)', maxWidth: 280, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 12 }} title={o.address}>{o.address}</td>
-                  <td>{o.customer}</td>
-                  <td className="mono" style={{ fontSize: 11.5, color: 'var(--text-tertiary)' }}>{o.phone}</td>
+                  <td
+                    style={{
+                      color: 'var(--text-tertiary)',
+                      overflow: 'hidden',
+                      display: '-webkit-box',
+                      WebkitLineClamp: 2,
+                      WebkitBoxOrient: 'vertical',
+                      whiteSpace: 'normal',
+                      lineHeight: 1.35,
+                      fontSize: 12,
+                    }}
+                    title={o.fullAddress || o.address}
+                  >
+                    {o.fullAddress || o.address}
+                  </td>
+                  <td>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}>
+                      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{o.customer}</span>
+                      <span className="mono" style={{ fontSize: 10.5, color: 'var(--text-quaternary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {o.phone}
+                      </span>
+                    </div>
+                  </td>
                   <td>
                     {isUnassigned
                       ? <span style={{
-                          fontSize: 12, fontWeight: 500, color: '#b45309',
+                          fontSize: 11.5, fontWeight: 500, color: '#b45309',
                           display: 'inline-flex', alignItems: 'center', gap: 5,
                         }}>
                           <span style={{ width: 5, height: 5, borderRadius: '50%', background: '#f59e0b' }}/>
                           미배정
                         </span>
                       : <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-                          <Avatar name={o.team[0]} size={18} tone="info"/>
-                          <span style={{ fontSize: 12 }}>{o.team}</span>
+                          <Avatar name={o.team[0]} size={16} tone="info"/>
+                          <span style={{ fontSize: 11.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{o.team}</span>
                         </span>}
                   </td>
-                  <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums', fontWeight: 600 }}>
-                    {o.amount === 0
-                      ? <span style={{ color: 'var(--text-quaternary)', fontWeight: 400 }}>—</span>
-                      : `₩${o.amount.toLocaleString()}`}
+                  <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
+                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 2 }}>
+                      <span style={{ fontWeight: 600 }}>
+                        {o.amount === 0
+                          ? <span style={{ color: 'var(--text-quaternary)', fontWeight: 400 }}>—</span>
+                          : `₩${o.amount.toLocaleString()}`}
+                      </span>
+                      <span style={{ color: 'var(--text-quaternary)', fontSize: 10.5, fontWeight: 500 }}>
+                        도급 {o.partnerPrice === 0 ? '—' : `₩${o.partnerPrice.toLocaleString()}`}
+                      </span>
+                      {o.vatType === 'excluded' && <span style={{ color: 'var(--warn-fg)', fontSize: 10.5, fontWeight: 500 }}>VAT 별도</span>}
+                    </div>
                   </td>
                   <td><PaidPill paid={o.paid} isUnpaid={isUnpaid}/></td>
-                  <td><SimplePill kind="photo" value={o.photo}/></td>
-                  <td><SimplePill kind="deliver" value={o.delivered}/></td>
+                  <td>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+                      <SimplePill kind="photo" value={o.photo}/>
+                      <SimplePill kind="deliver" value={o.delivered}/>
+                    </div>
+                  </td>
                   <td onClick={(e) => e.stopPropagation()} style={{ textAlign: 'right' }}>
                     <div style={{ display: 'inline-flex', gap: 4, opacity: hoverRow === o.id ? 1 : 0.78 }}>
                       <button
@@ -956,9 +1128,9 @@ function matchesOrderQuery(order, query) {
   }
 
   return [
-    order.id,
     order.status,
-    order.product,
+    order.serviceName,
+    order.sizeOrQuantity,
     order.address,
     order.customer,
     order.phone,
@@ -980,6 +1152,17 @@ function normalizeActionError(error) {
 
 function shortOrderId(orderId) {
   return String(orderId || '').slice(0, 8);
+}
+
+function matchesVisitDateFilter(value, dateFilter) {
+  if (dateFilter.preset === 'upcoming') {
+    // 오늘부터: 미정(날짜 없음) 주문은 노출 유지, 과거 방문일만 숨긴다.
+    if (!value) {
+      return true;
+    }
+    return value >= getAppTodayValue();
+  }
+  return matchesDateFilter(value, dateFilter);
 }
 
 function matchesDateFilter(value, dateFilter) {
@@ -1013,12 +1196,109 @@ function matchesPartnerFilter(order, partnerFilter) {
   return order.partnerId === partnerFilter;
 }
 
+function getInitialOrderTableColumnWidths() {
+  if (typeof window === 'undefined') {
+    return ORDER_TABLE_DEFAULT_WIDTHS;
+  }
+  try {
+    const saved = window.localStorage.getItem(ORDER_TABLE_COLUMN_STORAGE_KEY);
+    if (!saved) {
+      return ORDER_TABLE_DEFAULT_WIDTHS;
+    }
+    return normalizeOrderTableColumnWidths(JSON.parse(saved));
+  } catch {
+    return ORDER_TABLE_DEFAULT_WIDTHS;
+  }
+}
+
+function normalizeOrderTableColumnWidths(input) {
+  const next = {};
+  let total = 0;
+  for (const column of ORDER_TABLE_COLUMNS) {
+    const value = Number(input?.[column.key]);
+    const width = Number.isFinite(value) ? Math.max(value, column.min) : column.width;
+    next[column.key] = width;
+    total += width;
+  }
+
+  if (!total) {
+    return ORDER_TABLE_DEFAULT_WIDTHS;
+  }
+
+  for (const column of ORDER_TABLE_COLUMNS) {
+    next[column.key] = Number(((next[column.key] / total) * 100).toFixed(3));
+  }
+  return next;
+}
+
+function resizeOrderTableColumnPair(widths, currentColumn, nextColumn, delta) {
+  const currentWidth = widths[currentColumn.key];
+  const nextWidth = widths[nextColumn.key];
+  const minDelta = currentColumn.min - currentWidth;
+  const maxDelta = nextWidth - nextColumn.min;
+  const boundedDelta = Math.max(minDelta, Math.min(delta, maxDelta));
+
+  return {
+    ...widths,
+    [currentColumn.key]: Number((currentWidth + boundedDelta).toFixed(3)),
+    [nextColumn.key]: Number((nextWidth - boundedDelta).toFixed(3)),
+  };
+}
+
 function sortOrders(orders, sortBy) {
-  return [...orders].sort((a, b) => {
-    const aValue = sortBy === 'received' ? (a.receivedRaw || a.received) : (a.scheduledDate || '9999-99-99');
-    const bValue = sortBy === 'received' ? (b.receivedRaw || b.received) : (b.scheduledDate || '9999-99-99');
-    return String(aValue).localeCompare(String(bValue));
-  });
+  if (sortBy.startsWith('received')) {
+    const direction = sortBy.endsWith('_desc') ? -1 : 1;
+    const emptyValue = direction === 1 ? '9999-99-99' : '';
+    return [...orders].sort((a, b) => {
+      const aValue = a.receivedRaw || emptyValue;
+      const bValue = b.receivedRaw || emptyValue;
+      return String(aValue).localeCompare(String(bValue)) * direction
+        || String(a.id).localeCompare(String(b.id));
+    });
+  }
+
+  // 방문일 정렬: 오늘 우선(미수금 연체 → 오늘·이후·미정 → 과거), 기준일은 KST 오늘이라 매일 자동 롤오버된다.
+  const today = getAppTodayValue();
+  const reverse = sortBy.endsWith('_desc');
+  return [...orders].sort((a, b) => compareVisitOrder(a, b, today, reverse));
+}
+
+function visitOrderGroup(order, today) {
+  const date = order.scheduledDate;
+  if (date && date < today && isPaymentCheckNeeded(order.paymentStatus)) {
+    return 0; // 미수금 연체 — 항상 최상단
+  }
+  if (!date || date >= today) {
+    return 1; // 오늘·이후·미정
+  }
+  return 2; // 과거(전체 보기에서만 노출)
+}
+
+function compareVisitOrder(a, b, today, reverse) {
+  const groupA = visitOrderGroup(a, today);
+  const groupB = visitOrderGroup(b, today);
+  if (groupA !== groupB) {
+    return groupA - groupB;
+  }
+
+  const idCmp = String(a.id).localeCompare(String(b.id));
+  const dateA = a.scheduledDate || '';
+  const dateB = b.scheduledDate || '';
+
+  if (groupA === 1) {
+    // 미정(날짜 없음)은 오늘·이후 그룹 안에서 항상 마지막.
+    if (!dateA && !dateB) return idCmp;
+    if (!dateA) return 1;
+    if (!dateB) return -1;
+    const cmp = dateA.localeCompare(dateB) * (reverse ? -1 : 1);
+    return cmp || idCmp;
+  }
+  if (groupA === 2) {
+    // 과거는 최근 날짜가 먼저.
+    return dateB.localeCompare(dateA) || idCmp;
+  }
+  // 미수금 연체는 오래된 건이 먼저.
+  return dateA.localeCompare(dateB) || idCmp;
 }
 
 function toOrderRow(order) {
@@ -1034,10 +1314,16 @@ function toOrderRow(order) {
     timeWindow: order.requested_time || '-',
     team: order.team_name || '미배정',
     product: order.size_or_quantity ? `${order.service_name} (${order.size_or_quantity})` : order.service_name,
+    serviceName: order.service_name,
+    sizeOrQuantity: order.size_or_quantity,
     address: order.customer_address,
+    addressDetail: order.customer_address_detail || '',
+    fullAddress: [order.customer_address, order.customer_address_detail].filter(Boolean).join(' '),
     customer: order.customer_name,
     phone: formatPhone(order.customer_phone),
     amount: Number(order.total_amount || 0),
+    partnerPrice: Number(order.partner_price ?? order.partner_payment_amount ?? 0),
+    vatType: order.vat_type || 'included',
     paymentStatus: order.payment_status,
     paid: toPaidState(order.payment_status),
     photo: toPhotoState(order.status),
@@ -1052,6 +1338,12 @@ function toMockOrderRow(order) {
     partnerId: order.partnerId || null,
     receivedRaw: mockDateToValue(order.received),
     scheduledDate: mockDateToValue(order.visit),
+    serviceName: order.serviceName || order.product,
+    sizeOrQuantity: order.sizeOrQuantity || '',
+    addressDetail: order.addressDetail || '',
+    fullAddress: order.fullAddress || [order.address, order.addressDetail].filter(Boolean).join(' '),
+    partnerPrice: Number(order.partnerPrice || 0),
+    vatType: order.vatType || 'included',
   };
 }
 
@@ -1068,6 +1360,10 @@ function mockDateToValue(value) {
 
 function createDateFilter(preset) {
   const today = getAppTodayDate();
+  if (preset === 'upcoming') {
+    // 오늘부터(미래 + 미정) — start/end는 비워두고 matchesVisitDateFilter에서 처리한다.
+    return { preset, start: '', end: '' };
+  }
   if (preset === 'today') {
     const value = formatDateValue(today);
     return { preset, start: value, end: value };
@@ -1108,7 +1404,8 @@ function createInitialDateFilter(initialTab, initialDatePreset) {
   if (['monthly_done', 'monthly_revenue'].includes(initialTab)) {
     return createDateFilter('month');
   }
-  return createDateFilter('all');
+  // 기본 진입은 '오늘부터'(미래+미정)만 노출, '전체'를 눌러야 과거까지 본다.
+  return createDateFilter('upcoming');
 }
 
 function normalizeDateRange(start, end) {
@@ -1119,6 +1416,9 @@ function normalizeDateRange(start, end) {
 }
 
 function formatDateFilterSummary(dateFilter) {
+  if (dateFilter.preset === 'upcoming') {
+    return '오늘 이후 방문';
+  }
   if (!dateFilter.start && !dateFilter.end) {
     return '전체 방문일';
   }

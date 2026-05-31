@@ -73,7 +73,7 @@ export function MessagesPage({ onOpenOrder }) {
 
   return (
     <div data-testid="admin-messages-page" style={{ flex: 1, overflow: 'auto', background: 'var(--bg)', padding: 20 }}>
-      <div style={{ maxWidth: 1320, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 14 }}>
+      <div className="page-shell" style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10 }}>
           <StatCard label="전체 발송" value={messages.length} icon="send" />
           <StatCard label="성공" value={stats.sent} icon="check" tone="success" />

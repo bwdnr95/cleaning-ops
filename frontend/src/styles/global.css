@@ -52,6 +52,17 @@
   --purple-fg: #6d28d9;
   --purple-border: #ddd6fe;
 
+  --paid-fg: var(--neutral-fg);
+  --paid-bg: var(--neutral-bg);
+  --unpaid-fg: var(--danger-fg);
+  --unpaid-bg: var(--danger-bg);
+  --deposit-fg: var(--info-fg);
+  --deposit-bg: var(--info-bg);
+  --settlement-paid-fg: var(--neutral-fg);
+  --settlement-paid-bg: var(--neutral-bg);
+  --settlement-unpaid-fg: var(--danger-fg);
+  --settlement-unpaid-bg: var(--danger-bg);
+
   /* Density — Compact */
   --row-h: 38px;
   --header-h: 36px;
@@ -205,6 +216,12 @@ input, select, textarea { font-family: inherit; }
   border-radius: 8px;
 }
 
+.page-shell {
+  max-width: none;
+  margin: 0;
+  width: 100%;
+}
+
 /* ─── Table ─── */
 .table {
   width: 100%;
@@ -312,6 +329,59 @@ input, select, textarea { font-family: inherit; }
 .table-modern tbody tr.is-muted td { opacity: 0.5; }
 .table-modern tbody tr.is-muted:hover td { opacity: 0.8; }
 
+.orders-table thead th {
+  padding: 0 6px;
+}
+.orders-table-th-content {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.orders-table-resizer {
+  position: absolute;
+  top: 5px;
+  right: 0;
+  bottom: 5px;
+  z-index: 4;
+  width: 10px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  cursor: col-resize;
+}
+.orders-table-resizer::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  bottom: 2px;
+  left: 3px;
+  width: 1px;
+  background: transparent;
+}
+.orders-table-resizer:hover,
+.orders-table-resizer.is-active {
+  background: var(--brand-bg);
+}
+.orders-table-resizer:hover::after,
+.orders-table-resizer.is-active::after {
+  background: var(--brand);
+}
+body.orders-column-resizing {
+  cursor: col-resize;
+  user-select: none;
+}
+.orders-table tbody td {
+  height: 48px;
+  padding: 0 6px;
+}
+.orders-table tbody tr td:first-child {
+  padding-left: 6px;
+}
+.orders-table tbody tr td:last-child {
+  padding-right: 6px;
+}
+
 /* ─── Input ─── */
 .input {
   height: 30px;
@@ -348,6 +418,25 @@ input, select, textarea { font-family: inherit; }
   border: 1px solid var(--border);
   border-bottom-width: 2px;
   border-radius: 4px;
+}
+
+.admin-create-fab {
+  display: none;
+}
+
+@media (max-width: 768px) {
+  .admin-create-fab {
+    display: inline-flex;
+    position: fixed;
+    right: 16px;
+    bottom: 18px;
+    z-index: 50;
+    width: 48px;
+    height: 48px;
+    border-radius: 999px;
+    padding: 0;
+    box-shadow: var(--shadow-lg);
+  }
 }
 
 /* Striped placeholder for imagery */

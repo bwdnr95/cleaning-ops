@@ -138,7 +138,8 @@ test('admin can filter orders by visit date with the custom date picker', async 
   await loginAsAdmin(page);
   await page.getByTestId('admin-nav-orders').click();
   await expect(page.getByTestId('admin-orders-page')).toBeVisible();
-  await expect(page.getByTestId('orders-date-preset-all')).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByTestId('orders-date-preset-upcoming')).toHaveAttribute('aria-pressed', 'true');
+  await page.getByTestId('orders-date-preset-all').click();
   await expect(page.getByTestId(`admin-order-row-${targetOrder.id}`)).toBeVisible();
   await expect(page.getByTestId(`admin-order-row-${outsideOrder.id}`)).toBeVisible();
 
@@ -152,6 +153,57 @@ test('admin can filter orders by visit date with the custom date picker', async 
   await expect(page.getByTestId(`admin-order-row-${outsideOrder.id}`)).toBeVisible();
 });
 
+test('admin order list fits the desktop viewport and exposes received-date sorting', async ({ page }) => {
+  await loginAsAdmin(page);
+  await page.getByTestId('admin-nav-orders').click();
+  await expect(page.getByTestId('admin-orders-page')).toBeVisible();
+  await expect(page.getByRole('button', { name: '접수 내림차순' })).toBeVisible();
+
+  const width = await page.evaluate(() => ({
+    scrollWidth: document.documentElement.scrollWidth,
+    clientWidth: document.documentElement.clientWidth,
+  }));
+  expect(width.scrollWidth).toBeLessThanOrEqual(width.clientWidth + 1);
+
+  const tableWidth = await page.getByTestId('orders-table-scroll').evaluate((element) => ({
+    scrollWidth: element.scrollWidth,
+    clientWidth: element.clientWidth,
+  }));
+  expect(tableWidth.scrollWidth).toBeLessThanOrEqual(tableWidth.clientWidth + 1);
+
+  const addressBefore = await page.getByTestId('orders-column-address').boundingBox();
+  const customerBefore = await page.getByTestId('orders-column-customer').boundingBox();
+  const addressResizer = await page.getByTestId('orders-column-resizer-address').boundingBox();
+  expect(addressBefore).not.toBeNull();
+  expect(customerBefore).not.toBeNull();
+  expect(addressResizer).not.toBeNull();
+
+  await page.mouse.move(addressResizer!.x + addressResizer!.width / 2, addressResizer!.y + addressResizer!.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(addressResizer!.x - 70, addressResizer!.y + addressResizer!.height / 2);
+  await page.mouse.up();
+
+  const addressAfter = await page.getByTestId('orders-column-address').boundingBox();
+  const customerAfter = await page.getByTestId('orders-column-customer').boundingBox();
+  expect(addressAfter!.width).toBeLessThan(addressBefore!.width - 30);
+  expect(customerAfter!.width).toBeGreaterThan(customerBefore!.width + 30);
+  const resizedTableWidth = await page.getByTestId('orders-table-scroll').evaluate((element) => ({
+    scrollWidth: element.scrollWidth,
+    clientWidth: element.clientWidth,
+  }));
+  expect(resizedTableWidth.scrollWidth).toBeLessThanOrEqual(resizedTableWidth.clientWidth + 1);
+
+  const contentInset = await page.getByTestId('orders-table-scroll').evaluate((element) => {
+    const page = document.querySelector('[data-testid="admin-orders-page"]');
+    if (!page) return 999;
+    return element.getBoundingClientRect().left - page.getBoundingClientRect().left;
+  });
+  expect(contentInset).toBeLessThanOrEqual(6);
+
+  await page.getByRole('button', { name: '접수 내림차순' }).click();
+  await expect(page.getByRole('button', { name: '접수 내림차순' })).toBeVisible();
+});
+
 test('admin can page through the full order result set', async ({ page, request }) => {
   const orders = await createPaginationOrders(request);
   const lastOrder = orders[orders.length - 1];
@@ -159,7 +211,8 @@ test('admin can page through the full order result set', async ({ page, request 
   await loginAsAdmin(page);
   await page.getByTestId('admin-nav-orders').click();
   await expect(page.getByTestId('admin-orders-page')).toBeVisible();
-  await expect(page.getByTestId('orders-date-preset-all')).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByTestId('orders-date-preset-upcoming')).toHaveAttribute('aria-pressed', 'true');
+  await page.getByTestId('orders-date-preset-all').click();
   await page.getByTestId('orders-pagination-page-size').selectOption('10');
   await expect(page.getByTestId('orders-pagination-next')).toBeEnabled();
 
@@ -176,7 +229,8 @@ test('admin can run selected order bulk operations from the order list', async (
   await loginAsAdmin(page);
   await page.getByTestId('admin-nav-orders').click();
   await expect(page.getByTestId('admin-orders-page')).toBeVisible();
-  await expect(page.getByTestId('orders-date-preset-all')).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByTestId('orders-date-preset-upcoming')).toHaveAttribute('aria-pressed', 'true');
+  await page.getByTestId('orders-date-preset-all').click();
 
   await selectOrderRows(page, orders);
   await page.getByTestId('orders-bulk-status-open').click();
@@ -209,7 +263,8 @@ test('admin can adjust schedule from order detail and jump to related ops pages'
   await loginAsAdmin(page);
   await page.getByTestId('admin-nav-orders').click();
   await expect(page.getByTestId('admin-orders-page')).toBeVisible();
-  await expect(page.getByTestId('orders-date-preset-all')).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByTestId('orders-date-preset-upcoming')).toHaveAttribute('aria-pressed', 'true');
+  await page.getByTestId('orders-date-preset-all').click();
   await page.getByTestId(`admin-order-row-${order.id}`).click();
   await expect(page.getByTestId('admin-order-detail-page')).toBeVisible();
 

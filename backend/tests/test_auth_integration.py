@@ -586,7 +586,7 @@ def test_admin_order_list_returns_more_than_legacy_page_limit() -> None:
         )
         assert create_response.status_code == 201, create_response.text
 
-    list_response = client.get("/api/admin/orders", headers=headers)
+    list_response = client.get("/api/admin/orders?include_past_paid=true", headers=headers)
 
     assert list_response.status_code == 200
     body = list_response.json()
@@ -1874,6 +1874,8 @@ def test_admin_message_settings_reports_solapi_readiness_without_secret_values(m
     monkeypatch.setattr(settings, "solapi_kakao_template_customer_day_before", "KA_DAY_BEFORE")
     monkeypatch.setattr(settings, "solapi_kakao_template_partner_assignment", "KA_PARTNER")
     monkeypatch.setattr(settings, "solapi_kakao_template_customer_photo_ready", "KA_PHOTO")
+    monkeypatch.setattr(settings, "solapi_kakao_template_customer_quote", "KA_QUOTE")
+    monkeypatch.setattr(settings, "solapi_kakao_template_partner_customer_info", "KA_PARTNER_CUSTOMER")
 
     client = make_test_client()
     admin_session = login(client, "/api/auth/admin/login", DEV_ADMIN_EMAIL, DEV_ADMIN_PASSWORD)
@@ -1907,6 +1909,8 @@ def test_admin_message_settings_warns_for_unready_solapi(monkeypatch) -> None:
     monkeypatch.setattr(settings, "solapi_kakao_template_customer_day_before", "")
     monkeypatch.setattr(settings, "solapi_kakao_template_partner_assignment", "")
     monkeypatch.setattr(settings, "solapi_kakao_template_customer_photo_ready", "")
+    monkeypatch.setattr(settings, "solapi_kakao_template_customer_quote", "")
+    monkeypatch.setattr(settings, "solapi_kakao_template_partner_customer_info", "")
 
     client = make_test_client()
     admin_session = login(client, "/api/auth/admin/login", DEV_ADMIN_EMAIL, DEV_ADMIN_PASSWORD)

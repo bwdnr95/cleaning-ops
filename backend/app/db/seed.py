@@ -170,11 +170,14 @@ def ensure_service_catalog(db: Session) -> tuple[ServiceCategory, ServiceItem]:
             name="입주청소",
             unit="평",
             base_price=280000,
+            partner_base_price=196000,
             description="기본 입주청소 상품",
             is_active=True,
             sort_order=10,
         )
         db.add(item)
+    elif not item.partner_base_price:
+        item.partner_base_price = 196000
 
     return category, item
 
@@ -217,6 +220,7 @@ def ensure_sample_order(db: Session) -> Order:
         customer_phone=normalize_phone("01098765432"),
         customer_address="서울 강남구 테헤란로 100",
         total_amount=280000,
+        discount_amount=0,
         deposit_amount=50000,
         balance_amount=230000,
         onsite_extra_amount=0,

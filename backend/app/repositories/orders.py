@@ -3,6 +3,8 @@ from datetime import date
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from app.core.time import business_today
+from app.domain.payment_status import PaymentStatus
 from app.models.order import Order
 from app.repositories.base import Repository
 
@@ -19,15 +21,40 @@ class OrderRepository(Repository[Order]):
             return None
         return obj
 
-    def list_orders(self, *, limit: int | None = None, offset: int = 0) -> list[Order]:
-        stmt = (
-            select(Order)
-            .where(Order.deleted_at.is_(None))
-            .order_by(Order.scheduled_date.asc().nulls_last(), Order.id.asc())
-        )
+    def list_orders(
+        self,
+        *,
+        limit: int | None = None,
+        offset: int = 0,
+        sort: str = "visit_asc",
+        include_past_paid: bool = False,
+    ) -> list[Order]:
+        today = business_today()
+        stmt = select(Order).where(Order.deleted_at.is_(None))
+        rows = list(self.db.scalars(stmt))
+        if not include_past_paid:
+            rows = [
+                order
+                for order in rows
+                if not (
+                    order.scheduled_date is not None
+                    and order.scheduled_date < today
+                    and not is_overdue_unpaid_order(order, today)
+                )
+            ]
+
+        if sort in {"received_asc", "received_desc"}:
+            rows.sort(
+                key=lambda order: order_received_sort_key(order, reverse_received=sort == "received_desc"),
+            )
+        else:
+            reverse_visit = sort == "visit_desc"
+            rows.sort(key=lambda order: order_visit_sort_key(order, today, reverse_visit=reverse_visit))
+        if offset:
+            rows = rows[offset:]
         if limit is not None:
-            stmt = stmt.limit(limit).offset(offset)
-        return list(self.db.scalars(stmt))
+            rows = rows[:limit]
+        return rows
 
     def list_scheduled_between(
         self,
@@ -71,3 +98,43 @@ class OrderRepository(Repository[Order]):
             Order.scheduled_date == target,
         )
         return int(self.db.scalar(stmt) or 0)
+
+
+OVERDUE_UNPAID_PAYMENT_STATUSES: tuple[str, ...] = (
+    PaymentStatus.UNPAID,
+    PaymentStatus.PENDING,
+    PaymentStatus.BALANCE_PENDING,
+    PaymentStatus.DEPOSIT_PAID,
+)
+
+
+def is_overdue_unpaid_order(order: Order, today: date) -> bool:
+    return (
+        order.scheduled_date is not None
+        and order.scheduled_date < today
+        and order.payment_status in OVERDUE_UNPAID_PAYMENT_STATUSES
+    )
+
+
+def order_visit_sort_key(order: Order, today: date, *, reverse_visit: bool) -> tuple:
+    scheduled_date = order.scheduled_date
+    if is_overdue_unpaid_order(order, today):
+        group = 0
+    elif scheduled_date is None or scheduled_date >= today:
+        group = 1
+    else:
+        group = 2
+
+    ordinal = scheduled_date.toordinal() if scheduled_date else 99999999
+    if group in {1, 2} and reverse_visit and scheduled_date is not None:
+        ordinal = -ordinal
+    if group == 2 and not reverse_visit and scheduled_date is not None:
+        ordinal = -ordinal
+    return (group, ordinal, order.id)
+
+
+def order_received_sort_key(order: Order, *, reverse_received: bool) -> tuple:
+    if order.received_date is None:
+        return (1, 0, order.id)
+    ordinal = order.received_date.toordinal()
+    return (0, -ordinal if reverse_received else ordinal, order.id)

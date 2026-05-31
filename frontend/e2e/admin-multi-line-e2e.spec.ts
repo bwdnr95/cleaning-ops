@@ -10,7 +10,8 @@ test('관리자가 라인 2개 주문을 생성하고 같은 그룹에 묶여 �
   await adminLogin(page);
   await page.getByTestId('admin-nav-orders').click();
   await page.getByTestId('admin-orders-page').waitFor();
-  await expect(page.getByTestId('orders-date-preset-all')).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByTestId('orders-date-preset-upcoming')).toHaveAttribute('aria-pressed', 'true');
+  await page.getByTestId('orders-date-preset-all').click();
 
   const lineARow = page.getByTestId(`admin-order-row-${flow.lineIds[0]}`);
   const lineBRow = page.getByTestId(`admin-order-row-${flow.lineIds[1]}`);
@@ -46,7 +47,8 @@ test('admin edit preserves existing group notes', async ({ page, request }) => {
   await adminLogin(page);
   await page.getByTestId('admin-nav-orders').click();
   await page.getByTestId('admin-orders-page').waitFor();
-  await expect(page.getByTestId('orders-date-preset-all')).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByTestId('orders-date-preset-upcoming')).toHaveAttribute('aria-pressed', 'true');
+  await page.getByTestId('orders-date-preset-all').click();
   await page.getByTestId(`admin-order-row-${flow.lineIds[0]}`).click();
   await expect(page.getByTestId('admin-order-detail-page')).toBeVisible();
 

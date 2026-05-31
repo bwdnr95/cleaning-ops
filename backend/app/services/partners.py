@@ -1,3 +1,5 @@
+from dataclasses import dataclass, field
+from decimal import Decimal
 from secrets import token_urlsafe
 from uuid import uuid4
 
@@ -6,6 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.core.security import hash_password
 from app.domain.constants import OrderStatus, UserRole
+from app.domain.payment_status import PARTNER_SETTLEMENT_PENDING_STATUSES
 from app.domain.phone import normalize_phone
 from app.models.order import Order
 from app.models.partner import Partner, PartnerCategory
@@ -23,6 +26,14 @@ from app.schemas.partner import (
     PartnerPasswordResetRead,
     PartnerUpdate,
 )
+
+
+@dataclass(frozen=True)
+class PartnerAdminContext:
+    categories: dict[str, PartnerCategory] = field(default_factory=dict)
+    users: dict[str, User] = field(default_factory=dict)
+    counts: dict[str, dict[str, int]] = field(default_factory=dict)
+    settlements: dict[str, dict[str, float | int]] = field(default_factory=dict)
 
 
 ACTIVE_JOB_STATUSES = (
@@ -89,7 +100,8 @@ class PartnerService:
 
     def list_partners(self, *, include_inactive: bool = False) -> list[PartnerAdminRead]:
         partners = self.partners.list_all() if include_inactive else self.partners.list_active()
-        return [self.to_admin_dto(partner) for partner in partners]
+        context = self._build_admin_context(partners)
+        return [self.to_admin_dto(partner, context=context) for partner in partners]
 
     def get_detail(self, partner_id: str) -> PartnerDetailRead:
         partner = self.partners.get(partner_id)
@@ -193,14 +205,34 @@ class PartnerService:
             temporary_password=temporary_password,
         )
 
-    def to_admin_dto(self, partner: Partner) -> PartnerAdminRead:
-        user = self._first_partner_user(partner.id)
-        category = (
-            self.categories.get(partner.partner_category_id)
-            if partner.partner_category_id
-            else None
+    def to_admin_dto(
+        self,
+        partner: Partner,
+        *,
+        context: PartnerAdminContext | None = None,
+    ) -> PartnerAdminRead:
+        user = (
+            context.users.get(partner.id)
+            if context is not None
+            else self._first_partner_user(partner.id)
         )
-        counts = self._job_counts(partner.id)
+        category = None
+        if partner.partner_category_id:
+            category = (
+                context.categories.get(partner.partner_category_id)
+                if context is not None
+                else self.categories.get(partner.partner_category_id)
+            )
+        counts = (
+            context.counts.get(partner.id, empty_job_counts())
+            if context is not None
+            else self._job_counts(partner.id)
+        )
+        settlement = (
+            context.settlements.get(partner.id, empty_settlement_summary())
+            if context is not None
+            else self._unpaid_settlement_summary(partner.id)
+        )
         return PartnerAdminRead(
             id=partner.id,
             partner_category_id=partner.partner_category_id,
@@ -217,6 +249,8 @@ class PartnerService:
             scheduled_job_count=counts["scheduled"],
             active_job_count=counts["active"],
             completed_job_count=counts["completed"],
+            unpaid_partner_amount_total=settlement["amount"],
+            unpaid_partner_order_count=settlement["count"],
             user_id=user.id if user else None,
             login_phone=user.phone if user else None,
             user_is_active=user.is_active if user else None,
@@ -237,6 +271,91 @@ class PartnerService:
             ),
             created_at=category.created_at,
             updated_at=category.updated_at,
+        )
+
+    def _build_admin_context(self, partners: list[Partner]) -> PartnerAdminContext:
+        partner_ids = [partner.id for partner in partners]
+        if not partner_ids:
+            return PartnerAdminContext()
+
+        category_ids = {
+            partner.partner_category_id
+            for partner in partners
+            if partner.partner_category_id
+        }
+        categories = (
+            {
+                category.id: category
+                for category in self.db.scalars(
+                    select(PartnerCategory).where(PartnerCategory.id.in_(category_ids))
+                )
+            }
+            if category_ids
+            else {}
+        )
+
+        users: dict[str, User] = {}
+        user_stmt = (
+            select(User)
+            .where(User.partner_id.in_(partner_ids), User.role == UserRole.PARTNER)
+            .order_by(User.partner_id.asc(), User.created_at.asc(), User.id.asc())
+        )
+        for user in self.db.scalars(user_stmt):
+            if user.partner_id and user.partner_id not in users:
+                users[user.partner_id] = user
+
+        counts = {partner_id: empty_job_counts() for partner_id in partner_ids}
+        count_stmt = (
+            select(Order.partner_id, Order.status, func.count(Order.id))
+            .where(Order.deleted_at.is_(None), Order.partner_id.in_(partner_ids))
+            .group_by(Order.partner_id, Order.status)
+        )
+        for partner_id, status, count in self.db.execute(count_stmt):
+            if partner_id is None:
+                continue
+            bucket = counts.setdefault(partner_id, empty_job_counts())
+            value = int(count or 0)
+            if status != OrderStatus.CANCELLED:
+                bucket["scheduled"] += value
+            if status in ACTIVE_JOB_STATUSES:
+                bucket["active"] += value
+            if status in COMPLETED_JOB_STATUSES:
+                bucket["completed"] += value
+
+        settlements = {
+            partner_id: empty_settlement_summary()
+            for partner_id in partner_ids
+        }
+        unpaid_condition = Order.partner_payment_status.is_(None) | Order.partner_payment_status.in_(
+            PARTNER_SETTLEMENT_PENDING_STATUSES
+        )
+        settlement_stmt = (
+            select(
+                Order.partner_id,
+                func.count(Order.id),
+                func.coalesce(func.sum(Order.partner_payment_amount), 0),
+            )
+            .where(
+                Order.deleted_at.is_(None),
+                Order.partner_id.in_(partner_ids),
+                Order.status == OrderStatus.COMPLETED,
+                unpaid_condition,
+            )
+            .group_by(Order.partner_id)
+        )
+        for partner_id, count, amount in self.db.execute(settlement_stmt):
+            if partner_id is None:
+                continue
+            settlements[partner_id] = {
+                "amount": float(Decimal(str(amount or 0))),
+                "count": int(count or 0),
+            }
+
+        return PartnerAdminContext(
+            categories=categories,
+            users=users,
+            counts=counts,
+            settlements=settlements,
         )
 
     def _upsert_partner_user(self, partner: Partner, *, login_phone: str, password: str) -> User:
@@ -299,6 +418,25 @@ class PartnerService:
         )
         return list(self.db.scalars(stmt))
 
+    def _unpaid_settlement_summary(self, partner_id: str) -> dict[str, float | int]:
+        unpaid_condition = Order.partner_payment_status.is_(None) | Order.partner_payment_status.in_(
+            PARTNER_SETTLEMENT_PENDING_STATUSES
+        )
+        stmt = select(
+            func.count(Order.id),
+            func.coalesce(func.sum(Order.partner_payment_amount), 0),
+        ).where(
+            Order.partner_id == partner_id,
+            Order.deleted_at.is_(None),
+            Order.status == OrderStatus.COMPLETED,
+            unpaid_condition,
+        )
+        count, amount = self.db.execute(stmt).one()
+        return {
+            "amount": float(Decimal(str(amount or 0))),
+            "count": int(count or 0),
+        }
+
     def _list_partners_by_category(self, category_id: str) -> list[Partner]:
         stmt = select(Partner).where(Partner.partner_category_id == category_id)
         return list(self.db.scalars(stmt))
@@ -320,6 +458,14 @@ def scalar_count(db: Session, *conditions, model=Order) -> int:
     return int(db.scalar(stmt) or 0)
 
 
+def empty_job_counts() -> dict[str, int]:
+    return {"scheduled": 0, "active": 0, "completed": 0}
+
+
+def empty_settlement_summary() -> dict[str, float | int]:
+    return {"amount": 0.0, "count": 0}
+
+
 def to_assigned_order_dto(order: Order) -> PartnerAssignedOrderRead:
     return PartnerAssignedOrderRead(
         id=order.id,
@@ -330,6 +476,10 @@ def to_assigned_order_dto(order: Order) -> PartnerAssignedOrderRead:
         size_or_quantity=order.size_or_quantity,
         customer_name=order.customer_name,
         customer_address=order.customer_address,
+        consumer_price=float(order.total_amount or 0),
+        partner_price=float(order.partner_payment_amount or 0),
+        partner_payment_status=order.partner_payment_status,
+        settled_at=order.partner_settled_at,
     )
 
 

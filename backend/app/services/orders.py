@@ -93,6 +93,7 @@ class OrderService:
                         service_detail=payload.service_detail,
                         special_request=payload.special_request,
                         total_amount=payload.total_amount,
+                        discount_amount=payload.discount_amount,
                         deposit_amount=payload.deposit_amount,
                         balance_amount=payload.balance_amount,
                         onsite_extra_amount=payload.onsite_extra_amount,
@@ -320,6 +321,8 @@ class OrderService:
             values["service_name"] = item.name
             if values.get("total_amount") is None:
                 values["total_amount"] = float(item.base_price or 0)
+            if values.get("partner_payment_amount") is None:
+                values["partner_payment_amount"] = float(item.partner_base_price or 0)
             return
 
         service_category_id = values.get("service_category_id")
@@ -522,6 +525,7 @@ def to_admin_order_dto(
         customer_address=customer_address or "",
         customer_address_detail=customer_address_detail,
         total_amount=order.total_amount,
+        discount_amount=order.discount_amount,
         deposit_amount=order.deposit_amount,
         balance_amount=order.balance_amount,
         onsite_extra_amount=order.onsite_extra_amount,
@@ -531,6 +535,9 @@ def to_admin_order_dto(
         evidence_memo=order.evidence_memo,
         partner_payment_amount=order.partner_payment_amount,
         partner_payment_status=order.partner_payment_status,
+        consumer_price=order.total_amount,
+        partner_price=order.partner_payment_amount,
+        partner_settled_at=order.partner_settled_at,
         customer_visible_payment=customer_visible_payment,
         group_notes=group_notes,
         customer_token=customer_token or "",

@@ -14,7 +14,7 @@ export const NAV = [
   { key: 'sends',      label: '발송이력',     icon: 'send',     badge: null },
 ];
 
-export function AdminShell({ initialPage = 'dashboard', children, onNav = undefined, navBadges = {} }) {
+export function AdminShell({ initialPage = 'dashboard', children, onNav = undefined, onCreateOrder = undefined, navBadges = {} }) {
   const [page, setPage] = React.useState(initialPage);
 
   const handleNav = (k) => {
@@ -74,6 +74,15 @@ export function AdminShell({ initialPage = 'dashboard', children, onNav = undefi
               </button>
             );
           })}
+          <button
+            type="button"
+            data-testid="admin-nav-create-order"
+            className="btn btn--primary btn--sm"
+            onClick={() => onCreateOrder?.()}
+            style={{ margin: '10px 6px 0', justifyContent: 'flex-start' }}
+          >
+            <Icon name="plus" size={13}/> 신규 주문 등록
+          </button>
         </nav>
 
         <div style={{ padding: 10, borderTop: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -92,6 +101,14 @@ export function AdminShell({ initialPage = 'dashboard', children, onNav = undefi
       <main style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
         {children({ page, setPage })}
       </main>
+      <button
+        type="button"
+        data-testid="admin-mobile-create-order"
+        className="btn btn--primary admin-create-fab"
+        onClick={() => onCreateOrder?.()}
+      >
+        <Icon name="plus" size={16}/>
+      </button>
     </div>
   );
 }
@@ -99,7 +116,7 @@ export function AdminShell({ initialPage = 'dashboard', children, onNav = undefi
 export function Topbar({ title, subtitle = undefined, breadcrumb = undefined, actions = null }) {
   return (
     <header style={{
-      height: 52, padding: '0 20px',
+      height: 52, padding: '0 12px',
       display: 'flex', alignItems: 'center', gap: 12,
       borderBottom: '1px solid var(--border)',
       background: 'var(--surface)',

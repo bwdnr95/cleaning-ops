@@ -1,5 +1,132 @@
 import { apiRequest } from './client';
 
+export type MessageChannelInput = 'kakao' | 'sms' | 'lms';
+export type SettlementStatusFilter = 'unpaid' | 'paid' | 'all';
+export type AdminOrderSort = 'visit_asc' | 'visit_desc' | 'received_asc' | 'received_desc';
+
+export interface AdminOrderLineInput {
+  status?: string;
+  received_date?: string;
+  scheduled_date?: string | null;
+  requested_time?: string | null;
+  partner_id?: string | null;
+  team_name?: string | null;
+  service_category_id?: string | null;
+  service_item_id?: string | null;
+  service_name: string;
+  size_or_quantity?: string | null;
+  service_detail?: string | null;
+  special_request?: string | null;
+  total_amount?: number | null;
+  discount_amount?: number;
+  deposit_amount?: number | null;
+  balance_amount?: number | null;
+  onsite_extra_amount?: number | null;
+  vat_type?: string | null;
+  payment_status?: string | null;
+  payment_memo?: string | null;
+  evidence_memo?: string | null;
+  partner_payment_amount?: number | null;
+  partner_payment_status?: string | null;
+}
+
+export interface CreateOrderInput extends AdminOrderLineInput {
+  customer_name: string;
+  customer_phone: string;
+  customer_address: string;
+  customer_address_detail?: string | null;
+  source_channel?: string | null;
+  customer_visible_payment?: boolean;
+}
+
+export type UpdateOrderInput = Partial<AdminOrderLineInput>;
+
+export interface OrderGroupCreateInput {
+  customer_name: string;
+  customer_phone: string;
+  customer_address: string;
+  customer_address_detail?: string | null;
+  source_channel?: string | null;
+  customer_visible_payment?: boolean;
+  notes?: string | null;
+  lines: AdminOrderLineInput[];
+}
+
+export interface OrderGroupUpdateInput {
+  customer_name?: string;
+  customer_phone?: string;
+  customer_address?: string;
+  customer_address_detail?: string | null;
+  source_channel?: string | null;
+  customer_visible_payment?: boolean;
+  notes?: string | null;
+}
+
+export interface AdminOrder extends AdminOrderLineInput {
+  id: string;
+  group_id: string;
+  customer_name: string;
+  customer_phone: string;
+  customer_address: string;
+  customer_address_detail?: string | null;
+  customer_token: string;
+  consumer_price?: number | null;
+  partner_price?: number | null;
+  partner_settled_at?: string | null;
+}
+
+export interface AdminOrderGroup {
+  id: string;
+  customer_token: string;
+  lines: AdminOrder[];
+}
+
+export interface MessageLog {
+  id: string;
+  order_id: string;
+  message_type: string;
+  recipient_type: string;
+  channel: string;
+  status: string;
+  content: string;
+}
+
+export interface PartnerSettlementItem {
+  order_id: string;
+  status: string;
+  scheduled_date: string | null;
+  service_name: string;
+  customer_name: string;
+  address_short: string;
+  consumer_price: number | null;
+  partner_price: number | null;
+  partner_payment_status: string | null;
+  settled_at: string | null;
+}
+
+export interface PartnerSettlementListParams {
+  status?: SettlementStatusFilter;
+  from?: string;
+  to?: string;
+}
+
+export interface PartnerSettlementListResponse {
+  items: PartnerSettlementItem[];
+  total_partner_price: number;
+  total_consumer_price: number;
+  count: number;
+}
+
+export interface SettleOrdersInput {
+  order_ids: string[];
+  memo?: string | null;
+}
+
+export interface PartnerSettlementActionResult {
+  updated_order_ids: string[];
+  skipped_order_ids: string[];
+}
+
 export function getDashboardSummary() {
   return apiRequest('/admin/dashboard/summary');
 }
@@ -19,8 +146,15 @@ export function listAdminCalendarOrders({ year, month, partnerId = '' }) {
   return apiRequest(`/admin/calendar?${params.toString()}`);
 }
 
-export function listAdminOrders() {
-  return apiRequest('/admin/orders');
+export function listAdminOrders(
+  { sort = 'visit_asc', includePastPaid = false }: { sort?: AdminOrderSort; includePastPaid?: boolean } = {},
+): Promise<AdminOrder[]> {
+  const params = new URLSearchParams();
+  params.set('sort', sort);
+  if (includePastPaid) {
+    params.set('include_past_paid', 'true');
+  }
+  return apiRequest(`/admin/orders?${params.toString()}`) as Promise<AdminOrder[]>;
 }
 
 export interface ImportFailure {
@@ -40,22 +174,43 @@ export function importOrders(file: File): Promise<ImportResult> {
   return apiRequest('/admin/orders/import', { method: 'POST', body: form });
 }
 
-export function createAdminOrder(input) {
+export function createAdminOrder(input: CreateOrderInput): Promise<AdminOrder> {
   return apiRequest('/admin/orders', {
     method: 'POST',
     body: input,
-  });
+  }) as Promise<AdminOrder>;
 }
 
-export function getAdminOrder(orderId) {
-  return apiRequest(`/admin/orders/${encodeURIComponent(orderId)}`);
+export function getAdminOrder(orderId: string): Promise<AdminOrder> {
+  return apiRequest(`/admin/orders/${encodeURIComponent(orderId)}`) as Promise<AdminOrder>;
 }
 
-export function updateAdminOrder(orderId, input) {
+export function updateAdminOrder(orderId: string, input: UpdateOrderInput): Promise<AdminOrder> {
   return apiRequest(`/admin/orders/${encodeURIComponent(orderId)}`, {
     method: 'PATCH',
     body: input,
-  });
+  }) as Promise<AdminOrder>;
+}
+
+export function sendOrderQuote(
+  orderId: string,
+  channel: MessageChannelInput = 'kakao',
+): Promise<MessageLog> {
+  return apiRequest(`/admin/orders/${encodeURIComponent(orderId)}/quote/send`, {
+    method: 'POST',
+    body: { channel },
+  }) as Promise<MessageLog>;
+}
+
+export function notifyPartnerUnpaid(
+  orderId: string,
+  channel: MessageChannelInput = 'kakao',
+  memo = '',
+): Promise<MessageLog> {
+  return apiRequest(`/admin/orders/${encodeURIComponent(orderId)}/notify-partner-unpaid`, {
+    method: 'POST',
+    body: { channel, memo },
+  }) as Promise<MessageLog>;
 }
 
 export function deleteAdminOrder(orderId) {
@@ -71,29 +226,32 @@ export function bulkDeleteAdminOrders(orderIds) {
   });
 }
 
-export function createOrderGroup(input) {
+export function createOrderGroup(input: OrderGroupCreateInput): Promise<AdminOrderGroup> {
   return apiRequest('/admin/orders/groups', {
     method: 'POST',
     body: input,
-  });
+  }) as Promise<AdminOrderGroup>;
 }
 
-export function getAdminOrderGroup(groupId) {
-  return apiRequest(`/admin/orders/groups/${encodeURIComponent(groupId)}`);
+export function getAdminOrderGroup(groupId: string): Promise<AdminOrderGroup> {
+  return apiRequest(`/admin/orders/groups/${encodeURIComponent(groupId)}`) as Promise<AdminOrderGroup>;
 }
 
-export function addLineToGroup(groupId, input) {
+export function addLineToGroup(groupId: string, input: AdminOrderLineInput): Promise<AdminOrder> {
   return apiRequest(`/admin/orders/groups/${encodeURIComponent(groupId)}/lines`, {
     method: 'POST',
     body: input,
-  });
+  }) as Promise<AdminOrder>;
 }
 
-export function updateAdminOrderGroup(groupId, input) {
+export function updateAdminOrderGroup(
+  groupId: string,
+  input: OrderGroupUpdateInput,
+): Promise<AdminOrderGroup> {
   return apiRequest(`/admin/orders/groups/${encodeURIComponent(groupId)}`, {
     method: 'PATCH',
     body: input,
-  });
+  }) as Promise<AdminOrderGroup>;
 }
 
 export function listPartners() {
@@ -138,6 +296,41 @@ export function resetAdminPartnerPassword(partnerId, input = {}) {
     method: 'POST',
     body: input,
   });
+}
+
+export function listPartnerSettlements(
+  partnerId: string,
+  { status = 'unpaid', from = '', to = '' }: PartnerSettlementListParams = {},
+): Promise<PartnerSettlementListResponse> {
+  const params = new URLSearchParams({ status });
+  if (from) params.set('from', from);
+  if (to) params.set('to', to);
+  return apiRequest(
+    `/admin/partners/${encodeURIComponent(partnerId)}/settlements?${params.toString()}`,
+  ) as Promise<PartnerSettlementListResponse>;
+}
+
+export function settlePartnerOrders(
+  partnerId: string,
+  orderIds: string[],
+  memo = '',
+): Promise<PartnerSettlementActionResult> {
+  const input: SettleOrdersInput = { order_ids: orderIds, memo };
+  return apiRequest(`/admin/partners/${encodeURIComponent(partnerId)}/settlements/settle`, {
+    method: 'POST',
+    body: input,
+  }) as Promise<PartnerSettlementActionResult>;
+}
+
+export function revertPartnerOrders(
+  partnerId: string,
+  orderIds: string[],
+): Promise<PartnerSettlementActionResult> {
+  const input: SettleOrdersInput = { order_ids: orderIds };
+  return apiRequest(`/admin/partners/${encodeURIComponent(partnerId)}/settlements/revert`, {
+    method: 'POST',
+    body: input,
+  }) as Promise<PartnerSettlementActionResult>;
 }
 
 export function listPartnerCategories({ includeInactive = true } = {}) {

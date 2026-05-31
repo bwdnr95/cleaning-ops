@@ -2,7 +2,7 @@ from datetime import date, datetime
 
 from pydantic import Field
 
-from app.domain.constants import OrderStatus, PhotoType
+from app.domain.constants import OrderStatus, PhotoType, VatType
 from app.schemas.common import ApiModel, TimelineEventRead
 from app.schemas.message import MessageLogRead
 from app.schemas.photo import PartnerPhotoRead, PhotoRead
@@ -48,10 +48,12 @@ class OrderLineBase(ApiModel):
     service_detail: str | None = None
     special_request: str | None = None
     total_amount: float | None = Field(default=None, ge=0)
+    discount_amount: float = Field(default=0, ge=0)
     deposit_amount: float | None = Field(default=None, ge=0)
     balance_amount: float | None = Field(default=None, ge=0)
-    onsite_extra_amount: float | None = Field(default=None, ge=0)
-    vat_type: str | None = None
+    # 현장 추가는 부호 있는 현장 조정값(추가/차감)이라 음수를 허용한다.
+    onsite_extra_amount: float | None = None
+    vat_type: VatType | None = VatType.INCLUDED
     payment_status: str | None = None
     payment_memo: str | None = None
     evidence_memo: str | None = None
@@ -88,10 +90,12 @@ class OrderUpdate(ApiModel):
     service_detail: str | None = None
     special_request: str | None = None
     total_amount: float | None = Field(default=None, ge=0)
+    discount_amount: float | None = Field(default=None, ge=0)
     deposit_amount: float | None = Field(default=None, ge=0)
     balance_amount: float | None = Field(default=None, ge=0)
-    onsite_extra_amount: float | None = Field(default=None, ge=0)
-    vat_type: str | None = None
+    # 현장 추가는 부호 있는 현장 조정값(추가/차감)이라 음수를 허용한다.
+    onsite_extra_amount: float | None = None
+    vat_type: VatType | None = None
     payment_status: str | None = None
     payment_memo: str | None = None
     evidence_memo: str | None = None
@@ -110,6 +114,9 @@ class AdminOrderRead(OrderLineBase):
     customer_visible_payment: bool = False
     group_notes: str | None = None
     customer_token: str
+    consumer_price: float | None = None
+    partner_price: float | None = None
+    partner_settled_at: datetime | None = None
     created_at: datetime | None = None
     updated_at: datetime | None = None
     timeline: list[TimelineEventRead] = Field(default_factory=list)

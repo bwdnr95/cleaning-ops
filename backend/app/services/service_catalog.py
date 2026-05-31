@@ -162,6 +162,7 @@ def to_item_dto(item: ServiceItem) -> ServiceItemRead:
         name=item.name,
         unit=item.unit,
         base_price=float(item.base_price or 0),
+        partner_base_price=float(item.partner_base_price or 0),
         description=item.description,
         is_active=item.is_active,
         sort_order=item.sort_order,

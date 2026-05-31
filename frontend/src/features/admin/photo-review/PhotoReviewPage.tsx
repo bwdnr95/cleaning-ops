@@ -107,7 +107,7 @@ export function PhotoReviewPage({ onOpenOrder, onNav }) {
   }
 
   return (
-    <div data-testid="admin-photo-review-page" style={{ flex: 1, display: 'grid', gridTemplateColumns: '280px 1fr 330px', minHeight: 0, background: 'var(--bg)' }}>
+    <div data-testid="admin-photo-review-page" className="page-shell" style={{ flex: 1, display: 'grid', gridTemplateColumns: '280px 1fr 330px', minHeight: 0, background: 'var(--bg)' }}>
       <aside style={{ background: 'var(--surface)', borderRight: '1px solid var(--border)', display: 'flex', flexDirection: 'column', minWidth: 0 }}>
         <div style={{ padding: '10px 14px', borderBottom: '1px solid var(--divider)', display: 'flex', alignItems: 'center', gap: 6 }}>
           <span style={{ fontSize: 12.5, fontWeight: 700 }}>사진 모니터링</span>
@@ -378,7 +378,7 @@ function PhotoReviewEmptyState({ onNav, onRefresh }) {
   ];
 
   return (
-    <div data-testid="admin-photo-review-page" style={{ flex: 1, display: 'grid', gridTemplateColumns: '280px 1fr 330px', minHeight: 0, background: 'var(--bg)' }}>
+    <div data-testid="admin-photo-review-page" className="page-shell" style={{ flex: 1, display: 'grid', gridTemplateColumns: '280px 1fr 330px', minHeight: 0, background: 'var(--bg)' }}>
       <aside style={{ background: 'var(--surface)', borderRight: '1px solid var(--border)', display: 'flex', flexDirection: 'column', minWidth: 0 }}>
         <div style={{ padding: '10px 14px', borderBottom: '1px solid var(--divider)', display: 'flex', alignItems: 'center', gap: 6 }}>
           <span style={{ fontSize: 12.5, fontWeight: 700 }}>사진 모니터링</span>

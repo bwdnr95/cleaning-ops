@@ -219,7 +219,7 @@ export function ProductsPage() {
 
   return (
     <div data-testid="admin-products-page" style={{ flex: 1, minHeight: 0, overflow: 'auto', background: 'var(--bg)' }}>
-      <div style={{ padding: 20, maxWidth: 1240, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 12 }}>
+      <div className="page-shell" style={{ padding: 20, display: 'flex', flexDirection: 'column', gap: 12 }}>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: 10 }}>
           <StatCard label="카테고리" value={categories.length} icon="package" />
           <StatCard label="활성 상품" value={stats.activeItems} icon="check" tone="success" />
@@ -337,8 +337,8 @@ export function ProductsPage() {
               />
               {selectedCategory && items.length === 0 && <StateLine text="등록된 상품이 없습니다." />}
               {selectedCategory && items.length > 0 && (
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 72px 100px 80px 172px', fontSize: 12 }}>
-                  {['상품명', '단위', '기준가', '상태', '관리'].map((header) => <GridHead key={header}>{header}</GridHead>)}
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 72px 110px 110px 80px 172px', fontSize: 12, overflowX: 'auto' }}>
+                  {['상품명', '단위', '기준가', '도급가', '상태', '관리'].map((header) => <GridHead key={header}>{header}</GridHead>)}
                   {pagedItems.map((item) => (
                     <React.Fragment key={item.id}>
                       <GridCell>
@@ -348,6 +348,7 @@ export function ProductsPage() {
                       </GridCell>
                       <GridCell>{item.unit}</GridCell>
                       <GridCell mono>{formatWon(item.base_price)}</GridCell>
+                      <GridCell mono>{formatWon(item.partner_base_price)}</GridCell>
                       <GridCell>
                         <Badge tone={item.is_active ? 'success' : 'neutral'} dot>{item.is_active ? '활성' : '비활성'}</Badge>
                       </GridCell>
@@ -396,7 +397,7 @@ export function ProductsPage() {
             {selectedCategory && (
               <section className="card" style={{ padding: 0, overflow: 'hidden' }}>
                 <SectionHeader icon={selectedItem ? 'settings' : 'plus'} title={selectedItem ? `상품 수정 · ${selectedItem.name}` : '새 상품 등록'} />
-                <form onSubmit={saveItem} style={{ padding: 14, display: 'grid', gridTemplateColumns: '1fr 92px 140px 90px auto', gap: 10, alignItems: 'end' }}>
+                <form onSubmit={saveItem} style={{ padding: 14, display: 'grid', gridTemplateColumns: '1fr 92px 140px 140px 90px auto', gap: 10, alignItems: 'end' }}>
                   <FormField testId="products-item-name" label="상품명" value={itemForm.name} onChange={(value) => setItemForm({ ...itemForm, name: value })} required />
                   <label style={{ display: 'flex', flexDirection: 'column', gap: 5, minWidth: 0 }}>
                     <span style={labelStyle}>단위</span>
@@ -405,6 +406,7 @@ export function ProductsPage() {
                     </select>
                   </label>
                   <FormField testId="products-item-base-price" label="기준가" type="number" value={itemForm.base_price} onChange={(value) => setItemForm({ ...itemForm, base_price: value })} />
+                  <FormField testId="products-item-partner-base-price" label="도급가" type="number" value={itemForm.partner_base_price} onChange={(value) => setItemForm({ ...itemForm, partner_base_price: value })} />
                   <FormField testId="products-item-sort-order" label="정렬" type="number" value={itemForm.sort_order} onChange={(value) => setItemForm({ ...itemForm, sort_order: value })} />
                   <button data-testid="products-save-item" className="btn btn--primary btn--sm" disabled={isSaving || !itemForm.name.trim()}>
                     <Icon name="check" size={12} /> 저장
@@ -560,6 +562,7 @@ function defaultItemForm(overrides = {}) {
     name: '',
     unit: '건',
     base_price: '0',
+    partner_base_price: '0',
     description: '',
     sort_order: '0',
     is_active: true,
@@ -581,6 +584,7 @@ function toItemForm(item) {
     name: item.name || '',
     unit: item.unit || '건',
     base_price: String(item.base_price || 0),
+    partner_base_price: String(item.partner_base_price || 0),
     description: item.description || '',
     sort_order: String(item.sort_order || 0),
     is_active: item.is_active !== false,
@@ -601,6 +605,7 @@ function toItemPayload(form) {
     name: form.name.trim(),
     unit: form.unit,
     base_price: Number(form.base_price || 0),
+    partner_base_price: Number(form.partner_base_price || 0),
     description: emptyToNull(form.description),
     sort_order: Number(form.sort_order || 0),
     is_active: form.is_active !== false,

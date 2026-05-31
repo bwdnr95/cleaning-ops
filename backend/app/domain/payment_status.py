@@ -35,6 +35,7 @@ PARTNER_SETTLEMENT_PENDING_STATUSES: tuple[str, ...] = (
 
 PAYMENT_TRACKED_FIELDS: tuple[str, ...] = (
     "total_amount",
+    "discount_amount",
     "deposit_amount",
     "balance_amount",
     "onsite_extra_amount",
@@ -43,6 +44,7 @@ PAYMENT_TRACKED_FIELDS: tuple[str, ...] = (
     "evidence_memo",
     "partner_payment_amount",
     "partner_payment_status",
+    "partner_settled_at",
     "customer_visible_payment",
 )
 

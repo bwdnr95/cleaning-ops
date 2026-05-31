@@ -5,6 +5,13 @@
 
 최신 업데이트:
 
+- `R14 Pricing and Settlement` 완료
+  - 상품 도급가(`partner_base_price`), 주문 할인가(`discount_amount`), 협력사 정산일(`partner_settled_at`) 추가
+  - 주문 목록 기본 정렬: 과거 미납 우선, 오늘/미래순, `include_past_paid`로 과거 완료 포함
+  - 고객 견적 알림톡 / 협력사 고객정보 전송 / 정산 완료·되돌리기 timeline 기록
+  - 협력사 상세 정산 UI, 주문 가격 자동계산, 상품관리 도급가, 사이드바 신규 주문 버튼 추가
+  - 검증 완료: backend `pytest -q` -> `151 passed`, frontend `npm run typecheck`, `npm run lint`, `npm run build`, `npm run e2e` -> `33 passed`
+  - 제약: 현재 로컬 Python 환경에 `ruff` 미설치. Alembic offline SQL 출력은 기존 0006 migration 이슈로 실패하지만, 임시 DB online upgrade/downgrade/re-upgrade는 통과.
 - `R13 Operational Reporting` 완료
   - 매출/협력사/서비스/정산 4 보고서 + CSV/xlsx export
   - xlsx 일괄 주문 등록 (group_key 묶음) + 행별 부분 성공
@@ -90,21 +97,22 @@
 
 다음 세션 이름:
 
-**R8.5 Post-R8 Stabilization + Deprecated Order Customer Columns Cleanup**
+**R14.1 Verification Cleanup + Payment Provider Contract Prep**
 
 목표:
 
-R8 배포 후 운영 UX 회귀를 점검하고, R7에서 호환을 위해 남겨둔 `orders.customer_token`, `orders.customer_name`, `orders.customer_phone`, `orders.customer_address`, `orders.source_channel`, `orders.customer_visible_payment`를 제거할 준비를 한다.
+R14 배포 전 검증 도구/마이그레이션 offline 이슈를 정리하고, 셀프페이/결제선생 상세 계약 스펙 수령 후 결제 링크 provider를 붙일 준비를 한다. 동시에 R7에서 호환을 위해 남겨둔 `orders.customer_token`, `orders.customer_name`, `orders.customer_phone`, `orders.customer_address`, `orders.source_channel`, `orders.customer_visible_payment` cleanup 계획을 이어간다.
 
 권장 순서:
 
-1. 배포 환경에서 주소 검색 모달이 CSP 오류 없이 열리는지 확인한다.
-2. soft-delete된 주문이 관리자 목록/상세, 협력사 작업, 고객 링크에서 모두 숨겨지는지 운영 데이터 기준으로 점검한다.
-3. `rg "customer_token|customer_name|customer_phone|customer_address|source_channel|customer_visible_payment" backend/app frontend/src backend/tests`로 legacy `Order` 컬럼 의존도를 다시 확인한다.
-4. 아직 `Order`에서 customer 정보를 읽는 dashboard/calendar/message/partner DTO 경로를 group join 또는 explicit group 인자로 전환한다.
-5. import/외부 연동 스크립트가 있다면 group 생성 API를 사용하도록 바꾼다.
-6. Alembic cleanup migration을 별도 PR로 만든다.
-7. backend 테스트와 E2E를 전체 실행한다.
+1. backend dev dependency 설치 경로를 정리하고 `ruff check .`가 CI/로컬에서 동일하게 실행되게 만든다.
+2. 기존 `0006_default_partner_categories.py` data migration의 offline SQL 비호환성을 별도 PR에서 보정하거나, 프로젝트 검증 기준을 online migration 중심으로 명확히 문서화한다.
+3. 셀프페이/결제선생 계약 스펙을 확보해 결제 링크 생성/조회/취소/webhook/정산 필드를 확인한다.
+4. `PaymentLinkProvider` 인터페이스와 `payment_links` / `payment_events` 테이블 초안을 작성하되, 결제 성공 webhook이 `order_timeline`과 같은 트랜잭션에 남도록 설계한다.
+5. `rg "customer_token|customer_name|customer_phone|customer_address|source_channel|customer_visible_payment" backend/app frontend/src backend/tests`로 legacy `Order` 컬럼 의존도를 다시 확인한다.
+6. 아직 `Order`에서 customer 정보를 읽는 dashboard/calendar/message/partner DTO 경로를 group join 또는 explicit group 인자로 전환한다.
+7. cleanup migration은 결제 provider 설계와 충돌하지 않도록 별도 R15 PR로 분리한다.
+8. backend 테스트와 E2E를 전체 실행한다.
 
 후속 후보:
 
@@ -155,9 +163,9 @@ E2E는 Playwright webServer가 백엔드/프론트 서버를 자동으로 띄운
 
 ```text
 AGENTS.md, CLAUDE.md, .master/next_session_plan.md를 읽고,
-R8.5 Post-R8 Stabilization + Deprecated Order Customer Columns Cleanup을 진행해줘.
+R14.1 Verification Cleanup + Payment Provider Contract Prep을 진행해줘.
 
-먼저 legacy orders.customer_* 컬럼 의존도를 rg로 확인하고,
-R8의 soft-delete/주소 입력/세션 안전망 회귀가 없는지 확인한 뒤
-서비스/DTO/화면이 OrderGroup을 source of truth로 읽도록 cleanup migration 계획을 세워줘. 권한/DTO/timeline 규칙은 AGENTS.md 기준으로 유지해줘.
+먼저 backend dev dependency/ruff 실행 경로와 Alembic offline SQL 이슈를 정리하고,
+셀프페이/결제선생 계약 스펙 수령을 전제로 PaymentLinkProvider 설계안을 잡아줘.
+그 다음 legacy orders.customer_* 컬럼 의존도를 rg로 확인해 OrderGroup source of truth cleanup 계획을 이어가줘. 권한/DTO/timeline 규칙은 AGENTS.md 기준으로 유지해줘.
 ```
