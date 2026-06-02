@@ -8,6 +8,7 @@ import { sendAdminMessage } from '../../../api/messages';
 import { useApiResource } from '../../../api/useApiResource';
 import { ORDER_STATUSES } from '../../../domain/orderStatus';
 import { isPaymentCheckNeeded } from '../../../domain/paymentStatus';
+import { formatQuantity } from '../../../domain/format';
 import { formatPhone } from '../../../domain/phone';
 import { OrderImportDialog } from './OrderImportDialog';
 import {
@@ -1302,6 +1303,7 @@ function compareVisitOrder(a, b, today, reverse) {
 }
 
 function toOrderRow(order) {
+  const sizeOrQuantity = formatQuantity(order.size_or_quantity);
   return {
     id: order.id,
     groupId: order.group_id || null,
@@ -1313,9 +1315,9 @@ function toOrderRow(order) {
     scheduledDate: order.scheduled_date,
     timeWindow: order.requested_time || '-',
     team: order.team_name || '미배정',
-    product: order.size_or_quantity ? `${order.service_name} (${order.size_or_quantity})` : order.service_name,
+    product: sizeOrQuantity ? `${order.service_name} (${sizeOrQuantity})` : order.service_name,
     serviceName: order.service_name,
-    sizeOrQuantity: order.size_or_quantity,
+    sizeOrQuantity,
     address: order.customer_address,
     addressDetail: order.customer_address_detail || '',
     fullAddress: [order.customer_address, order.customer_address_detail].filter(Boolean).join(' '),
@@ -1339,7 +1341,7 @@ function toMockOrderRow(order) {
     receivedRaw: mockDateToValue(order.received),
     scheduledDate: mockDateToValue(order.visit),
     serviceName: order.serviceName || order.product,
-    sizeOrQuantity: order.sizeOrQuantity || '',
+    sizeOrQuantity: formatQuantity(order.sizeOrQuantity || ''),
     addressDetail: order.addressDetail || '',
     fullAddress: order.fullAddress || [order.address, order.addressDetail].filter(Boolean).join(' '),
     partnerPrice: Number(order.partnerPrice || 0),

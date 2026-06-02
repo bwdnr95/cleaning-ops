@@ -3,6 +3,7 @@ import { KPI, QUEUES, RECENT_PHOTOS, RECENT_SENDS, TODAY_JOBS, TOMORROW_JOBS } f
 import { getDashboardRecentActivity, getDashboardSummary, listAdminOrders } from '../../../api/admin';
 import { toApiAssetUrl } from '../../../api/client';
 import { useApiResource } from '../../../api/useApiResource';
+import { formatQuantity } from '../../../domain/format';
 import { formatPhone } from '../../../domain/phone';
 import { addDays, formatAppTime, getAppNowDate, getAppTodayDate, isSameDateValue } from '../../../domain/time';
 
@@ -365,7 +366,7 @@ function toDashJobs(orders, target) {
     .map((order) => ({
       id: order.id,
       time: order.requested_time || '-',
-      product: order.size_or_quantity ? `${order.service_name} ${order.size_or_quantity}` : order.service_name,
+      product: formatServiceLabel(order.service_name, order.size_or_quantity),
       addr: order.customer_address,
       team: order.team_name || '미배정',
       status: order.status,
@@ -376,7 +377,7 @@ function toRecentPhotos(photos) {
   return photos.map((photo) => ({
     photoId: photo.photo_id,
     orderId: photo.order_id,
-    label: photo.size_or_quantity ? `${photo.service_name} ${photo.size_or_quantity}` : photo.service_name,
+    label: formatServiceLabel(photo.service_name, photo.size_or_quantity),
     count: `${photoTypeLabel(photo.photo_type)} · ${photo.customer_name}${photo.team_name ? ` · ${photo.team_name}` : ''}`,
     time: formatRelativeTime(photo.uploaded_at),
     tone: photo.is_customer_visible ? 'approved' : 'wait',
@@ -402,6 +403,11 @@ function toRecentSends(messages) {
 
 function formatWon(value) {
   return `₩${Number(value || 0).toLocaleString()}`;
+}
+
+function formatServiceLabel(serviceName, sizeOrQuantity) {
+  const quantity = formatQuantity(sizeOrQuantity);
+  return quantity ? `${serviceName} ${quantity}` : serviceName;
 }
 
 function photoTypeLabel(type) {

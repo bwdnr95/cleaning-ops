@@ -14,6 +14,7 @@ import {
   partnerPaymentStatusLabel,
   paymentStatusLabel,
 } from '../../../domain/paymentStatus';
+import { formatQuantity } from '../../../domain/format';
 import { formatPhone } from '../../../domain/phone';
 import { formatAppDateTime } from '../../../domain/time';
 import { useApiResource } from '../../../api/useApiResource';
@@ -303,7 +304,7 @@ export function OrderDetailPage({ orderId, onBack, onEdit, onNav, onOpenOrder })
             <Section title="상품 / 일정" icon="package">
               <KV col={2}>
                 <KVItem label="상품명" value={order.service_name}/>
-                <KVItem label="수량/규격" value={order.size_or_quantity || '-'}/>
+                <KVItem label="수량/규격" value={formatQuantity(order.size_or_quantity) || '-'}/>
                 <KVItem label="방문 예정일" value={order.scheduled_date || '미정'}/>
                 <KVItem label="요청 시간" value={order.requested_time || '-'}/>
                 <KVItem label="상세" value={order.service_detail || '-'} span={2} multiline/>
@@ -858,7 +859,8 @@ function EmptyLine({ text }) {
 }
 
 function formatService(order) {
-  return order.size_or_quantity ? `${order.service_name} ${order.size_or_quantity}` : order.service_name;
+  const quantity = formatQuantity(order.size_or_quantity);
+  return quantity ? `${order.service_name} ${quantity}` : order.service_name;
 }
 
 function formatWon(value) {

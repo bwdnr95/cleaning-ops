@@ -6,6 +6,7 @@ import { toApiAssetUrl } from '../../../api/client';
 import { useApiResource } from '../../../api/useApiResource';
 import { PaginationBar, paginateItems } from '../../../components/common/Pagination';
 import { Badge, Icon } from '../../../components/common/ui';
+import { formatQuantity } from '../../../domain/format';
 
 const FILTERS = [
   { key: 'all', label: '전체' },
@@ -558,7 +559,8 @@ function reviewStage(item) {
 }
 
 function formatServiceName(item) {
-  return item.size_or_quantity ? `${item.service_name} ${item.size_or_quantity}` : item.service_name;
+  const quantity = formatQuantity(item.size_or_quantity);
+  return quantity ? `${item.service_name} ${quantity}` : item.service_name;
 }
 
 function photoTypeLabel(type) {

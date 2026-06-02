@@ -3,6 +3,7 @@ import React from 'react';
 import { listAdminCalendarOrders, listPartners } from '../../../api/admin';
 import { Icon } from '../../../components/common/ui';
 import { useApiResource } from '../../../api/useApiResource';
+import { formatQuantity } from '../../../domain/format';
 import { getAppTodayDate } from '../../../domain/time';
 
 export function CalendarPage({ onOpenOrder, onCreateOrder }) {
@@ -486,10 +487,11 @@ function groupOrdersByDay(orders) {
       continue;
     }
     const day = Number(order.scheduled_date.slice(8, 10));
+    const quantity = formatQuantity(order.size_or_quantity);
     const event = {
       id: order.id,
       time: order.requested_time || '-',
-      title: order.size_or_quantity ? `${order.service_name} ${order.size_or_quantity}` : order.service_name,
+      title: quantity ? `${order.service_name} ${quantity}` : order.service_name,
       status: order.status,
       customer: order.customer_name,
       address: order.customer_address,

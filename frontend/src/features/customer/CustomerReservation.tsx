@@ -4,6 +4,7 @@ import { verifyCustomerOrder } from '../../api/customer';
 import { ApiError, toApiAssetUrl } from '../../api/client';
 import { Badge, Icon } from '../../components/common/ui';
 import { paymentStatusLabel } from '../../domain/paymentStatus';
+import { formatQuantity } from '../../domain/format';
 import { formatPhone } from '../../domain/phone';
 import { parseDateValue } from '../../domain/time';
 
@@ -216,6 +217,8 @@ function ReservationContent({ order, onReset }) {
 }
 
 function ReservationLineCard({ line, customerVisiblePayment }) {
+  const quantity = formatQuantity(line.size_or_quantity);
+
   return (
     <section data-testid={`customer-line-${line.id}`} style={summaryCardStyle}>
       <SummaryBlock title="방문 일시">
@@ -224,7 +227,7 @@ function ReservationLineCard({ line, customerVisiblePayment }) {
       </SummaryBlock>
       <CustomerRow icon="package" label="서비스">
         {line.service_name}
-        {line.size_or_quantity && <span style={mutedInlineStyle}> · {line.size_or_quantity}</span>}
+        {quantity && <span style={mutedInlineStyle}> · {quantity}</span>}
         {line.service_detail && <div style={mutedLineStyle}>{line.service_detail}</div>}
       </CustomerRow>
       <CustomerRow icon="bell" label="진행상황">

@@ -4,6 +4,7 @@ import { completePartnerJob, getPartnerJob, listPartnerJobs, startPartnerJob } f
 import { uploadPartnerJobPhoto } from '../../api/photos';
 import { ApiError, toApiAssetUrl } from '../../api/client';
 import { useApiResource } from '../../api/useApiResource';
+import { formatQuantity } from '../../domain/format';
 import { digitsOnly, formatPhone } from '../../domain/phone';
 import { parseDateValue } from '../../domain/time';
 
@@ -172,7 +173,7 @@ export function PartnerJobDetail() {
           <PartnerStatusBadge status={job.status}/>
         </div>
         <h2 style={{ margin: 0, fontSize: 17, fontWeight: 700 }}>{job.service_name}</h2>
-        <div style={{ fontSize: 12, color: 'var(--text-tertiary)', marginTop: 2 }}>{job.size_or_quantity || job.service_detail || '상세 수량 미입력'}</div>
+        <div style={{ fontSize: 12, color: 'var(--text-tertiary)', marginTop: 2 }}>{formatQuantity(job.size_or_quantity) || job.service_detail || '상세 수량 미입력'}</div>
       </div>
 
       <div className="scroll" style={{ flex: 1, overflow: 'auto', padding: 12 }}>
