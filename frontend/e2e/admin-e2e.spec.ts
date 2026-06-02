@@ -145,11 +145,17 @@ test('admin can filter orders by visit date with the custom date picker', async 
   await expect(page.getByTestId(`admin-order-row-${targetOrder.id}`)).toBeVisible();
   await expect(page.getByTestId(`admin-order-row-${outsideOrder.id}`)).toBeVisible();
 
-  await pickDate(page, 'orders-date-start', '2026-05-21');
-  await pickDate(page, 'orders-date-end', '2026-05-21');
+  await pickDate(page, 'orders-date-start', '2026-12-24');
+  await pickDate(page, 'orders-date-end', '2026-12-24');
 
   await expect(page.getByTestId(`admin-order-row-${targetOrder.id}`)).toBeVisible();
   await expect(page.getByTestId(`admin-order-row-${outsideOrder.id}`)).toHaveCount(0);
+  const summary = page.getByTestId('orders-filter-summary');
+  await expect(summary).toBeVisible();
+  await expect(summary).toContainText('1건');
+  await expect(summary).toContainText('₩123,000');
+  await expect(summary).toContainText('₩45,000');
+  await expect(summary).toContainText('₩78,000');
 
   await page.getByTestId('orders-date-clear').click();
   await expect(page.getByTestId(`admin-order-row-${outsideOrder.id}`)).toBeVisible();
@@ -554,26 +560,30 @@ async function createDateFilterOrders(request) {
     headers: adminHeaders,
     data: {
       received_date: '2026-05-05',
-      scheduled_date: '2026-05-21',
+      scheduled_date: '2026-12-24',
       requested_time: '11:00',
       service_name: 'Date Filter Target QA',
       customer_name: 'Date Filter Target',
       customer_phone: '010-7000-2100',
       customer_address: 'Seoul Date Filter Target',
       customer_visible_payment: false,
+      total_amount: 123000,
+      partner_payment_amount: 45000,
     },
   }));
   const outsideOrder = await checkedJson(await request.post(`${backendUrl}/api/admin/orders`, {
     headers: adminHeaders,
     data: {
       received_date: '2026-05-05',
-      scheduled_date: '2026-05-22',
+      scheduled_date: '2026-12-25',
       requested_time: '11:00',
       service_name: 'Date Filter Outside QA',
       customer_name: 'Date Filter Outside',
       customer_phone: '010-7000-2200',
       customer_address: 'Seoul Date Filter Outside',
       customer_visible_payment: false,
+      total_amount: 999000,
+      partner_payment_amount: 111000,
     },
   }));
 

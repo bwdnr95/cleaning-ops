@@ -476,6 +476,12 @@ export function OrdersPage({ onOpenOrder, onCreateOrder, onEditOrder, initialTab
     () => paginateItems(groupedFiltered, page, pageSize),
     [groupedFiltered, page, pageSize],
   );
+  const filterSummary = React.useMemo(() => summarizeFilteredOrders(filtered), [filtered]);
+  const selectedPartnerName = partnerFilter === 'all'
+    ? '전체 협력사'
+    : sortedActivePartners.find((partner) => partner.id === partnerFilter)?.name || '선택 협력사';
+  const shouldShowFilterSummary = partnerFilter !== 'all' || isDateFilterActive;
+  const filterSummaryLabel = `${selectedPartnerName} · ${formatDateFilterSummary(dateFilter)}`;
 
   const setDatePreset = (preset) => {
     setDateFilter(createDateFilter(preset));
@@ -652,6 +658,13 @@ export function OrdersPage({ onOpenOrder, onCreateOrder, onEditOrder, initialTab
           </button>
         ))}
       </div>
+
+      {shouldShowFilterSummary && (
+        <FilterSummaryLine
+          label={filterSummaryLabel}
+          summary={filterSummary}
+        />
+      )}
 
       {/* 접수일 필터 */}
       <div style={{ padding: '0 10px 8px', background: 'var(--bg)', display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
@@ -1013,6 +1026,55 @@ function Insight({ num, label, warn = false, danger = false, muted = false }) {
 
 function InsightDivider() {
   return <span style={{ width: 1, height: 14, background: 'var(--border)', alignSelf: 'center' }}/>;
+}
+
+function FilterSummaryLine({ label, summary }) {
+  const items = [
+    ['건수', `${summary.count.toLocaleString()}건`],
+    ['소비자가', formatWon(summary.consumerTotal)],
+    ['도급가', formatWon(summary.partnerTotal)],
+    ['이윤', formatWon(summary.profitTotal)],
+  ];
+
+  return (
+    <div
+      data-testid="orders-filter-summary"
+      style={{
+        padding: '0 10px 8px',
+        background: 'var(--bg)',
+        display: 'flex',
+      }}
+    >
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 10,
+          flexWrap: 'wrap',
+          minHeight: 30,
+          padding: '5px 10px',
+          border: '1px solid var(--border)',
+          borderRadius: 8,
+          background: 'var(--surface)',
+          color: 'var(--text-secondary)',
+          fontSize: 12,
+          boxShadow: 'var(--shadow-xs)',
+        }}
+      >
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontWeight: 700, color: 'var(--text)' }}>
+          <Icon name="trending" size={12}/>
+          {label}
+        </span>
+        {items.map(([itemLabel, value]) => (
+          <span key={itemLabel} style={{ display: 'inline-flex', alignItems: 'baseline', gap: 4, whiteSpace: 'nowrap' }}>
+            <span style={{ color: 'var(--text-quaternary)' }}>·</span>
+            <span style={{ color: 'var(--text-tertiary)', fontWeight: 600 }}>{itemLabel}</span>
+            <span style={{ color: 'var(--text)', fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{value}</span>
+          </span>
+        ))}
+      </div>
+    </div>
+  );
 }
 
 function BulkActionPanel({
@@ -1510,6 +1572,28 @@ function toDeliveredState(status) {
     return 'done';
   }
   return 'pending';
+}
+
+function summarizeFilteredOrders(orders) {
+  const summary = {
+    count: orders.length,
+    consumerTotal: 0,
+    partnerTotal: 0,
+    profitTotal: 0,
+  };
+
+  for (const order of orders) {
+    summary.consumerTotal += Number(order.amount || 0);
+    summary.partnerTotal += Number(order.partnerPrice || 0);
+  }
+  summary.profitTotal = summary.consumerTotal - summary.partnerTotal;
+  return summary;
+}
+
+function formatWon(value) {
+  const amount = Number(value || 0);
+  const sign = amount < 0 ? '-' : '';
+  return `${sign}₩${Math.abs(amount).toLocaleString()}`;
 }
 
 function formatCompactWon(value) {
