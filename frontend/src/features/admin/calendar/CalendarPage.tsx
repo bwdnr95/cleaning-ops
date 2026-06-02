@@ -4,6 +4,7 @@ import { listAdminCalendarOrders, listPartners } from '../../../api/admin';
 import { Icon } from '../../../components/common/ui';
 import { useApiResource } from '../../../api/useApiResource';
 import { formatQuantity } from '../../../domain/format';
+import { formatPhone } from '../../../domain/phone';
 import { getAppTodayDate } from '../../../domain/time';
 
 export function CalendarPage({ onOpenOrder, onCreateOrder }) {
@@ -443,7 +444,7 @@ function DaySchedulePanel({ year, month, day, events, siteName, onOpenOrder }) {
               <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--text-secondary)' }}>
                 <span style={{ fontWeight: 600 }}>{eventItem.customer}</span>
                 <span style={{ color: 'var(--text-quaternary)' }}>·</span>
-                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{eventItem.team}</span>
+                <span className="mono" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{formatPhone(eventItem.phone)}</span>
               </div>
               <div style={{ fontSize: 11.5, color: 'var(--text-tertiary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                 {eventItem.address}
@@ -488,14 +489,17 @@ function groupOrdersByDay(orders) {
     }
     const day = Number(order.scheduled_date.slice(8, 10));
     const quantity = formatQuantity(order.size_or_quantity);
+    const serviceTitle = quantity ? `${order.service_name} ${quantity}` : order.service_name;
+    const team = order.team_name || '미배정';
     const event = {
       id: order.id,
       time: order.requested_time || '-',
-      title: quantity ? `${order.service_name} ${quantity}` : order.service_name,
+      title: `${serviceTitle} | ${team}`,
       status: order.status,
       customer: order.customer_name,
+      phone: order.customer_phone,
       address: order.customer_address,
-      team: order.team_name || '미배정',
+      team,
       tone: statusTone(order.status),
     };
     groups.set(day, [...(groups.get(day) || []), event]);

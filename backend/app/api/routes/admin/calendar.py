@@ -42,6 +42,7 @@ def list_calendar_orders(
                 service_name=order.service_name,
                 size_or_quantity=order.size_or_quantity,
                 customer_name=(group.customer_name if group else order.customer_name) or "",
+                customer_phone=(group.customer_phone if group else order.customer_phone),
                 customer_address=(group.customer_address if group else order.customer_address) or "",
                 customer_address_detail=group.customer_address_detail if group else None,
             )

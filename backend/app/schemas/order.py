@@ -155,6 +155,7 @@ class AdminCalendarOrderRead(ApiModel):
     service_name: str
     size_or_quantity: str | None = None
     customer_name: str
+    customer_phone: str | None = None
     customer_address: str
     customer_address_detail: str | None = None
 

@@ -512,6 +512,7 @@ def test_admin_calendar_lists_monthly_scheduled_orders_and_partner_filter() -> N
     assert all_response.json()[0]["id"] == "seed-order-2450"
     assert all_response.json()[0]["scheduled_date"] == "2026-05-04"
     assert all_response.json()[0]["team_name"] == "강남 1팀"
+    assert all_response.json()[0]["customer_phone"] == "01098765432"
     assert partner_response.json()[0]["partner_id"] == DEV_PARTNER_ID
 
 
@@ -547,6 +548,7 @@ def test_admin_calendar_includes_group_address_detail() -> None:
     item = next(item for item in response.json() if item["id"] == line_id)
     assert item["customer_address"] == "Seoul Gangnam"
     assert item["customer_address_detail"] == "Unit 1204"
+    assert item["customer_phone"] == "01011112222"
 
 
 def test_admin_calendar_rejects_partner_access() -> None:

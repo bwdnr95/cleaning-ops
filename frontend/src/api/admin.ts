@@ -81,6 +81,21 @@ export interface AdminOrderGroup {
   lines: AdminOrder[];
 }
 
+export interface AdminCalendarOrder {
+  id: string;
+  status: string;
+  scheduled_date: string;
+  requested_time?: string | null;
+  partner_id?: string | null;
+  team_name?: string | null;
+  service_name: string;
+  size_or_quantity?: string | null;
+  customer_name: string;
+  customer_phone?: string | null;
+  customer_address: string;
+  customer_address_detail?: string | null;
+}
+
 export interface MessageLog {
   id: string;
   order_id: string;
@@ -135,7 +150,7 @@ export function getDashboardRecentActivity() {
   return apiRequest('/admin/dashboard/recent-activity');
 }
 
-export function listAdminCalendarOrders({ year, month, partnerId = '' }) {
+export function listAdminCalendarOrders({ year, month, partnerId = '' }): Promise<AdminCalendarOrder[]> {
   const params = new URLSearchParams({
     year: String(year),
     month: String(month),
@@ -143,7 +158,7 @@ export function listAdminCalendarOrders({ year, month, partnerId = '' }) {
   if (partnerId) {
     params.set('partner_id', partnerId);
   }
-  return apiRequest(`/admin/calendar?${params.toString()}`);
+  return apiRequest(`/admin/calendar?${params.toString()}`) as Promise<AdminCalendarOrder[]>;
 }
 
 export function listAdminOrders(

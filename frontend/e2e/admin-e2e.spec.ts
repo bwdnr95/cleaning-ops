@@ -127,6 +127,8 @@ test('calendar more link opens the selected day order list', async ({ page, requ
   for (const order of orders) {
     await expect(page.getByTestId(`calendar-panel-order-${order.id}`)).toBeVisible();
   }
+  await expect(page.getByTestId(`calendar-panel-order-${orders[3].id}`)).toContainText('Calendar Overflow QA 4 4 | E2E QA Team');
+  await expect(page.getByTestId(`calendar-panel-order-${orders[3].id}`)).toContainText('Calendar Customer 4 · 010-3333-1033');
 
   await page.getByTestId(`calendar-panel-order-${orders[3].id}`).click();
   await expect(page.getByTestId('admin-order-detail-page')).toBeVisible();
@@ -533,6 +535,7 @@ async function createCalendarDayOrders(request) {
         partner_id: SEED_PARTNER_ID,
         team_name: 'E2E QA Team',
         service_name: `Calendar Overflow QA ${index + 1}`,
+        size_or_quantity: `${index + 1}.0`,
         customer_name: `Calendar Customer ${index + 1}`,
         customer_phone: `010-3333-10${index}${index}`,
         customer_address: `Seoul Calendar QA ${index + 1}`,
