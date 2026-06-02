@@ -122,13 +122,13 @@ test('calendar more link opens the selected day order list', async ({ page, requ
   await page.getByTestId('calendar-more-20').click();
 
   const panel = page.getByTestId('calendar-day-panel');
-  await expect(panel).toContainText('2026.05.20');
+  await expect(panel).toContainText('2026.06.20');
   await expect(panel).toContainText('4건');
   for (const order of orders) {
     await expect(page.getByTestId(`calendar-panel-order-${order.id}`)).toBeVisible();
   }
   await expect(page.getByTestId(`calendar-panel-order-${orders[3].id}`)).toContainText('Calendar Overflow QA 4 4 | E2E QA Team');
-  await expect(page.getByTestId(`calendar-panel-order-${orders[3].id}`)).toContainText('Calendar Customer 4 · 010-3333-1033');
+  await expect(page.getByTestId(`calendar-panel-order-${orders[3].id}`)).toContainText(/Calendar Customer 4\s*·\s*010-3333-1033/);
 
   await page.getByTestId(`calendar-panel-order-${orders[3].id}`).click();
   await expect(page.getByTestId('admin-order-detail-page')).toBeVisible();
@@ -145,8 +145,8 @@ test('admin can filter orders by visit date with the custom date picker', async 
   await expect(page.getByTestId(`admin-order-row-${targetOrder.id}`)).toBeVisible();
   await expect(page.getByTestId(`admin-order-row-${outsideOrder.id}`)).toBeVisible();
 
-  await pickDate(page, 'orders-date-start', '2026-12-24');
-  await pickDate(page, 'orders-date-end', '2026-12-24');
+  await pickDate(page, 'orders-date-start', '2026-06-24');
+  await pickDate(page, 'orders-date-end', '2026-06-24');
 
   await expect(page.getByTestId(`admin-order-row-${targetOrder.id}`)).toBeVisible();
   await expect(page.getByTestId(`admin-order-row-${outsideOrder.id}`)).toHaveCount(0);
@@ -354,7 +354,7 @@ test('admin can add a catalog item in product ops and use it in an order', async
   await page.getByTestId('order-customer-name').fill('E2E Admin Customer');
   await page.getByTestId('order-customer-phone').fill('010-4444-8899');
   await page.getByTestId('order-customer-address').fill('Seoul E2E Admin QA 1');
-  await pickDate(page, 'order-line-0-scheduled-date', '2026-05-12');
+  await pickDate(page, 'order-line-0-scheduled-date', '2026-06-12');
   await page.getByTestId('order-line-0-requested-time').fill('10:30');
   await page.getByTestId('order-line-0-partner').selectOption(SEED_PARTNER_ID);
   await page.getByLabel('결제 상태').selectOption('deposit_paid');
@@ -536,7 +536,7 @@ async function createCalendarDayOrders(request) {
       headers: adminHeaders,
       data: {
         received_date: '2026-05-05',
-        scheduled_date: '2026-05-20',
+        scheduled_date: '2026-06-20',
         requested_time: `${String(9 + index).padStart(2, '0')}:00`,
         partner_id: SEED_PARTNER_ID,
         team_name: 'E2E QA Team',
@@ -560,7 +560,7 @@ async function createDateFilterOrders(request) {
     headers: adminHeaders,
     data: {
       received_date: '2026-05-05',
-      scheduled_date: '2026-12-24',
+      scheduled_date: '2026-06-24',
       requested_time: '11:00',
       service_name: 'Date Filter Target QA',
       customer_name: 'Date Filter Target',
@@ -575,7 +575,7 @@ async function createDateFilterOrders(request) {
     headers: adminHeaders,
     data: {
       received_date: '2026-05-05',
-      scheduled_date: '2026-12-25',
+      scheduled_date: '2026-06-25',
       requested_time: '11:00',
       service_name: 'Date Filter Outside QA',
       customer_name: 'Date Filter Outside',
