@@ -59,6 +59,7 @@ class MessagePreviewRead(ApiModel):
 
 class MessageSettingsRead(ApiModel):
     provider: str
+    kakao_channel_url: str | None = None
     solapi_credentials_configured: bool
     solapi_sender_configured: bool
     solapi_webhook_configured: bool

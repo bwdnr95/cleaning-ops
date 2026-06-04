@@ -12,6 +12,7 @@ class Settings(BaseSettings):
     business_timezone: str = "Asia/Seoul"
     database_url: str = "sqlite:///./cleaning_ops.db"
     frontend_url: str = "http://localhost:5173"
+    kakao_channel_url: str = ""
     cors_origins: list[str] = ["http://localhost:5173"]
     secret_key: str = "change-me-in-production"
     jwt_algorithm: str = "HS256"

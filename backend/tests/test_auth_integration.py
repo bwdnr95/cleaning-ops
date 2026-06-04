@@ -1878,6 +1878,7 @@ def test_admin_message_settings_reports_solapi_readiness_without_secret_values(m
     monkeypatch.setattr(settings, "solapi_kakao_template_customer_photo_ready", "KA_PHOTO")
     monkeypatch.setattr(settings, "solapi_kakao_template_customer_quote", "KA_QUOTE")
     monkeypatch.setattr(settings, "solapi_kakao_template_partner_customer_info", "KA_PARTNER_CUSTOMER")
+    monkeypatch.setattr(settings, "kakao_channel_url", "https://pf.kakao.com/_cleanjob")
 
     client = make_test_client()
     admin_session = login(client, "/api/auth/admin/login", DEV_ADMIN_EMAIL, DEV_ADMIN_PASSWORD)
@@ -1888,6 +1889,7 @@ def test_admin_message_settings_reports_solapi_readiness_without_secret_values(m
     assert response.status_code == 200
     body = response.json()
     assert body["provider"] == "solapi"
+    assert body["kakao_channel_url"] == "https://pf.kakao.com/_cleanjob"
     assert body["solapi_credentials_configured"] is True
     assert body["solapi_sender_configured"] is True
     assert body["solapi_webhook_configured"] is True
@@ -1913,6 +1915,7 @@ def test_admin_message_settings_warns_for_unready_solapi(monkeypatch) -> None:
     monkeypatch.setattr(settings, "solapi_kakao_template_customer_photo_ready", "")
     monkeypatch.setattr(settings, "solapi_kakao_template_customer_quote", "")
     monkeypatch.setattr(settings, "solapi_kakao_template_partner_customer_info", "")
+    monkeypatch.setattr(settings, "kakao_channel_url", "")
 
     client = make_test_client()
     admin_session = login(client, "/api/auth/admin/login", DEV_ADMIN_EMAIL, DEV_ADMIN_PASSWORD)
@@ -1922,6 +1925,7 @@ def test_admin_message_settings_warns_for_unready_solapi(monkeypatch) -> None:
 
     assert response.status_code == 200
     body = response.json()
+    assert body["kakao_channel_url"] is None
     assert body["can_send_sms"] is False
     assert body["can_send_alimtalk"] is False
     assert "solapi_missing_credentials" in body["warnings"]

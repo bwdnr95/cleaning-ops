@@ -2,6 +2,7 @@ import React from 'react';
 
 import { deleteAdminOrder, getAdminOrder, listPartners, updateAdminOrder } from '../../../api/admin';
 import {
+  getAdminMessageSettings,
   previewAdminMessage,
   sendAdminMessage,
 } from '../../../api/messages';
@@ -50,6 +51,7 @@ export function OrderDetailPage({ orderId, onBack, onEdit, onNav, onOpenOrder })
   const loadOrder = React.useCallback(() => getAdminOrder(orderId), [orderId]);
   const orderResource = useApiResource(loadOrder, orderId);
   const partnersResource = useApiResource(listPartners);
+  const messageSettingsResource = useApiResource(getAdminMessageSettings);
   const order = orderResource.data;
   const [selectedStatus, setSelectedStatus] = React.useState('');
   const [selectedPartnerId, setSelectedPartnerId] = React.useState('');
@@ -244,6 +246,7 @@ export function OrderDetailPage({ orderId, onBack, onEdit, onNav, onOpenOrder })
   const timeline = order.timeline || [];
   const selectedPartner = (partnersResource.data || []).find((partner) => partner.id === order.partner_id);
   const hasScheduleChanges = selectedScheduledDate !== (order.scheduled_date || '') || selectedRequestedTime !== (order.requested_time || '');
+  const kakaoChannelUrl = normalizeHttpUrl(messageSettingsResource.data?.kakao_channel_url);
 
   return (
     <div data-testid="admin-order-detail-page" style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0, background: 'var(--bg)' }}>
@@ -299,6 +302,19 @@ export function OrderDetailPage({ orderId, onBack, onEdit, onNav, onOpenOrder })
                 />
                 <KVItem label="요청사항" value={order.special_request || '-'} span={2} multiline/>
               </KV>
+              {kakaoChannelUrl && (
+                <div style={{ marginTop: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <a
+                    data-testid="order-kakao-consult-link"
+                    className="btn btn--secondary btn--sm"
+                    href={kakaoChannelUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    <Icon name="send" size={13}/> 카카오톡 상담
+                  </a>
+                </div>
+              )}
             </Section>
 
             <Section title="상품 / 일정" icon="package">
@@ -948,6 +964,19 @@ function messagePreviewWarningLabel(warning) {
     alimtalk_fallback_sms_enabled: '알림톡 설정이 준비되지 않으면 같은 문구를 SMS로 fallback 발송합니다.',
   };
   return map[warning] || warning;
+}
+
+function normalizeHttpUrl(value) {
+  const input = String(value || '').trim();
+  if (!input) {
+    return '';
+  }
+  try {
+    const url = new URL(input);
+    return ['http:', 'https:'].includes(url.protocol) ? url.toString() : '';
+  } catch {
+    return '';
+  }
 }
 
 function timelineEventLabel(type) {

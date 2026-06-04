@@ -651,6 +651,7 @@ class MessageService:
 
         return MessageSettingsRead(
             provider=provider,
+            kakao_channel_url=settings.kakao_channel_url.strip() or None,
             solapi_credentials_configured=credentials_configured,
             solapi_sender_configured=sender_configured,
             solapi_webhook_configured=webhook_configured,
