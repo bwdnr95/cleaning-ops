@@ -3,12 +3,18 @@ from datetime import UTC, datetime
 from app.core.time import business_today, to_business_time
 from app.domain.constants import ORDER_STATUSES, OrderStatus
 from app.domain.phone import normalize_phone, phone_suffix_matches
+from app.domain.service_catalog import SERVICE_UNITS, ServiceUnit
 
 
 def test_order_status_contract_has_required_statuses() -> None:
     assert ORDER_STATUSES == tuple(status.value for status in OrderStatus)
     assert "사진검수대기" in ORDER_STATUSES
     assert "서비스완료" in ORDER_STATUSES
+
+
+def test_service_units_include_kan_for_service_catalog() -> None:
+    assert ServiceUnit.KAN.value == "칸"
+    assert "칸" in SERVICE_UNITS
 
 
 def test_phone_suffix_verification_normalizes_phone() -> None:

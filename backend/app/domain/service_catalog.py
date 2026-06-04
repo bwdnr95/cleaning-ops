@@ -6,6 +6,7 @@ class ServiceUnit(StrEnum):
     CASE = "건"
     UNIT = "대"
     SET = "세트"
+    KAN = "칸"
     ETC = "기타"
 
 

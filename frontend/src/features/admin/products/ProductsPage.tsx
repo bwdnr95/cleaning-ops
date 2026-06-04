@@ -13,7 +13,7 @@ import { PaginationBar, paginateItems } from '../../../components/common/Paginat
 import { useApiResource } from '../../../api/useApiResource';
 import { Badge, Icon } from '../../../components/common/ui';
 
-const SERVICE_UNITS = ['평', '건', '대', '세트', '기타'];
+const SERVICE_UNITS = ['평', '건', '대', '세트', '칸', '기타'];
 
 export function ProductsPage() {
   const loadCatalog = React.useCallback(() => listServiceCatalog({ includeInactive: true }), []);
