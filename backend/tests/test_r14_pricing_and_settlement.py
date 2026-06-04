@@ -60,7 +60,7 @@ def test_service_item_pricing_auto_fills_order_consumer_and_partner_prices() -> 
     assert line["vat_type"] == "excluded"
 
 
-def test_admin_order_list_prioritizes_overdue_unpaid_and_hides_past_paid() -> None:
+def test_admin_order_list_prioritizes_upcoming_then_overdue_unpaid_and_hides_past_paid() -> None:
     today = business_today()
 
     def seed_sort_orders(db: Session) -> None:
@@ -104,6 +104,20 @@ def test_admin_order_list_prioritizes_overdue_unpaid_and_hides_past_paid() -> No
                     payment_status=PaymentStatus.PAID,
                 ),
                 Order(
+                    id="r14-today-paid",
+                    group_id="r14-sort-group",
+                    status=OrderStatus.SCHEDULED,
+                    received_date=today,
+                    scheduled_date=today,
+                    service_name="오늘 작업",
+                    customer_token="r14-sort-token",
+                    customer_name="R14 정렬 고객",
+                    customer_phone="01011112222",
+                    customer_address="서울 R14 정렬로 1",
+                    total_amount=Decimal("110000"),
+                    payment_status=PaymentStatus.PAID,
+                ),
+                Order(
                     id="r14-future-paid",
                     group_id="r14-sort-group",
                     status=OrderStatus.SCHEDULE_CONFIRMED,
@@ -128,16 +142,20 @@ def test_admin_order_list_prioritizes_overdue_unpaid_and_hides_past_paid() -> No
     assert response.status_code == 200, response.text
     ids = [item["id"] for item in response.json()]
     assert "r14-overdue-unpaid" in ids
+    assert "r14-today-paid" in ids
     assert "r14-future-paid" in ids
     assert "r14-overdue-paid" not in ids
-    assert ids.index("r14-overdue-unpaid") < ids.index("r14-future-paid")
+    assert ids.index("r14-today-paid") < ids.index("r14-future-paid")
+    assert ids.index("r14-future-paid") < ids.index("r14-overdue-unpaid")
 
     with_past_response = client.get(
         "/api/admin/orders?sort=visit_asc&include_past_paid=true",
         headers=headers,
     )
     assert with_past_response.status_code == 200
-    assert "r14-overdue-paid" in [item["id"] for item in with_past_response.json()]
+    with_past_ids = [item["id"] for item in with_past_response.json()]
+    assert "r14-overdue-paid" in with_past_ids
+    assert with_past_ids.index("r14-overdue-unpaid") < with_past_ids.index("r14-overdue-paid")
 
     received_response = client.get(
         "/api/admin/orders?sort=received_desc&include_past_paid=true",

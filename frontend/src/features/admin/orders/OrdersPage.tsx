@@ -7,7 +7,7 @@ import { bulkDeleteAdminOrders, listAdminOrders, listPartners, updateAdminOrder,
 import { sendAdminMessage } from '../../../api/messages';
 import { useApiResource } from '../../../api/useApiResource';
 import { ORDER_STATUSES } from '../../../domain/orderStatus';
-import { isPaymentCheckNeeded } from '../../../domain/paymentStatus';
+import { isBalanceIncomplete, isPaymentCheckNeeded } from '../../../domain/paymentStatus';
 import { formatQuantity } from '../../../domain/format';
 import { formatPhone } from '../../../domain/phone';
 import { OrderImportDialog } from './OrderImportDialog';
@@ -440,7 +440,7 @@ export function OrdersPage({ onOpenOrder, onCreateOrder, onEditOrder, initialTab
         if (tab === 'cancel') return o.status === '취소';
         return true;
       })
-      .filter((o) => matchesVisitDateFilter(o.scheduledDate, dateFilter))
+      .filter((o) => matchesVisitDateFilter(o, dateFilter))
       .filter((o) => matchesReceivedDateFilter(o.receivedRaw, receivedDateFilter))
       .filter((o) => matchesPartnerFilter(o, partnerFilter))
       .filter((o) => matchesOrderQuery(o, query)),
@@ -1217,13 +1217,12 @@ function shortOrderId(orderId) {
   return String(orderId || '').slice(0, 8);
 }
 
-function matchesVisitDateFilter(value, dateFilter) {
+function matchesVisitDateFilter(order, dateFilter) {
+  const value = order.scheduledDate;
   if (dateFilter.preset === 'upcoming') {
-    // 오늘부터: 미정(날짜 없음) 주문은 노출 유지, 과거 방문일만 숨긴다.
-    if (!value) {
-      return true;
-    }
-    return value >= getAppTodayValue();
+    // 오늘부터: 오늘·미래 일정과 과거 잔금 미완납을 함께 보여주고, 과거 완납은 전체에서만 본다.
+    const today = getAppTodayValue();
+    return !value || value >= today || hasPastIncompleteBalance(order, today);
   }
   return matchesDateFilter(value, dateFilter);
 }
@@ -1320,7 +1319,7 @@ function sortOrders(orders, sortBy) {
     });
   }
 
-  // 방문일 정렬: 오늘 우선(미수금 연체 → 오늘·이후·미정 → 과거), 기준일은 KST 오늘이라 매일 자동 롤오버된다.
+  // 방문일 정렬: 오늘·미래 → 과거 잔금 미완납 → 미정 → 과거 완납, 기준일은 KST 오늘이라 매일 자동 롤오버된다.
   const today = getAppTodayValue();
   const reverse = sortBy.endsWith('_desc');
   return [...orders].sort((a, b) => compareVisitOrder(a, b, today, reverse));
@@ -1328,13 +1327,16 @@ function sortOrders(orders, sortBy) {
 
 function visitOrderGroup(order, today) {
   const date = order.scheduledDate;
-  if (date && date < today && isPaymentCheckNeeded(order.paymentStatus)) {
-    return 0; // 미수금 연체 — 항상 최상단
+  if (date && date >= today) {
+    return 0; // 오늘·미래 방문예정
   }
-  if (!date || date >= today) {
-    return 1; // 오늘·이후·미정
+  if (hasPastIncompleteBalance(order, today)) {
+    return 1; // 과거 일정 중 잔금 미완납
   }
-  return 2; // 과거(전체 보기에서만 노출)
+  if (!date) {
+    return 2; // 미정
+  }
+  return 3; // 과거 완납(기본 화면에서는 숨김)
 }
 
 function compareVisitOrder(a, b, today, reverse) {
@@ -1348,20 +1350,23 @@ function compareVisitOrder(a, b, today, reverse) {
   const dateA = a.scheduledDate || '';
   const dateB = b.scheduledDate || '';
 
-  if (groupA === 1) {
-    // 미정(날짜 없음)은 오늘·이후 그룹 안에서 항상 마지막.
-    if (!dateA && !dateB) return idCmp;
-    if (!dateA) return 1;
-    if (!dateB) return -1;
+  if (groupA === 0) {
     const cmp = dateA.localeCompare(dateB) * (reverse ? -1 : 1);
     return cmp || idCmp;
   }
-  if (groupA === 2) {
+  if (groupA === 1 || groupA === 3) {
     // 과거는 최근 날짜가 먼저.
     return dateB.localeCompare(dateA) || idCmp;
   }
-  // 미수금 연체는 오래된 건이 먼저.
-  return dateA.localeCompare(dateB) || idCmp;
+  return idCmp;
+}
+
+function hasPastIncompleteBalance(order, today) {
+  return Boolean(
+    order.scheduledDate
+    && order.scheduledDate < today
+    && isBalanceIncomplete(order.paymentStatus),
+  );
 }
 
 function toOrderRow(order) {

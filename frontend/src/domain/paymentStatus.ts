@@ -15,6 +15,7 @@ export const PARTNER_PAYMENT_STATUSES = [
 ];
 
 export const PAYMENT_CHECK_STATUSES = ['pending', 'balance_pending', 'unpaid'];
+export const BALANCE_INCOMPLETE_STATUSES = ['pending', 'deposit_paid', 'balance_pending', 'unpaid'];
 
 export function paymentStatusLabel(status) {
   return PAYMENT_STATUSES.find((item) => item.value === status)?.label || status || '-';
@@ -26,4 +27,8 @@ export function partnerPaymentStatusLabel(status) {
 
 export function isPaymentCheckNeeded(status) {
   return PAYMENT_CHECK_STATUSES.includes(status);
+}
+
+export function isBalanceIncomplete(status) {
+  return BALANCE_INCOMPLETE_STATUSES.includes(status);
 }

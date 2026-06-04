@@ -118,17 +118,19 @@ def is_overdue_unpaid_order(order: Order, today: date) -> bool:
 
 def order_visit_sort_key(order: Order, today: date, *, reverse_visit: bool) -> tuple:
     scheduled_date = order.scheduled_date
-    if is_overdue_unpaid_order(order, today):
+    if scheduled_date is not None and scheduled_date >= today:
         group = 0
-    elif scheduled_date is None or scheduled_date >= today:
+    elif is_overdue_unpaid_order(order, today):
         group = 1
-    else:
+    elif scheduled_date is None:
         group = 2
+    else:
+        group = 3
 
-    ordinal = scheduled_date.toordinal() if scheduled_date else 99999999
-    if group in {1, 2} and reverse_visit and scheduled_date is not None:
+    ordinal = scheduled_date.toordinal() if scheduled_date else 0
+    if group == 0 and reverse_visit and scheduled_date is not None:
         ordinal = -ordinal
-    if group == 2 and not reverse_visit and scheduled_date is not None:
+    if group in {1, 3} and scheduled_date is not None:
         ordinal = -ordinal
     return (group, ordinal, order.id)
 
