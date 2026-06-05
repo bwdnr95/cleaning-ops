@@ -51,10 +51,6 @@ def _build_csp_value() -> str:
     connect_sources = {"'self'", "https://postcode.map.kakao.com"}
     script_sources = {"'self'", "https://t1.daumcdn.net"}
     frame_sources = {"https://postcode.map.kakao.com"}
-    # Pretendard 웹폰트(global.css @import)는 jsDelivr CDN에서 stylesheet + woff2 폰트를 로드한다.
-    style_sources = {"'self'", "'unsafe-inline'", "https://cdn.jsdelivr.net"}
-    font_sources = {"'self'", "data:", "https://cdn.jsdelivr.net"}
-
     public_storage = settings.s3_public_base_url.strip()
     if public_storage:
         img_sources.add(_origin(public_storage))
@@ -75,8 +71,8 @@ def _build_csp_value() -> str:
         f"connect-src {' '.join(sorted(connect_sources))}",
         f"script-src {' '.join(sorted(script_sources))}",
         f"frame-src {' '.join(sorted(frame_sources))}",
-        f"style-src {' '.join(sorted(style_sources))}",
-        f"font-src {' '.join(sorted(font_sources))}",
+        "style-src 'self' 'unsafe-inline'",
+        "font-src 'self' data:",
         "object-src 'none'",
         "base-uri 'self'",
         "frame-ancestors 'none'",
