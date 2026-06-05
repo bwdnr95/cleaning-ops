@@ -92,6 +92,14 @@ class OrderRepository(Repository[Order]):
         )
         return list(self.db.scalars(stmt))
 
+    def list_by_ids_preserving_order(self, order_ids: list[str]) -> list[Order]:
+        if not order_ids:
+            return []
+        unique_ids = list(dict.fromkeys(order_ids))
+        stmt = select(Order).where(Order.deleted_at.is_(None), Order.id.in_(unique_ids))
+        orders_by_id = {order.id: order for order in self.db.scalars(stmt)}
+        return [orders_by_id[order_id] for order_id in order_ids if order_id in orders_by_id]
+
     def count_scheduled_on(self, target: date) -> int:
         stmt = select(func.count(Order.id)).where(
             Order.deleted_at.is_(None),

@@ -23,7 +23,9 @@ from app.schemas.order import (
 )
 from app.schemas.message import MessageLogRead, MessageSendRequest
 from app.schemas.report import OrderImportResult
+from app.services.exporters import to_xlsx_bytes
 from app.services.messages import MessageService
+from app.services.order_export import MissingExportOrdersError, OrderExportService
 from app.services.order_import import import_orders_from_xlsx, is_xlsx_upload
 from app.services.orders import (
     OrderService,
@@ -34,8 +36,14 @@ from app.services.orders import (
 
 router = APIRouter()
 
+_XLSX_MEDIA = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+
 
 class BulkDeleteRequest(BaseModel):
+    order_ids: list[str]
+
+
+class OrderExportRequest(BaseModel):
     order_ids: list[str]
 
 
@@ -182,6 +190,31 @@ async def import_orders(
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/export")
+def export_orders(
+    payload: OrderExportRequest,
+    db: Session = Depends(get_session),
+    _: CurrentUser = Depends(require_admin),
+) -> Response:
+    if not payload.order_ids:
+        raise HTTPException(status_code=400, detail="order_ids_required")
+
+    try:
+        table = OrderExportService(db).build_admin_orders_export(payload.order_ids)
+    except MissingExportOrdersError as exc:
+        raise HTTPException(
+            status_code=404,
+            detail={"code": "orders_not_found", "order_ids": exc.order_ids},
+        ) from exc
+
+    body = to_xlsx_bytes(table.headers, table.rows, sheet_name="orders")
+    return Response(
+        content=body,
+        media_type=_XLSX_MEDIA,
+        headers={"content-disposition": 'attachment; filename="orders.xlsx"'},
+    )
 
 
 @router.delete("/{order_id}", status_code=status.HTTP_204_NO_CONTENT)

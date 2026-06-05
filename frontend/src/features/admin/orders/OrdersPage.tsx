@@ -3,7 +3,7 @@ import { DatePicker } from '../../../components/common/DatePicker';
 import { PaginationBar, paginateItems } from '../../../components/common/Pagination';
 import { Avatar, Icon } from '../../../components/common/ui';
 import { ORDERS } from '../../../mocks/cleaningOpsData';
-import { bulkDeleteAdminOrders, listAdminOrders, listPartners, updateAdminOrder, type AdminOrderSort } from '../../../api/admin';
+import { bulkDeleteAdminOrders, exportAdminOrders, listAdminOrders, listPartners, updateAdminOrder, type AdminOrderSort } from '../../../api/admin';
 import { sendAdminMessage } from '../../../api/messages';
 import { useApiResource } from '../../../api/useApiResource';
 import { ORDER_STATUSES } from '../../../domain/orderStatus';
@@ -226,6 +226,7 @@ export function OrdersPage({ onOpenOrder, onCreateOrder, onEditOrder, initialTab
   const [actionNotice, setActionNotice] = React.useState(null);
   const [isSavingAction, setIsSavingAction] = React.useState(false);
   const [isDeleting, setIsDeleting] = React.useState(false);
+  const [isExporting, setIsExporting] = React.useState(false);
   const [bulkAction, setBulkAction] = React.useState(null);
   const [bulkStatus, setBulkStatus] = React.useState('일정확정');
   const [bulkPartnerId, setBulkPartnerId] = React.useState('');
@@ -503,6 +504,31 @@ export function OrdersPage({ onOpenOrder, onCreateOrder, onEditOrder, initialTab
     }));
   };
 
+  const handleExportOrders = async () => {
+    setActionError('');
+    setActionNotice(null);
+
+    if (!ordersResource.data) {
+      setActionError('주문 목록을 불러온 뒤 내보내기를 다시 시도해주세요.');
+      return;
+    }
+    if (filtered.length === 0) {
+      setActionNotice({ tone: 'warn', text: '내보낼 주문이 없습니다.' });
+      return;
+    }
+
+    setIsExporting(true);
+    try {
+      const blob = await exportAdminOrders(filtered.map((order) => order.id));
+      downloadExportBlob(blob, createOrdersExportFilename());
+      setActionNotice({ tone: 'success', text: `${filtered.length}건을 내보냈습니다.` });
+    } catch (error) {
+      setActionError(`내보내기 실패: ${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
   return (
     <div data-testid="admin-orders-page" className="page-shell" style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0, background: 'var(--bg)', maxWidth: 'none' }}>
       {/* Insight line — typographic, no card chrome */}
@@ -525,8 +551,14 @@ export function OrdersPage({ onOpenOrder, onCreateOrder, onEditOrder, initialTab
           <Insight num={formatCompactWon(orders.reduce((sum, order) => sum + order.amount, 0))} label="이번 달" muted/>
         </div>
         <div style={{ display: 'flex', gap: 6 }}>
-          <button className="btn btn--secondary btn--sm">
-            <Icon name="fileText" size={12}/> 내보내기
+          <button
+            type="button"
+            data-testid="admin-orders-export"
+            className="btn btn--secondary btn--sm"
+            disabled={isExporting || ordersResource.isLoading || Boolean(ordersResource.error)}
+            onClick={() => void handleExportOrders()}
+          >
+            <Icon name="fileText" size={12}/> {isExporting ? '내보내는 중' : '내보내기'}
           </button>
           <button
             data-testid="admin-orders-import"
@@ -1215,6 +1247,24 @@ function normalizeActionError(error) {
 
 function shortOrderId(orderId) {
   return String(orderId || '').slice(0, 8);
+}
+
+function createOrdersExportFilename() {
+  return `주문내보내기_${getAppTodayValue().replace(/-/g, '')}.xlsx`;
+}
+
+function downloadExportBlob(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  try {
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+  } finally {
+    URL.revokeObjectURL(url);
+  }
 }
 
 function matchesVisitDateFilter(order, dateFilter) {

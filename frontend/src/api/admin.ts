@@ -1,4 +1,4 @@
-import { apiRequest } from './client';
+import { apiBlobRequest, apiRequest } from './client';
 
 export type MessageChannelInput = 'kakao' | 'sms' | 'lms';
 export type SettlementStatusFilter = 'unpaid' | 'paid' | 'all';
@@ -187,6 +187,13 @@ export function importOrders(file: File): Promise<ImportResult> {
   const form = new FormData();
   form.append('file', file);
   return apiRequest('/admin/orders/import', { method: 'POST', body: form });
+}
+
+export function exportAdminOrders(orderIds: string[]): Promise<Blob> {
+  return apiBlobRequest('/admin/orders/export', {
+    method: 'POST',
+    body: { order_ids: orderIds },
+  });
 }
 
 export function createAdminOrder(input: CreateOrderInput): Promise<AdminOrder> {

@@ -19,6 +19,13 @@ let refreshPromise = null;
 
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL ?? '/api').replace(/\/$/, '');
 
+type FetchOptions = NonNullable<Parameters<typeof fetch>[1]>;
+type ApiRequestOptions = Omit<FetchOptions, 'body'> & {
+  body?: unknown;
+  retryOnUnauthorized?: boolean;
+  skipAuth?: boolean;
+};
+
 export function setApiAuthHandlers(handlers) {
   authHandlers = handlers;
 }
@@ -72,8 +79,7 @@ export async function apiRequest(path, requestOptions = undefined) {
 }
 
 export async function downloadBlob(path: string, suggestedFilename: string): Promise<void> {
-  const response = await fetchBlobWithRefresh(path);
-  const blob = await response.blob();
+  const blob = await apiBlobRequest(path);
   const url = URL.createObjectURL(blob);
   try {
     const a = document.createElement('a');
@@ -87,13 +93,30 @@ export async function downloadBlob(path: string, suggestedFilename: string): Pro
   }
 }
 
-async function fetchBlobWithRefresh(path: string): Promise<Response> {
-  let response = await blobRequest(path);
-  if (response.status === 401 && authHandlers?.getRefreshToken()) {
+export async function apiBlobRequest(
+  path: string,
+  requestOptions: ApiRequestOptions | undefined = undefined,
+): Promise<Blob> {
+  const response = await fetchBlobWithRefresh(path, requestOptions);
+  return response.blob();
+}
+
+async function fetchBlobWithRefresh(
+  path: string,
+  requestOptions: ApiRequestOptions | undefined = undefined,
+): Promise<Response> {
+  const options = requestOptions ?? {};
+  let response = await blobRequest(path, options);
+  if (
+    response.status === 401 &&
+    options.skipAuth !== true &&
+    options.retryOnUnauthorized !== false &&
+    authHandlers?.getRefreshToken()
+  ) {
     try {
       const session = await refreshWithRotation(authHandlers.getRefreshToken() ?? '');
       authHandlers.onRefresh(session);
-      response = await blobRequest(path);
+      response = await blobRequest(path, options);
       if (response.status === 401) {
         authHandlers.onUnauthorized();
         throw await toApiError(response);
@@ -110,14 +133,28 @@ async function fetchBlobWithRefresh(path: string): Promise<Response> {
   return response;
 }
 
-async function blobRequest(path: string): Promise<Response> {
-  const headers = new Headers();
+async function blobRequest(path: string, options: ApiRequestOptions = {}): Promise<Response> {
+  const headers = new Headers(options.headers);
   headers.set('X-Request-ID', createRequestId());
+  const { body, retryOnUnauthorized, skipAuth, ...fetchOptions } = options;
+  void retryOnUnauthorized;
+  const isFormData = typeof FormData !== 'undefined' && body instanceof FormData;
+
+  if (body !== undefined && !headers.has('Content-Type') && !isFormData) {
+    headers.set('Content-Type', 'application/json');
+  }
+
   const accessToken = authHandlers?.getAccessToken();
-  if (accessToken) {
+  if (skipAuth !== true && accessToken) {
     headers.set('Authorization', `Bearer ${accessToken}`);
   }
-  return fetch(toApiUrl(path), { headers, credentials: 'include' });
+  const requestBody = body === undefined || isFormData ? (body as FetchOptions['body']) : JSON.stringify(body);
+  return fetch(toApiUrl(path), {
+    ...fetchOptions,
+    headers,
+    body: requestBody,
+    credentials: 'include',
+  });
 }
 
 async function request(path, options) {
