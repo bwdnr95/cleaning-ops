@@ -1319,7 +1319,7 @@ function sortOrders(orders, sortBy) {
     });
   }
 
-  // 방문일 정렬: 오늘·미래 → 과거 잔금 미완납 → 미정 → 과거 완납, 기준일은 KST 오늘이라 매일 자동 롤오버된다.
+  // 방문일 정렬: 오늘·미래 → 미정 → 과거 잔금 미완납 → 과거 완납, 기준일은 KST 오늘이라 매일 자동 롤오버된다.
   const today = getAppTodayValue();
   const reverse = sortBy.endsWith('_desc');
   return [...orders].sort((a, b) => compareVisitOrder(a, b, today, reverse));
@@ -1330,11 +1330,11 @@ function visitOrderGroup(order, today) {
   if (date && date >= today) {
     return 0; // 오늘·미래 방문예정
   }
-  if (hasPastIncompleteBalance(order, today)) {
-    return 1; // 과거 일정 중 잔금 미완납
-  }
   if (!date) {
-    return 2; // 미정
+    return 1; // 미정(신규접수/일정 미확정)
+  }
+  if (hasPastIncompleteBalance(order, today)) {
+    return 2; // 과거 일정 중 잔금 미완납
   }
   return 3; // 과거 완납(기본 화면에서는 숨김)
 }
@@ -1354,11 +1354,11 @@ function compareVisitOrder(a, b, today, reverse) {
     const cmp = dateA.localeCompare(dateB) * (reverse ? -1 : 1);
     return cmp || idCmp;
   }
-  if (groupA === 1 || groupA === 3) {
+  if (groupA === 2 || groupA === 3) {
     // 과거는 최근 날짜가 먼저.
     return dateB.localeCompare(dateA) || idCmp;
   }
-  return idCmp;
+  return idCmp; // 미정(group 1)
 }
 
 function hasPastIncompleteBalance(order, today) {

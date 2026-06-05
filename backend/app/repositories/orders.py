@@ -119,18 +119,18 @@ def is_overdue_unpaid_order(order: Order, today: date) -> bool:
 def order_visit_sort_key(order: Order, today: date, *, reverse_visit: bool) -> tuple:
     scheduled_date = order.scheduled_date
     if scheduled_date is not None and scheduled_date >= today:
-        group = 0
-    elif is_overdue_unpaid_order(order, today):
-        group = 1
+        group = 0  # 오늘·미래 방문예정
     elif scheduled_date is None:
-        group = 2
+        group = 1  # 미정(신규접수/일정 미확정)
+    elif is_overdue_unpaid_order(order, today):
+        group = 2  # 과거 일정 중 잔금 미완납
     else:
-        group = 3
+        group = 3  # 과거 완납
 
     ordinal = scheduled_date.toordinal() if scheduled_date else 0
     if group == 0 and reverse_visit and scheduled_date is not None:
         ordinal = -ordinal
-    if group in {1, 3} and scheduled_date is not None:
+    if group in {2, 3} and scheduled_date is not None:
         ordinal = -ordinal
     return (group, ordinal, order.id)
 

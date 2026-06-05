@@ -131,6 +131,20 @@ def test_admin_order_list_prioritizes_upcoming_then_overdue_unpaid_and_hides_pas
                     total_amount=Decimal("120000"),
                     payment_status=PaymentStatus.PAID,
                 ),
+                Order(
+                    id="r14-unscheduled",
+                    group_id="r14-sort-group",
+                    status=OrderStatus.NEW,
+                    received_date=today - timedelta(days=1),
+                    scheduled_date=None,
+                    service_name="일정 미정 신규접수",
+                    customer_token="r14-sort-token",
+                    customer_name="R14 정렬 고객",
+                    customer_phone="01011112222",
+                    customer_address="서울 R14 정렬로 1",
+                    total_amount=Decimal("130000"),
+                    payment_status=PaymentStatus.PENDING,
+                ),
             ]
         )
 
@@ -144,9 +158,12 @@ def test_admin_order_list_prioritizes_upcoming_then_overdue_unpaid_and_hides_pas
     assert "r14-overdue-unpaid" in ids
     assert "r14-today-paid" in ids
     assert "r14-future-paid" in ids
+    assert "r14-unscheduled" in ids
     assert "r14-overdue-paid" not in ids
+    # 오늘·미래 → 미정(신규접수) → 과거 잔금 미완납 순.
     assert ids.index("r14-today-paid") < ids.index("r14-future-paid")
-    assert ids.index("r14-future-paid") < ids.index("r14-overdue-unpaid")
+    assert ids.index("r14-future-paid") < ids.index("r14-unscheduled")
+    assert ids.index("r14-unscheduled") < ids.index("r14-overdue-unpaid")
 
     with_past_response = client.get(
         "/api/admin/orders?sort=visit_asc&include_past_paid=true",
