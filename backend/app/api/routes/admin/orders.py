@@ -25,7 +25,13 @@ from app.schemas.message import MessageLogRead, MessageSendRequest
 from app.schemas.report import OrderImportResult
 from app.services.exporters import to_xlsx_bytes
 from app.services.messages import MessageService
-from app.services.order_export import MissingExportOrdersError, OrderExportService
+from app.services.order_export import (
+    ORDER_EXPORT_NUMBER_HEADERS,
+    ORDER_EXPORT_WIDTH_OVERRIDES,
+    ORDER_EXPORT_WRAP_HEADERS,
+    MissingExportOrdersError,
+    OrderExportService,
+)
 from app.services.order_import import import_orders_from_xlsx, is_xlsx_upload
 from app.services.orders import (
     OrderService,
@@ -209,7 +215,15 @@ def export_orders(
             detail={"code": "orders_not_found", "order_ids": exc.order_ids},
         ) from exc
 
-    body = to_xlsx_bytes(table.headers, table.rows, sheet_name="orders")
+    body = to_xlsx_bytes(
+        table.headers,
+        table.rows,
+        sheet_name="orders",
+        polished=True,
+        number_headers=ORDER_EXPORT_NUMBER_HEADERS,
+        wrap_headers=ORDER_EXPORT_WRAP_HEADERS,
+        width_overrides=ORDER_EXPORT_WIDTH_OVERRIDES,
+    )
     return Response(
         content=body,
         media_type=_XLSX_MEDIA,

@@ -68,7 +68,7 @@ def test_admin_order_export_xlsx_preserves_requested_order(
     )
     assert 'filename="orders.xlsx"' in response.headers.get("content-disposition", "")
 
-    workbook = load_workbook(io.BytesIO(response.content), read_only=True)
+    workbook = load_workbook(io.BytesIO(response.content), read_only=False)
     try:
         rows = list(workbook["orders"].iter_rows(values_only=True))
     finally:
@@ -76,22 +76,33 @@ def test_admin_order_export_xlsx_preserves_requested_order(
 
     header = list(rows[0])
     body = rows[1:]
-    assert "payment_memo" in header
-    assert "evidence_memo" in header
-    assert "profit_amount" in header
-    assert "group_notes" in header
+    assert "입금메모" in header
+    assert "증빙메모" in header
+    assert "이윤" in header
+    assert "내부메모" in header
 
-    order_id_index = header.index("order_id")
-    service_index = header.index("service_name")
-    quantity_index = header.index("size_or_quantity")
-    profit_index = header.index("profit_amount")
-    notes_index = header.index("group_notes")
+    order_id_index = header.index("주문ID")
+    service_index = header.index("상품명")
+    quantity_index = header.index("수량")
+    profit_index = header.index("이윤")
+    notes_index = header.index("내부메모")
 
     assert [row[order_id_index] for row in body] == [line_b["id"], line_a["id"]]
     assert [row[service_index] for row in body] == ["Export line B", "Export line A"]
     assert [row[quantity_index] for row in body] == ["3.5ea", "12sqm"]
     assert [row[profit_index] for row in body] == [60000, 60000]
     assert [row[notes_index] for row in body] == ["internal memo", "internal memo"]
+
+    worksheet = workbook["orders"]
+    assert worksheet.freeze_panes == "A2"
+    assert worksheet.auto_filter.ref == "A1:AI3"
+    assert worksheet["A1"].font.bold is True
+    assert worksheet["A1"].font.color.rgb == "00FFFFFF"
+    assert worksheet["A1"].fill.fgColor.rgb == "001F2937"
+    assert worksheet.column_dimensions["I"].width == 34
+    assert worksheet.column_dimensions["N"].width == 28
+    assert worksheet["I2"].alignment.wrap_text is True
+    assert worksheet["P2"].number_format == "#,##0"
 
 
 def test_admin_order_export_empty_order_ids_returns_400(
