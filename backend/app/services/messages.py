@@ -25,6 +25,7 @@ from app.domain.message_templates import (
     get_kakao_template_definition,
     render_kakao_variables,
 )
+from app.domain.order_pricing import order_consumer_total
 from app.domain.phone import normalize_phone
 from app.models.message import MessageLog
 from app.models.order import Order
@@ -1269,7 +1270,7 @@ class MessageService:
             "partner_name": partner.name if partner else "",
             "partner_manager_name": partner.manager_name or partner.name if partner else "",
             "special_request": order.special_request or "-",
-            "consumer_price": format_money(order.total_amount),
+            "consumer_price": format_money(order_consumer_total(order)),
             "discount_amount": format_money(order.discount_amount),
             "total_amount": format_money(order.total_amount),
             "deposit_amount": format_money(order.deposit_amount),
@@ -1377,7 +1378,7 @@ class MessageService:
             return (
                 f"[클린잡] {order.customer_name}님 견적 안내드립니다.\n"
                 f"서비스: {format_service_name(order)}\n"
-                f"소비자가(VAT {format_vat_label(order.vat_type)}): {format_money(order.total_amount)}\n"
+                f"소비자가(VAT {format_vat_label(order.vat_type)}): {format_money(order_consumer_total(order))}\n"
                 f"할인가: {format_money(order.discount_amount)}\n"
                 f"계약금: {format_money(order.deposit_amount)} / 잔금: {format_money(order.balance_amount)}\n"
                 f"방문: {schedule}"

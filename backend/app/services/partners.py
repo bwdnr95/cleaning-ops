@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.core.security import hash_password
 from app.domain.constants import AuditEventType, AuditSeverity, OrderStatus, UserRole
+from app.domain.order_pricing import order_consumer_total
 from app.domain.payment_status import PARTNER_SETTLEMENT_PENDING_STATUSES
 from app.domain.phone import normalize_phone
 from app.models.order import Order
@@ -551,7 +552,7 @@ def to_assigned_order_dto(order: Order) -> PartnerAssignedOrderRead:
         size_or_quantity=order.size_or_quantity,
         customer_name=order.customer_name,
         customer_address=order.customer_address,
-        consumer_price=float(order.total_amount or 0),
+        consumer_price=float(order_consumer_total(order)),
         partner_price=float(order.partner_payment_amount or 0),
         partner_payment_status=order.partner_payment_status,
         settled_at=order.partner_settled_at,

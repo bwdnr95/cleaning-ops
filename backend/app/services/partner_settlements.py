@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.core.time import utc_now
 from app.domain.constants import OrderStatus, TimelineEventType
+from app.domain.order_pricing import order_consumer_total
 from app.domain.payment_status import PARTNER_SETTLEMENT_PENDING_STATUSES, PartnerPaymentStatus
 from app.models.order import Order
 from app.repositories.partners import PartnerRepository
@@ -47,7 +48,7 @@ class PartnerSettlementService:
             Decimal("0"),
         )
         total_consumer_price = sum(
-            (money_decimal(order.total_amount) for order in orders),
+            (order_consumer_total(order) for order in orders),
             Decimal("0"),
         )
         items = [to_settlement_item(order) for order in orders]
@@ -191,7 +192,7 @@ def to_settlement_item(order: Order) -> PartnerSettlementItemRead:
         service_name=order.service_name,
         customer_name=order.customer_name or "",
         address_short=order.customer_address or "",
-        consumer_price=float(order.total_amount or 0),
+        consumer_price=float(order_consumer_total(order)),
         partner_price=float(order.partner_payment_amount or 0),
         partner_payment_status=order.partner_payment_status,
         settled_at=order.partner_settled_at,

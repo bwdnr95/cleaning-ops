@@ -10,6 +10,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.domain.constants import OrderStatus
+from app.domain.order_pricing import order_consumer_total
 from app.models.order import Order
 from app.models.order_group import OrderGroup
 from app.repositories.orders import OrderRepository
@@ -159,7 +160,7 @@ class OrderExportService:
             format_quantity(order.size_or_quantity),
             order.service_detail or "",
             order.special_request or "",
-            order.total_amount,
+            order_consumer_total(order),
             order.discount_amount,
             order.deposit_amount,
             order.balance_amount,

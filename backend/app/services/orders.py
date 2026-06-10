@@ -7,6 +7,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.domain.constants import OrderStatus, TimelineEventType
+from app.domain.order_pricing import order_consumer_total
 from app.domain.payment_status import PAYMENT_TRACKED_FIELDS
 from app.domain.phone import normalize_phone
 from app.models.order import Order
@@ -667,7 +668,7 @@ def _to_customer_line_dto(
         size_or_quantity=line.size_or_quantity,
         service_detail=line.service_detail,
         special_request=line.special_request,
-        total_amount=line.total_amount if payment_visible else None,
+        total_amount=order_consumer_total(line) if payment_visible else None,
         deposit_amount=line.deposit_amount if payment_visible else None,
         balance_amount=line.balance_amount if payment_visible else None,
         payment_status=line.payment_status if payment_visible else None,
