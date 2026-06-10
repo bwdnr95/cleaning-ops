@@ -245,11 +245,13 @@ export function OrdersPage({ onOpenOrder, onCreateOrder, onEditOrder, initialTab
   const [resizingColumn, setResizingColumn] = React.useState(null);
   const hasSearchQuery = query.trim().length > 0;
   const shouldIncludePastPaid = hasSearchQuery || PAST_PAID_VISIBLE_TABS.has(tab);
+  // 주문 목록은 한 번만 전체를 불러오고(정렬·탭·검색·날짜 필터는 모두 클라이언트에서 처리),
+  // 정렬/탭 변경 때마다 재요청하지 않는다. shouldIncludePastPaid 는 화면 필터 로직에만 쓴다.
   const loadOrders = React.useCallback(() => listAdminOrders({
-    sort: sortBy,
-    includePastPaid: shouldIncludePastPaid,
-  }), [sortBy, shouldIncludePastPaid]);
-  const ordersResource = useApiResource(loadOrders, `${sortBy}:${shouldIncludePastPaid}`);
+    sort: 'visit_asc',
+    includePastPaid: true,
+  }), []);
+  const ordersResource = useApiResource(loadOrders, 'admin-orders');
   const partnersResource = useApiResource(listPartners);
   const orders = React.useMemo(
     () => (ordersResource.data ? ordersResource.data.map(toOrderRow) : ORDERS.map(toMockOrderRow)),
