@@ -122,6 +122,30 @@ class AdminOrderRead(OrderLineBase):
     timeline: list[TimelineEventRead] = Field(default_factory=list)
 
 
+class AdminOrderPageSummary(ApiModel):
+    count: int = 0
+    consumer_total: float = 0.0
+    partner_total: float = 0.0
+    profit: float = 0.0
+
+
+class AdminOrderPageInsight(ApiModel):
+    today_jobs: int = 0
+    unassigned: int = 0
+    schedule_confirmed: int = 0
+    work_done: int = 0
+    unpaid_total: float = 0.0
+    month_total: float = 0.0
+
+
+class AdminOrderPageRead(ApiModel):
+    items: list[AdminOrderRead] = Field(default_factory=list)
+    total: int = 0
+    status_counts: dict[str, int] = Field(default_factory=dict)
+    summary: AdminOrderPageSummary = Field(default_factory=AdminOrderPageSummary)
+    insight: AdminOrderPageInsight = Field(default_factory=AdminOrderPageInsight)
+
+
 class AdminOrderGroupRead(OrderGroupBase):
     id: str
     customer_token: str

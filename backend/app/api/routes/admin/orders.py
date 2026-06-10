@@ -1,3 +1,5 @@
+from datetime import date
+
 from fastapi import APIRouter, Depends, File, HTTPException, Query, Response, UploadFile, status
 from pydantic import BaseModel
 from sqlalchemy.exc import SQLAlchemyError
@@ -13,6 +15,9 @@ from app.repositories.timeline import TimelineRepository
 from app.schemas.order import (
     AdminOrderDetailRead,
     AdminOrderGroupRead,
+    AdminOrderPageInsight,
+    AdminOrderPageRead,
+    AdminOrderPageSummary,
     AdminOrderRead,
     AdminOrderSiblingRead,
     OrderCreate,
@@ -33,6 +38,7 @@ from app.services.order_export import (
     OrderExportService,
 )
 from app.services.order_import import import_orders_from_xlsx, is_xlsx_upload
+from app.services.order_page import OrderPageService
 from app.services.orders import (
     OrderService,
     to_admin_group_dto,
@@ -85,6 +91,58 @@ def list_orders(
         to_admin_order_dto(order, group=groups_by_id.get(order.group_id))
         for order in orders
     ]
+
+
+@router.get("/page", response_model=AdminOrderPageRead)
+def list_orders_page(
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=50, ge=1, le=500),
+    sort: str = Query(default="visit_asc", pattern="^(visit_asc|visit_desc|received_asc|received_desc)$"),
+    status: str | None = Query(default=None),
+    visit_preset: str | None = Query(default=None),
+    visit_from: date | None = Query(default=None),
+    visit_to: date | None = Query(default=None),
+    received_preset: str | None = Query(default=None),
+    received_from: date | None = Query(default=None),
+    received_to: date | None = Query(default=None),
+    partner_id: str | None = Query(default=None),
+    q: str | None = Query(default=None),
+    db: Session = Depends(get_session),
+    _: CurrentUser = Depends(require_admin),
+) -> AdminOrderPageRead:
+    result = OrderPageService(db).list_page(
+        page=page,
+        page_size=page_size,
+        sort=sort,
+        status=status,
+        visit_preset=visit_preset,
+        visit_from=visit_from,
+        visit_to=visit_to,
+        received_preset=received_preset,
+        received_from=received_from,
+        received_to=received_to,
+        partner_id=partner_id or None,
+        q=q,
+    )
+    return AdminOrderPageRead(
+        items=result.items,
+        total=result.total,
+        status_counts=result.status_counts,
+        summary=AdminOrderPageSummary(
+            count=result.summary.count,
+            consumer_total=result.summary.consumer_total,
+            partner_total=result.summary.partner_total,
+            profit=result.summary.profit,
+        ),
+        insight=AdminOrderPageInsight(
+            today_jobs=result.insight.today_jobs,
+            unassigned=result.insight.unassigned,
+            schedule_confirmed=result.insight.schedule_confirmed,
+            work_done=result.insight.work_done,
+            unpaid_total=result.insight.unpaid_total,
+            month_total=result.insight.month_total,
+        ),
+    )
 
 
 @router.post("", response_model=AdminOrderRead, status_code=status.HTTP_201_CREATED)
