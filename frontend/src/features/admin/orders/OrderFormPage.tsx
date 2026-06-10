@@ -122,7 +122,7 @@ export function OrderFormPage({ mode = 'create', orderId = null, onCancel, onSav
       const previousLine = nextLines[lineIndex];
       let nextLine = { ...previousLine, [key]: formattedValue };
       nextLine = applyMoneyTouch(nextLine, key, formattedValue);
-      nextLine = recalculateLine(nextLine, { source: key, previousLine });
+      nextLine = recalculateLine(nextLine, { source: key });
 
       nextLines[lineIndex] = nextLine;
       return { ...current, lines: nextLines };
@@ -468,11 +468,20 @@ function LineEditor({
 
         <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-tertiary)' }}>결제 / 정산</div>
         <FieldGrid>
-          <TextField testId={`order-line-${lineIndex}-total-amount`} label="소비자가 (VAT 포함)" inputMode="numeric" value={line.total_amount} onChange={(value) => onMoneyChange(lineIndex, 'total_amount', value)} />
+          <TextField testId={`order-line-${lineIndex}-total-amount`} label="소비자가 (현장추가 별도)" inputMode="numeric" value={line.total_amount} onChange={(value) => onMoneyChange(lineIndex, 'total_amount', value)} />
           <TextField testId={`order-line-${lineIndex}-discount-amount`} label="할인가" inputMode="numeric" value={line.discount_amount} onChange={(value) => onMoneyChange(lineIndex, 'discount_amount', value)} />
           <TextField testId={`order-line-${lineIndex}-deposit-amount`} label="계약금" inputMode="numeric" value={line.deposit_amount} onChange={(value) => onMoneyChange(lineIndex, 'deposit_amount', value)} />
           <TextField label="잔금" inputMode="numeric" value={line.balance_amount} onChange={(value) => onMoneyChange(lineIndex, 'balance_amount', value)} />
           <TextField testId={`order-line-${lineIndex}-onsite-extra-amount`} label="현장 추가" inputMode="numeric" value={line.onsite_extra_amount} onChange={(value) => onMoneyChange(lineIndex, 'onsite_extra_amount', value)} />
+          <Field label="총금액 (VAT 포함)">
+            <div
+              data-testid={`order-line-${lineIndex}-grand-total`}
+              className="input"
+              style={{ display: 'flex', alignItems: 'center', fontWeight: 700, background: 'var(--bg-subtle)', color: 'var(--text)' }}
+            >
+              {formatWon((parseMoneyInput(line.total_amount) || 0) + (parseMoneyInput(line.onsite_extra_amount) || 0))}
+            </div>
+          </Field>
           <Field label="결제 상태">
             <select className="input" value={line.payment_status} onChange={(event) => onFieldChange(lineIndex, 'payment_status', event.target.value)}>
               <option value="">미입력</option>
@@ -782,24 +791,20 @@ function applyMoneyTouch(line, key, formattedValue) {
   return { ...line, [touchKey]: formattedValue !== '' };
 }
 
-function recalculateLine(line, { source, previousLine = null }) {
+function recalculateLine(line, { source }) {
   const quantity = parseQuantity(line.size_or_quantity);
   const baseUnitPrice = Number(line.base_unit_price || 0);
   const partnerUnitPrice = Number(line.partner_unit_price || 0);
   const discount = parseMoneyInput(line.discount_amount) || 0;
   const onsiteExtra = parseMoneyInput(line.onsite_extra_amount) || 0;
-  const calculatedTotal = Math.max(Math.round(baseUnitPrice * quantity) - discount + onsiteExtra, 0);
+  // 소비자가(total_amount)는 현장추가 제외 순수 계약가. 총금액(VAT포함)=소비자가+현장추가로
+  // 계약금/잔금을 계산한다(현장추가가 고객 총액에 반영되도록).
+  const calculatedConsumer = Math.max(Math.round(baseUnitPrice * quantity) - discount, 0);
   const calculatedPartnerPrice = Math.max(Math.round(partnerUnitPrice * quantity), 0);
   const next = { ...line };
 
-  if (source === 'onsite_extra_amount' && next.total_amount_touched) {
-    const previousExtra = parseMoneyInput(previousLine?.onsite_extra_amount) || 0;
-    const previousTotal = parseMoneyInput(previousLine?.total_amount);
-    if (previousTotal !== null) {
-      next.total_amount = formatMoneyInput(Math.max(previousTotal + onsiteExtra - previousExtra, 0));
-    }
-  } else if (baseUnitPrice > 0 && (!next.total_amount_touched || next.total_amount === '')) {
-    next.total_amount = formatMoneyInput(calculatedTotal);
+  if (baseUnitPrice > 0 && (!next.total_amount_touched || next.total_amount === '')) {
+    next.total_amount = formatMoneyInput(calculatedConsumer);
     next.total_amount_touched = false;
   }
 
@@ -808,9 +813,10 @@ function recalculateLine(line, { source, previousLine = null }) {
     next.partner_payment_amount_touched = false;
   }
 
+  const grandTotal = (parseMoneyInput(next.total_amount) || 0) + onsiteExtra;
+
   if (next.total_amount !== '' && (!next.deposit_amount_touched || next.deposit_amount === '')) {
-    const total = parseMoneyInput(next.total_amount) || 0;
-    next.deposit_amount = formatMoneyInput(Math.round(total * 0.3));
+    next.deposit_amount = formatMoneyInput(Math.round(grandTotal * 0.3));
     next.deposit_amount_touched = false;
   }
 
@@ -822,7 +828,7 @@ function recalculateLine(line, { source, previousLine = null }) {
     || source === 'discount_amount'
     || source === 'onsite_extra_amount'
   ) {
-    next.balance_amount = calculateBalanceAmount(next.total_amount, next.deposit_amount);
+    next.balance_amount = calculateBalanceAmount(formatMoneyInput(grandTotal), next.deposit_amount);
     next.balance_amount_touched = false;
   }
 

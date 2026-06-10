@@ -1074,7 +1074,7 @@ function InsightDivider() {
 function FilterSummaryLine({ label, summary }) {
   const items = [
     ['건수', `${summary.count.toLocaleString()}건`],
-    ['소비자가', formatWon(summary.consumerTotal)],
+    ['총금액(VAT포함)', formatWon(summary.consumerTotal)],
     ['도급가(VAT 포함)', formatWon(summary.partnerTotal)],
     ['이윤', formatWon(summary.profitTotal)],
   ];
@@ -1474,7 +1474,7 @@ function toOrderRow(order) {
     fullAddress: [order.customer_address, order.customer_address_detail].filter(Boolean).join(' '),
     customer: order.customer_name,
     phone: formatPhone(order.customer_phone),
-    amount: Number(order.total_amount || 0),
+    amount: Number(order.total_amount || 0) + Number(order.onsite_extra_amount || 0),
     partnerPrice: Number(order.partner_price ?? order.partner_payment_amount ?? 0),
     vatType: order.vat_type || 'included',
     paymentStatus: order.payment_status,
