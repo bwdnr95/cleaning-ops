@@ -168,7 +168,7 @@ export function MessagesPage({ onOpenOrder }) {
           {!messagesResource.isLoading && !messagesResource.error && filtered.length === 0 && <StateLine text="표시할 발송 이력이 없습니다." />}
           {!messagesResource.isLoading && !messagesResource.error && filtered.length > 0 && (
             <div style={{ display: 'grid', gridTemplateColumns: '126px 104px 124px 128px minmax(220px, 1fr) 70px 120px 108px 112px', fontSize: 12 }}>
-              {['발송시각', '주문번호', '유형', '수신자', '내용', '채널', 'Provider', '상태', '관리'].map((header) => (
+              {['발송시각', '고객', '유형', '수신자', '내용', '채널', 'Provider', '상태', '관리'].map((header) => (
                 <HeaderCell key={header}>{header}</HeaderCell>
               ))}
               {pagedMessages.map((message) => (
@@ -179,9 +179,10 @@ export function MessagesPage({ onOpenOrder }) {
                       type="button"
                       data-testid={`message-open-order-${message.order_id}`}
                       onClick={() => onOpenOrder?.(message.order_id)}
+                      title="주문 상세 열기"
                       style={linkButtonStyle}
                     >
-                      {shortOrderId(message.order_id)}
+                      {message.order_customer_name || shortOrderId(message.order_id)}
                     </button>
                   </BodyCell>
                   <BodyCell>{messageTypeLabel(message.message_type)}</BodyCell>

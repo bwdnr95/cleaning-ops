@@ -198,8 +198,7 @@ export function Dashboard({ onOpenOrder, onNav, onCreateOrder, userName = undefi
                       <div className="placeholder-img" style={{ width: 36, height: 36, fontSize: 9, flexShrink: 0 }}>IMG</div>
                     )}
                     <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontSize: 12, fontWeight: 500, display: 'flex', alignItems: 'center', gap: 6 }}>
-                        <span className="mono" style={{ fontSize: 10.5, color: 'var(--text-tertiary)' }}>{p.orderId || p.id}</span>
+                      <div style={{ fontSize: 12, fontWeight: 500, display: 'flex', alignItems: 'center', gap: 6, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                         {p.label}
                       </div>
                       <div style={{ fontSize: 11, color: 'var(--text-tertiary)', marginTop: 1 }}>{p.count} · {p.time}</div>
@@ -274,7 +273,7 @@ function DashList({ title, subtitle, jobs, onOpen, onQueue, accent, muted = fals
           <button key={j.id} onClick={() => onOpen && onOpen(j.id)}
             style={{
               width: '100%', textAlign: 'left',
-              display: 'grid', gridTemplateColumns: '60px 80px 1fr 110px 90px',
+              display: 'grid', gridTemplateColumns: '80px 1fr 110px 90px',
               alignItems: 'center', gap: 10,
               padding: '7px 14px',
               border: 'none',
@@ -284,7 +283,6 @@ function DashList({ title, subtitle, jobs, onOpen, onQueue, accent, muted = fals
               fontSize: 12.5,
               opacity: muted ? 0.92 : 1,
             }}>
-            <span className="mono" style={{ fontSize: 10.5, color: 'var(--text-tertiary)' }}>{j.id}</span>
             <span style={{ fontSize: 11.5, color: 'var(--text-secondary)' }}>{j.time}</span>
             <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
               <span style={{ fontWeight: 500 }}>{j.product}</span>

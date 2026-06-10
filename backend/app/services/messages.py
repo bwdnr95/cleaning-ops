@@ -33,7 +33,12 @@ from app.repositories.messages import MessageRepository
 from app.repositories.orders import OrderRepository
 from app.repositories.partners import PartnerRepository
 from app.repositories.photos import PhotoRepository
-from app.schemas.message import MessagePreviewRead, MessageSendRequest, MessageSettingsRead
+from app.schemas.message import (
+    MessageLogRead,
+    MessagePreviewRead,
+    MessageSendRequest,
+    MessageSettingsRead,
+)
 from app.services.timeline import TimelineService
 
 logger = logging.getLogger(__name__)
@@ -653,8 +658,13 @@ class MessageService:
         self.timeline = TimelineService(db)
         self.provider = provider or build_message_provider()
 
-    def list_logs(self) -> list[MessageLog]:
-        return self.messages.list_messages()
+    def list_logs(self) -> list[MessageLogRead]:
+        return [
+            MessageLogRead.model_validate(log).model_copy(
+                update={"order_customer_name": customer_name}
+            )
+            for log, customer_name in self.messages.list_messages_with_customer()
+        ]
 
     def settings_status(self) -> MessageSettingsRead:
         provider = settings.message_provider.strip().lower() or "mock"

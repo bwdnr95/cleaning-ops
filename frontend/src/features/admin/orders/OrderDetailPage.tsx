@@ -320,7 +320,6 @@ export function OrderDetailPage({ orderId, onBack, onEdit, onNav, onOpenOrder })
           <Icon name="chevronLeft" size={13}/> 목록
         </button>
         <span style={{ width: 1, height: 16, background: 'var(--border)' }}/>
-        <span className="mono" style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>{order.id}</span>
         <h2 style={{ margin: 0, fontSize: 14, fontWeight: 600 }}>{formatService(order)}</h2>
         <StatusBadge status={orderWorkflowStatusValue(order.status, order.payment_status)}/>
         {hasUnsavedChanges && (
@@ -362,7 +361,6 @@ export function OrderDetailPage({ orderId, onBack, onEdit, onNav, onOpenOrder })
                 <KVItem label="고객명" value={order.customer_name}/>
                 <KVItem label="연락처" value={formatPhone(order.customer_phone)} mono/>
                 <KVItem label="유입 경로" value={order.source_channel || '-'}/>
-                <KVItem label="고객 링크 토큰" value={order.customer_token} mono/>
                 <KVItem
                   label="주소"
                   value={[order.customer_address, order.customer_address_detail].filter(Boolean).join(' ')}
@@ -419,7 +417,7 @@ export function OrderDetailPage({ orderId, onBack, onEdit, onNav, onOpenOrder })
                 <div style={{ flex: 1 }}>
                   <div style={{ fontSize: 13, fontWeight: 600 }}>{order.team_name || selectedPartner?.name || '미배정'}</div>
                   <div style={{ fontSize: 11.5, color: 'var(--text-tertiary)', marginTop: 2 }}>
-                    협력사 ID: {order.partner_id || '-'} · 정산 상태: {partnerPaymentStatusLabel(order.partner_payment_status)}
+                    정산 상태: {partnerPaymentStatusLabel(order.partner_payment_status)}
                   </div>
                   <div style={{ fontSize: 11.5, color: 'var(--text-tertiary)', marginTop: 2 }}>
                     도급가(VAT 포함) {formatWon(order.partner_price ?? order.partner_payment_amount)} · 정산일 {order.partner_settled_at ? formatDateTime(order.partner_settled_at) : '-'}
@@ -629,12 +627,22 @@ export function OrderDetailPage({ orderId, onBack, onEdit, onNav, onOpenOrder })
 
             <div className="card" style={{ padding: 14 }}>
               <PanelTitle>고객 전달</PanelTitle>
-              <div className="mono" style={{ padding: '7px 9px', background: 'var(--bg-subtle)', border: '1px solid var(--border)', borderRadius: 6, fontSize: 10.5, color: 'var(--text-tertiary)', marginBottom: 8, overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                /c/{order.customer_token}
+              <div style={{ fontSize: 11.5, color: 'var(--text-tertiary)', marginBottom: 8, lineHeight: 1.45 }}>
+                고객이 예약 정보와 공개 사진을 확인하는 링크입니다. 복사해서 고객에게 바로 보내세요.
               </div>
-              <div style={{ marginBottom: 8 }}>
-                <CopyLinkButton testId="copy-customer-link" link={`${window.location.origin}/c/${order.customer_token}`} />
-              </div>
+              {order.customer_token ? (
+                <div style={{ marginBottom: 8 }}>
+                  <CopyLinkButton
+                    testId="copy-customer-link"
+                    label="고객 링크 복사"
+                    link={`${window.location.origin}/c/${order.customer_token}`}
+                  />
+                </div>
+              ) : (
+                <div style={{ fontSize: 11.5, color: 'var(--warn-fg)', marginBottom: 8 }}>
+                  아직 고객 링크가 생성되지 않았습니다.
+                </div>
+              )}
               <button data-testid="send-customer-photo-ready" className="btn btn--secondary btn--block" disabled={isSaving || isPreviewLoading} onClick={() => void openMessagePreview(MESSAGE_ACTIONS.customerPhotoReady)}>
                 <Icon name="send" size={13}/> 사진 링크 발송
               </button>
@@ -916,7 +924,8 @@ function PanelTitle({ children, dirty = false }) {
 }
 
 // 고객 링크를 운영자가 손으로 드래그·복사하지 않도록 클립보드 복사 버튼을 제공한다.
-function CopyLinkButton({ link, testId = undefined }) {
+// 원시 토큰은 노출하지 않고, 복사 시 고객에게 바로 보낼 수 있는 전체 URL을 복사한다.
+function CopyLinkButton({ link, label = '링크 복사', testId = undefined }) {
   const [copied, setCopied] = React.useState(false);
 
   const handleCopy = async () => {
@@ -933,10 +942,10 @@ function CopyLinkButton({ link, testId = undefined }) {
     <button
       type="button"
       data-testid={testId}
-      className="btn btn--secondary btn--block"
+      className={`btn btn--block ${copied ? 'btn--primary' : 'btn--secondary'}`}
       onClick={() => void handleCopy()}
     >
-      <Icon name={copied ? 'check' : 'copy'} size={13}/> {copied ? '복사됨' : '링크 복사'}
+      <Icon name={copied ? 'check' : 'copy'} size={13}/> {copied ? '링크가 복사되었습니다' : label}
     </button>
   );
 }

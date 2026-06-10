@@ -24,6 +24,20 @@ class MessageRepository(Repository[MessageLog]):
             stmt = stmt.limit(limit).offset(offset)
         return list(self.db.scalars(stmt))
 
+    def list_messages_with_customer(
+        self, *, limit: int | None = None, offset: int = 0
+    ) -> list[tuple[MessageLog, str | None]]:
+        # 발송이력 화면에서 원시 주문 ID 대신 주문 고객명을 보여주기 위해 함께 조회한다.
+        stmt = (
+            select(MessageLog, Order.customer_name)
+            .join(Order, MessageLog.order_id == Order.id)
+            .where(Order.deleted_at.is_(None))
+            .order_by(MessageLog.created_at.desc(), MessageLog.id.desc())
+        )
+        if limit is not None:
+            stmt = stmt.limit(limit).offset(offset)
+        return [(row[0], row[1]) for row in self.db.execute(stmt).all()]
+
     def list_for_order(self, order_id: str) -> list[MessageLog]:
         stmt = (
             select(MessageLog)

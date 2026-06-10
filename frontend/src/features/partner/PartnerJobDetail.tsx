@@ -175,7 +175,6 @@ export function PartnerJobDetail() {
           <button onClick={() => setSelectedJobId(null)} style={{ padding: 0, border: 'none', background: 'transparent', cursor: 'pointer' }}>
             <Icon name="chevronLeft" size={20}/>
           </button>
-          <span className="mono" style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>{job.id}</span>
           <PartnerStatusBadge status={job.status}/>
         </div>
         <h2 style={{ margin: 0, fontSize: 17, fontWeight: 700 }}>{job.service_name}</h2>

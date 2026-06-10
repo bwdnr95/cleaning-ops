@@ -172,7 +172,6 @@ export function PhotoReviewPage({ onOpenOrder, onNav }) {
                 }}
               >
                 <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
-                  <span className="mono" style={{ fontSize: 10.5, color: 'var(--text-tertiary)' }}>{item.order_id}</span>
                   <Badge tone={stage.tone}>{stage.label}</Badge>
                 </div>
                 <div style={{ fontSize: 12.5, fontWeight: 700, marginBottom: 3, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{formatServiceName(item)}</div>
@@ -204,7 +203,6 @@ export function PhotoReviewPage({ onOpenOrder, onNav }) {
 
       <main style={{ display: 'flex', flexDirection: 'column', minHeight: 0, background: 'var(--bg-subtle)' }}>
         <div style={{ padding: '10px 16px', background: 'var(--surface)', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 10 }}>
-          <span className="mono" style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>{selected?.order_id}</span>
           <span style={{ fontSize: 13, fontWeight: 700 }}>{selected ? formatServiceName(selected) : '-'}</span>
           {selectedStage && <Badge tone={selectedStage.tone}>{selectedStage.label}</Badge>}
           <span style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>· {selected?.customer_name} · {selected?.team_name || '미배정'}</span>

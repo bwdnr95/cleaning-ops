@@ -153,7 +153,7 @@ export function App() {
                       <>
                         <Topbar
                           title={orderForm.mode === 'edit' ? '주문 수정' : '신규 주문 등록'}
-                          breadcrumb={['운영', '주문관리', orderForm.mode === 'edit' ? orderForm.orderId : '신규']}
+                          breadcrumb={['운영', '주문관리', orderForm.mode === 'edit' ? '수정' : '신규']}
                         />
                         <OrderFormPage
                           mode={orderForm.mode}
@@ -178,7 +178,7 @@ export function App() {
                       <>
                         <Topbar
                           title="주문 상세"
-                          breadcrumb={['운영', '주문관리', detailOrderId]}
+                          breadcrumb={['운영', '주문관리', '상세']}
                         />
                         <OrderDetailPage
                           orderId={detailOrderId}

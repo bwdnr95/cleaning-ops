@@ -17,6 +17,7 @@ class MessageSendRequest(ApiModel):
 class MessageLogRead(ApiModel):
     id: str
     order_id: str
+    order_customer_name: str | None = None
     recipient_type: RecipientType
     recipient_name: str
     recipient_phone: str

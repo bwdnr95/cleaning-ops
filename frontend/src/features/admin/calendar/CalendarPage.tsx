@@ -436,7 +436,6 @@ function DaySchedulePanel({ year, month, day, events, siteName, onOpenOrder }) {
                   {eventItem.time}
                 </span>
                 <StatusChip tone={eventItem.tone} label={eventItem.status} />
-                <span className="mono" style={{ marginLeft: 'auto', fontSize: 10.5, color: 'var(--text-quaternary)' }}>{eventItem.id}</span>
               </div>
               <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                 {eventItem.title}
