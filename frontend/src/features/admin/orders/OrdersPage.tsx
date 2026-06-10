@@ -627,58 +627,6 @@ export function OrdersPage({ onOpenOrder, onCreateOrder, onEditOrder, initialTab
             }}
           />
         </div>
-        <div style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 6,
-          minHeight: 32,
-          paddingLeft: 4,
-        }}>
-          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, color: 'var(--text-tertiary)', fontSize: 12, fontWeight: 600, whiteSpace: 'nowrap' }}>
-            <Icon name="calendar" size={12}/> 방문일
-          </span>
-          {[
-            ['upcoming', '오늘부터'],
-            ['all', '전체'],
-            ['today', '오늘'],
-            ['tomorrow', '내일'],
-            ['week', '이번주'],
-            ['month', '이번달'],
-          ].map(([key, label]) => (
-            <button
-              key={key}
-              type="button"
-              data-testid={`orders-date-preset-${key}`}
-              aria-pressed={dateFilter.preset === key}
-              onClick={() => setDatePreset(key)}
-              style={datePresetButton(dateFilter.preset === key)}
-            >
-              {label}
-            </button>
-          ))}
-          <DatePicker
-            compact
-            testId="orders-date-start"
-            ariaLabel="방문일 시작"
-            placeholder="시작일"
-            value={dateFilter.start}
-            onChange={(value) => setDateBoundary('start', value)}
-          />
-          <span style={{ color: 'var(--text-quaternary)', fontSize: 12 }}>~</span>
-          <DatePicker
-            compact
-            testId="orders-date-end"
-            ariaLabel="방문일 종료"
-            placeholder="종료일"
-            value={dateFilter.end}
-            onChange={(value) => setDateBoundary('end', value)}
-          />
-          {isDateFilterActive && (
-            <button type="button" data-testid="orders-date-clear" style={softGhostBtn} onClick={() => setDatePreset('all')}>
-              해제
-            </button>
-          )}
-        </div>
         <div style={{ flex: 1 }}/>
         <button
           data-testid="admin-orders-create"
@@ -755,6 +703,54 @@ export function OrdersPage({ onOpenOrder, onCreateOrder, onEditOrder, initialTab
         />
         {isReceivedDateFilterActive && (
           <button type="button" data-testid="orders-received-clear" style={softGhostBtn} onClick={() => setReceivedDateFilter(createDateFilter('all'))}>
+            해제
+          </button>
+        )}
+      </div>
+
+      {/* 방문일 필터 — 접수일 아래에 배치 */}
+      <div style={{ padding: '0 10px 8px', background: 'var(--bg)', display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, color: 'var(--text-tertiary)', fontSize: 12, fontWeight: 600, whiteSpace: 'nowrap' }}>
+          <Icon name="calendar" size={12}/> 방문일
+        </span>
+        {[
+          ['upcoming', '오늘부터'],
+          ['all', '전체'],
+          ['today', '오늘'],
+          ['tomorrow', '내일'],
+          ['week', '이번주'],
+          ['month', '이번달'],
+        ].map(([key, label]) => (
+          <button
+            key={key}
+            type="button"
+            data-testid={`orders-date-preset-${key}`}
+            aria-pressed={dateFilter.preset === key}
+            onClick={() => setDatePreset(key)}
+            style={datePresetButton(dateFilter.preset === key)}
+          >
+            {label}
+          </button>
+        ))}
+        <DatePicker
+          compact
+          testId="orders-date-start"
+          ariaLabel="방문일 시작"
+          placeholder="시작일"
+          value={dateFilter.start}
+          onChange={(value) => setDateBoundary('start', value)}
+        />
+        <span style={{ color: 'var(--text-quaternary)', fontSize: 12 }}>~</span>
+        <DatePicker
+          compact
+          testId="orders-date-end"
+          ariaLabel="방문일 종료"
+          placeholder="종료일"
+          value={dateFilter.end}
+          onChange={(value) => setDateBoundary('end', value)}
+        />
+        {isDateFilterActive && (
+          <button type="button" data-testid="orders-date-clear" style={softGhostBtn} onClick={() => setDatePreset('all')}>
             해제
           </button>
         )}
