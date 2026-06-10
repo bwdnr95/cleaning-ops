@@ -96,7 +96,7 @@ def list_orders(
 @router.get("/page", response_model=AdminOrderPageRead)
 def list_orders_page(
     page: int = Query(default=1, ge=1),
-    page_size: int = Query(default=50, ge=1, le=500),
+    page_size: int = Query(default=50, ge=1, le=2000),
     sort: str = Query(default="visit_asc", pattern="^(visit_asc|visit_desc|received_asc|received_desc)$"),
     status: str | None = Query(default=None),
     visit_preset: str | None = Query(default=None),

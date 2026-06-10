@@ -172,6 +172,57 @@ export function listAdminOrders(
   return apiRequest(`/admin/orders?${params.toString()}`) as Promise<AdminOrder[]>;
 }
 
+export interface AdminOrderPageParams {
+  page?: number;
+  page_size?: number;
+  sort?: AdminOrderSort;
+  status?: string;
+  visit_preset?: string;
+  visit_from?: string;
+  visit_to?: string;
+  received_preset?: string;
+  received_from?: string;
+  received_to?: string;
+  partner_id?: string;
+  q?: string;
+}
+
+export interface AdminOrderPageSummary {
+  count: number;
+  consumer_total: number;
+  partner_total: number;
+  profit: number;
+}
+
+export interface AdminOrderPageInsight {
+  today_jobs: number;
+  unassigned: number;
+  schedule_confirmed: number;
+  work_done: number;
+  unpaid_total: number;
+  month_total: number;
+}
+
+export interface AdminOrderPageResponse {
+  items: AdminOrder[];
+  total: number;
+  status_counts: Record<string, number>;
+  summary: AdminOrderPageSummary;
+  insight: AdminOrderPageInsight;
+}
+
+export function listAdminOrdersPage(params: AdminOrderPageParams = {}): Promise<AdminOrderPageResponse> {
+  const search = new URLSearchParams();
+  for (const [key, value] of Object.entries(params)) {
+    if (value === undefined || value === null || value === '') {
+      continue;
+    }
+    search.set(key, String(value));
+  }
+  const query = search.toString();
+  return apiRequest(`/admin/orders/page${query ? `?${query}` : ''}`) as Promise<AdminOrderPageResponse>;
+}
+
 export interface ImportFailure {
   row_index: number;
   reason: string;

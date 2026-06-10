@@ -1,15 +1,13 @@
 import React from 'react';
 import { DatePicker } from '../../../components/common/DatePicker';
-import { PaginationBar, paginateItems } from '../../../components/common/Pagination';
+import { PaginationBar } from '../../../components/common/Pagination';
 import { Avatar, Icon } from '../../../components/common/ui';
-import { ORDERS } from '../../../mocks/cleaningOpsData';
-import { bulkDeleteAdminOrders, exportAdminOrders, listAdminOrders, listPartners, updateAdminOrder, type AdminOrderSort } from '../../../api/admin';
+import { bulkDeleteAdminOrders, exportAdminOrders, listAdminOrdersPage, listPartners, updateAdminOrder, type AdminOrderPageParams, type AdminOrderSort } from '../../../api/admin';
 import { sendAdminMessage } from '../../../api/messages';
 import { useApiResource } from '../../../api/useApiResource';
 import { ORDER_STATUS_OPTIONS, orderStatusLabel, orderWorkflowStatusValue } from '../../../domain/orderStatus';
-import { isBalanceIncomplete, isPaymentCheckNeeded } from '../../../domain/paymentStatus';
 import { formatQuantity } from '../../../domain/format';
-import { digitsOnly, formatPhone } from '../../../domain/phone';
+import { formatPhone } from '../../../domain/phone';
 import { OrderImportDialog } from './OrderImportDialog';
 import { PartnerFilterSelect } from './PartnerFilterSelect';
 import {
@@ -17,7 +15,6 @@ import {
   formatDateValue,
   getAppTodayDate,
   getAppTodayValue,
-  isRelativeAppDateValue,
   parseDateValue,
   startOfWeek,
 } from '../../../domain/time';
@@ -192,7 +189,6 @@ const ORDER_STATUS_TAB_OPTIONS = [
   { key: 'cancel', status: '취소', label: '취소' },
 ];
 const ORDER_STATUS_TAB_BY_KEY = new Map(ORDER_STATUS_TAB_OPTIONS.map((item) => [item.key, item]));
-const PAST_PAID_VISIBLE_TABS = new Set(['all', 'work_done', 'final_payment_complete', 'done', 'monthly_done', 'monthly_revenue']);
 const BULK_MESSAGE_OPTIONS = [
   { value: 'customer_schedule_confirmed', label: '고객 일정확정 안내', recipient: 'customer' },
   { value: 'customer_day_before', label: '고객 전날 안내', recipient: 'customer' },
@@ -243,21 +239,72 @@ export function OrdersPage({ onOpenOrder, onCreateOrder, onEditOrder, initialTab
   const [isImportOpen, setImportOpen] = React.useState(false);
   const [columnWidths, setColumnWidths] = React.useState(getInitialOrderTableColumnWidths);
   const [resizingColumn, setResizingColumn] = React.useState(null);
-  const hasSearchQuery = query.trim().length > 0;
-  const shouldIncludePastPaid = hasSearchQuery || PAST_PAID_VISIBLE_TABS.has(tab);
-  // 주문 목록은 한 번만 전체를 불러오고(정렬·탭·검색·날짜 필터는 모두 클라이언트에서 처리),
-  // 정렬/탭 변경 때마다 재요청하지 않는다. shouldIncludePastPaid 는 화면 필터 로직에만 쓴다.
-  const loadOrders = React.useCallback(() => listAdminOrders({
-    sort: 'visit_asc',
-    includePastPaid: true,
-  }), []);
-  const ordersResource = useApiResource(loadOrders, 'admin-orders');
+  const [debouncedQuery, setDebouncedQuery] = React.useState('');
+
+  // 검색어는 디바운스하여 키 입력마다 요청이 나가지 않도록 한다(입력 자체는 query로 즉시 반영).
+  React.useEffect(() => {
+    const handle = window.setTimeout(() => setDebouncedQuery(query.trim()), 300);
+    return () => window.clearTimeout(handle);
+  }, [query]);
+
+  // 서버가 필터·정렬·페이지네이션·집계를 모두 처리한다. items는 그대로 화면에 표시하고
+  // 클라이언트에서 재필터/재정렬/재페이지하지 않는다.
+  const orderPageParams = React.useMemo<AdminOrderPageParams>(() => ({
+    page,
+    page_size: pageSize,
+    sort: sortBy,
+    status: tab,
+    visit_preset: dateFilter.preset,
+    visit_from: dateFilter.start || undefined,
+    visit_to: dateFilter.end || undefined,
+    received_preset: receivedDateFilter.preset,
+    received_from: receivedDateFilter.start || undefined,
+    received_to: receivedDateFilter.end || undefined,
+    partner_id: partnerFilter === 'all' ? undefined : partnerFilter,
+    q: debouncedQuery || undefined,
+  }), [
+    page,
+    pageSize,
+    sortBy,
+    tab,
+    dateFilter.preset,
+    dateFilter.start,
+    dateFilter.end,
+    receivedDateFilter.preset,
+    receivedDateFilter.start,
+    receivedDateFilter.end,
+    partnerFilter,
+    debouncedQuery,
+  ]);
+  const ordersResourceKey = [
+    tab,
+    sortBy,
+    page,
+    pageSize,
+    dateFilter.preset,
+    dateFilter.start,
+    dateFilter.end,
+    receivedDateFilter.preset,
+    receivedDateFilter.start,
+    receivedDateFilter.end,
+    partnerFilter,
+    debouncedQuery,
+  ].join('|');
+  const loadOrders = React.useCallback(() => listAdminOrdersPage(orderPageParams), [orderPageParams]);
+  const ordersResource = useApiResource(loadOrders, ordersResourceKey);
   const partnersResource = useApiResource(listPartners);
-  const orders = React.useMemo(
-    () => (ordersResource.data ? ordersResource.data.map(toOrderRow) : ORDERS.map(toMockOrderRow)),
-    [ordersResource.data],
+  const orderPage = ordersResource.data;
+  const items = React.useMemo(
+    () => (orderPage?.items ? orderPage.items.map(toOrderRow) : []),
+    [orderPage],
   );
-  const statusTabs = React.useMemo(() => getStatusTabs(orders), [orders]);
+  const statusTabs = React.useMemo(
+    () => getStatusTabs(orderPage?.status_counts),
+    [orderPage],
+  );
+  const insight = orderPage?.insight;
+  const summary = orderPage?.summary;
+  const totalItems = orderPage?.total ?? 0;
   const isDateFilterActive = dateFilter.start !== '' || dateFilter.end !== '';
   const isReceivedDateFilterActive = receivedDateFilter.start !== '' || receivedDateFilter.end !== '';
   const partners = React.useMemo(() => partnersResource.data || [], [partnersResource.data]);
@@ -440,42 +487,9 @@ export function OrdersPage({ onOpenOrder, onCreateOrder, onEditOrder, initialTab
     }
   };
 
-  const filtered = React.useMemo(() => sortOrders(
-      orders
-        .filter((o) => {
-          const statusTab = ORDER_STATUS_TAB_BY_KEY.get(tab);
-          if (statusTab) return o.status === statusTab.status;
-          if (tab === 'today') return isTodayDate(o.scheduledDate) && o.status === '작업예정';
-          if (tab === 'tomorrow_notice') return isTomorrowDate(o.scheduledDate) && o.status === '작업예정';
-          if (tab === 'partner_pending') return o.status === '협력사확인중';
-          if (tab === 'photo_review') return o.status === '고객전달필요';
-          if (tab === 'pending') return ['상담중', '협력사확인중'].includes(o.status);
-          if (tab === 'work') return o.status === '작업예정';
-          if (tab === 'deliver') return o.status === '고객전달필요';
-          if (tab === 'payment_check') return isPaymentCheckNeeded(o.paymentStatus);
-          if (tab === 'monthly_done') return o.status === '서비스완료';
-          if (tab === 'monthly_revenue') return ['고객전달필요', '서비스완료'].includes(o.status);
-          if (tab === 'done') return ['고객전달필요', '서비스완료'].includes(o.status);
-          if (tab === 'cancel') return o.status === '취소';
-          return true;
-        })
-        .filter((o) => matchesVisitDateFilter(o, dateFilter, { includeArchivedForSearch: shouldIncludePastPaid }))
-        .filter((o) => matchesReceivedDateFilter(o.receivedRaw, receivedDateFilter))
-        .filter((o) => matchesPartnerFilter(o, partnerFilter))
-        .filter((o) => matchesOrderQuery(o, query)),
-      sortBy,
-    ), [
-      orders,
-      tab,
-      dateFilter,
-      shouldIncludePastPaid,
-      receivedDateFilter,
-      partnerFilter,
-      query,
-      sortBy,
-    ]);
-  const groupedFiltered = React.useMemo(() => {
-    const sorted = [...filtered];
+  // 서버가 정렬·페이지네이션한 현재 페이지 항목에 대해서만 그룹 시각화 메타를 계산한다.
+  const pagedRows = React.useMemo(() => {
+    const sorted = [...items];
     const groupStatusMap = new Map();
     for (const row of sorted) {
       const key = row.groupId || row.id;
@@ -499,12 +513,13 @@ export function OrdersPage({ onOpenOrder, onCreateOrder, onEditOrder, initialTab
         isGroupCancelled: Boolean(group && group.count > 1 && group.count === group.cancelled),
       };
     });
-  }, [filtered]);
-  const pagedRows = React.useMemo(
-    () => paginateItems(groupedFiltered, page, pageSize),
-    [groupedFiltered, page, pageSize],
-  );
-  const filterSummary = React.useMemo(() => summarizeFilteredOrders(filtered), [filtered]);
+  }, [items]);
+  const filterSummary = React.useMemo(() => ({
+    count: summary?.count ?? 0,
+    consumerTotal: summary?.consumer_total ?? 0,
+    partnerTotal: summary?.partner_total ?? 0,
+    profitTotal: summary?.profit ?? 0,
+  }), [summary]);
   const visibleActiveTabKey = getVisibleStatusTabKey(tab);
   const selectedPartnerName = partnerFilter === 'all'
     ? '전체 협력사'
@@ -540,16 +555,27 @@ export function OrdersPage({ onOpenOrder, onCreateOrder, onEditOrder, initialTab
       setActionError('주문 목록을 불러온 뒤 내보내기를 다시 시도해주세요.');
       return;
     }
-    if (filtered.length === 0) {
+    if (totalItems === 0) {
       setActionNotice({ tone: 'warn', text: '내보낼 주문이 없습니다.' });
       return;
     }
 
     setIsExporting(true);
     try {
-      const blob = await exportAdminOrders(filtered.map((order) => order.id));
+      // 현재 필터 조건 그대로, 한 번에 전체 결과를 받아 id 목록을 만든다(서버 page_size 최대 2000).
+      const fullPage = await listAdminOrdersPage({
+        ...orderPageParams,
+        page: 1,
+        page_size: totalItems,
+      });
+      const orderIds = fullPage.items.map((order) => order.id);
+      if (orderIds.length === 0) {
+        setActionNotice({ tone: 'warn', text: '내보낼 주문이 없습니다.' });
+        return;
+      }
+      const blob = await exportAdminOrders(orderIds);
       downloadExportBlob(blob, createOrdersExportFilename());
-      setActionNotice({ tone: 'success', text: `${filtered.length}건을 내보냈습니다.` });
+      setActionNotice({ tone: 'success', text: `${orderIds.length}건을 내보냈습니다.` });
     } catch (error) {
       setActionError(`내보내기 실패: ${error instanceof Error ? error.message : String(error)}`);
     } finally {
@@ -566,17 +592,17 @@ export function OrdersPage({ onOpenOrder, onCreateOrder, onEditOrder, initialTab
         display: 'flex', alignItems: 'center', gap: 24,
       }}>
         <div style={{ display: 'flex', alignItems: 'baseline', gap: 18, flex: 1, flexWrap: 'wrap' }}>
-          <Insight num={statusTabs.find((item) => item.key === 'today')?.count ?? 0} label="오늘 작업" />
+          <Insight num={insight?.today_jobs ?? 0} label="오늘 작업" />
           <InsightDivider/>
-          <Insight num={orders.filter((order) => order.team === '미배정').length} label="미배정" warn />
+          <Insight num={insight?.unassigned ?? 0} label="미배정" warn />
           <InsightDivider/>
-          <Insight num={orders.filter((order) => order.status === '작업예정').length} label="일정/작업 확정" />
+          <Insight num={insight?.schedule_confirmed ?? 0} label="일정/작업 확정" />
           <InsightDivider/>
-          <Insight num={orders.filter((order) => order.status === '고객전달필요').length} label="작업완료" />
+          <Insight num={insight?.work_done ?? 0} label="작업완료" />
           <InsightDivider/>
-          <Insight num={formatCompactWon(orders.filter((order) => isPaymentCheckNeeded(order.paymentStatus)).reduce((sum, order) => sum + order.amount, 0))} label="미수금" danger/>
+          <Insight num={formatCompactWon(insight?.unpaid_total ?? 0)} label="미수금" danger/>
           <InsightDivider/>
-          <Insight num={formatCompactWon(orders.reduce((sum, order) => sum + order.amount, 0))} label="이번 달" muted/>
+          <Insight num={formatCompactWon(insight?.month_total ?? 0)} label="이번 달" muted/>
         </div>
         <div style={{ display: 'flex', gap: 6 }}>
           <button
@@ -844,7 +870,7 @@ export function OrdersPage({ onOpenOrder, onCreateOrder, onEditOrder, initialTab
         {actionNotice && <ListNotice testId="orders-bulk-notice" text={actionNotice.text} tone={actionNotice.tone} />}
         {ordersResource.isLoading && <ListNotice text="주문 목록을 불러오는 중입니다." />}
         {!ordersResource.isLoading && ordersResource.error && <ListNotice text="주문 목록을 불러오지 못했습니다." tone="danger" />}
-        {!ordersResource.isLoading && !ordersResource.error && filtered.length === 0 && <ListNotice text="표시할 주문이 없습니다." />}
+        {!ordersResource.isLoading && !ordersResource.error && items.length === 0 && <ListNotice text="표시할 주문이 없습니다." />}
         <table className="table-modern orders-table" style={{ width: 'calc(100% - 12px)', tableLayout: 'fixed' }}>
           <colgroup>
             {ORDER_TABLE_COLUMNS.map((column) => (
@@ -1035,7 +1061,7 @@ export function OrdersPage({ onOpenOrder, onCreateOrder, onEditOrder, initialTab
 
       <PaginationBar
         testId="orders-pagination"
-        totalItems={filtered.length}
+        totalItems={totalItems}
         page={page}
         pageSize={pageSize}
         onPageChange={setPage}
@@ -1211,13 +1237,14 @@ function ListNotice({ text, tone = 'muted', testId = undefined }) {
   );
 }
 
-function getStatusTabs(orders) {
+function getStatusTabs(statusCounts) {
+  const counts = statusCounts || {};
   return [
-    { key: 'all', label: '전체', count: orders.length },
+    { key: 'all', label: '전체', count: counts.all ?? 0 },
     ...ORDER_STATUS_TAB_OPTIONS.map((option) => ({
       key: option.key,
       label: option.label,
-      count: orders.filter((order) => order.status === option.status).length,
+      count: counts[option.key] ?? 0,
     })),
   ];
 }
@@ -1237,30 +1264,6 @@ function getVisibleStatusTabKey(tab) {
     monthly_done: 'final_payment_complete',
   };
   return legacyMap[tab] || null;
-}
-
-function matchesOrderQuery(order, query) {
-  const keyword = query.trim().toLowerCase();
-  if (!keyword) {
-    return true;
-  }
-
-  const textMatched = [
-    orderStatusLabel(order.status),
-    order.rawStatus,
-    order.serviceName,
-    order.sizeOrQuantity,
-    order.address,
-    order.customer,
-    order.phone,
-    order.team,
-  ].some((value) => String(value || '').toLowerCase().includes(keyword));
-  if (textMatched) {
-    return true;
-  }
-
-  const keywordDigits = digitsOnly(keyword);
-  return Boolean(keywordDigits && digitsOnly(order.phone).includes(keywordDigits));
 }
 
 function normalizeActionError(error) {
@@ -1295,50 +1298,6 @@ function downloadExportBlob(blob, filename) {
   } finally {
     URL.revokeObjectURL(url);
   }
-}
-
-function matchesVisitDateFilter(order, dateFilter, { includeArchivedForSearch = false } = {}) {
-  const value = order.scheduledDate;
-  if (dateFilter.preset === 'upcoming') {
-    if (includeArchivedForSearch) {
-      return true;
-    }
-    // 오늘부터: 오늘·미래 일정과 과거 잔금 미완납을 함께 보여주고, 과거 완납은 전체에서만 본다.
-    const today = getAppTodayValue();
-    return !value || value >= today || hasPastIncompleteBalance(order, today);
-  }
-  return matchesDateFilter(value, dateFilter);
-}
-
-function matchesDateFilter(value, dateFilter) {
-  if (!dateFilter.start && !dateFilter.end) {
-    return true;
-  }
-
-  if (!value) {
-    return false;
-  }
-
-  const { start, end } = normalizeDateRange(dateFilter.start, dateFilter.end);
-
-  if (start && value < start) {
-    return false;
-  }
-  if (end && value > end) {
-    return false;
-  }
-  return true;
-}
-
-function matchesReceivedDateFilter(receivedValue, dateFilter) {
-  return matchesDateFilter(receivedValue, dateFilter);
-}
-
-function matchesPartnerFilter(order, partnerFilter) {
-  if (!partnerFilter || partnerFilter === 'all') {
-    return true;
-  }
-  return order.partnerId === partnerFilter;
 }
 
 function getInitialOrderTableColumnWidths() {
@@ -1390,68 +1349,6 @@ function resizeOrderTableColumnPair(widths, currentColumn, nextColumn, delta) {
   };
 }
 
-function sortOrders(orders, sortBy) {
-  if (sortBy.startsWith('received')) {
-    const direction = sortBy.endsWith('_desc') ? -1 : 1;
-    const emptyValue = direction === 1 ? '9999-99-99' : '';
-    return [...orders].sort((a, b) => {
-      const aValue = a.receivedRaw || emptyValue;
-      const bValue = b.receivedRaw || emptyValue;
-      return String(aValue).localeCompare(String(bValue)) * direction
-        || String(a.id).localeCompare(String(b.id));
-    });
-  }
-
-  // 방문일 정렬: 오늘·미래 → 미정 → 과거 잔금 미완납 → 과거 완납, 기준일은 KST 오늘이라 매일 자동 롤오버된다.
-  const today = getAppTodayValue();
-  const reverse = sortBy.endsWith('_desc');
-  return [...orders].sort((a, b) => compareVisitOrder(a, b, today, reverse));
-}
-
-function visitOrderGroup(order, today) {
-  const date = order.scheduledDate;
-  if (date && date >= today) {
-    return 0; // 오늘·미래 방문예정
-  }
-  if (!date) {
-    return 1; // 미정(신규접수/일정 미확정)
-  }
-  if (hasPastIncompleteBalance(order, today)) {
-    return 2; // 과거 일정 중 잔금 미완납
-  }
-  return 3; // 과거 완납(기본 화면에서는 숨김)
-}
-
-function compareVisitOrder(a, b, today, reverse) {
-  const groupA = visitOrderGroup(a, today);
-  const groupB = visitOrderGroup(b, today);
-  if (groupA !== groupB) {
-    return groupA - groupB;
-  }
-
-  const idCmp = String(a.id).localeCompare(String(b.id));
-  const dateA = a.scheduledDate || '';
-  const dateB = b.scheduledDate || '';
-
-  if (groupA === 0) {
-    const cmp = dateA.localeCompare(dateB) * (reverse ? -1 : 1);
-    return cmp || idCmp;
-  }
-  if (groupA === 2 || groupA === 3) {
-    // 과거는 최근 날짜가 먼저.
-    return dateB.localeCompare(dateA) || idCmp;
-  }
-  return idCmp; // 미정(group 1)
-}
-
-function hasPastIncompleteBalance(order, today) {
-  return Boolean(
-    order.scheduledDate
-    && order.scheduledDate < today
-    && isBalanceIncomplete(order.paymentStatus),
-  );
-}
-
 function toOrderRow(order) {
   const sizeOrQuantity = formatQuantity(order.size_or_quantity);
   const rawStatus = order.status;
@@ -1484,37 +1381,6 @@ function toOrderRow(order) {
     photo: toPhotoState(rawStatus),
     delivered: toDeliveredState(rawStatus),
   };
-}
-
-function toMockOrderRow(order) {
-  const rawStatus = order.status;
-  const status = orderWorkflowStatusValue(rawStatus, order.paymentStatus);
-  return {
-    ...order,
-    status,
-    rawStatus,
-    groupId: order.groupId || null,
-    partnerId: order.partnerId || null,
-    receivedRaw: mockDateToValue(order.received),
-    scheduledDate: mockDateToValue(order.visit),
-    serviceName: order.serviceName || order.product,
-    sizeOrQuantity: formatQuantity(order.sizeOrQuantity || ''),
-    addressDetail: order.addressDetail || '',
-    fullAddress: order.fullAddress || [order.address, order.addressDetail].filter(Boolean).join(' '),
-    partnerPrice: Number(order.partnerPrice || 0),
-    vatType: order.vatType || 'included',
-  };
-}
-
-function mockDateToValue(value) {
-  if (!value || value === '미정') {
-    return '';
-  }
-  const match = String(value).match(/^(\d{2})-(\d{2})/);
-  if (!match) {
-    return value;
-  }
-  return `${getAppTodayDate().getFullYear()}-${match[1]}-${match[2]}`;
 }
 
 function createDateFilter(preset) {
@@ -1595,14 +1461,6 @@ function formatDateFilterSummary(dateFilter) {
   return `${formatFullDate(end)} 이전`;
 }
 
-function isTodayDate(value) {
-  return isRelativeAppDateValue(value, 0);
-}
-
-function isTomorrowDate(value) {
-  return isRelativeAppDateValue(value, 1);
-}
-
 function formatDate(value) {
   if (!value) {
     return '';
@@ -1658,22 +1516,6 @@ function toDeliveredState(status) {
     return 'done';
   }
   return 'pending';
-}
-
-function summarizeFilteredOrders(orders) {
-  const summary = {
-    count: orders.length,
-    consumerTotal: 0,
-    partnerTotal: 0,
-    profitTotal: 0,
-  };
-
-  for (const order of orders) {
-    summary.consumerTotal += Number(order.amount || 0);
-    summary.partnerTotal += Number(order.partnerPrice || 0);
-  }
-  summary.profitTotal = summary.consumerTotal - summary.partnerTotal;
-  return summary;
 }
 
 function formatWon(value) {
