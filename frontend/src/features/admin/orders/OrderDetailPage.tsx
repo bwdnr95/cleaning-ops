@@ -62,6 +62,7 @@ export function OrderDetailPage({ orderId, onBack, onEdit, onNav, onOpenOrder })
   const [selectedRequestedTime, setSelectedRequestedTime] = React.useState('');
   const [selectedPaymentStatus, setSelectedPaymentStatus] = React.useState('');
   const [selectedPartnerPaymentStatus, setSelectedPartnerPaymentStatus] = React.useState('');
+  const [selectedOnsiteExtra, setSelectedOnsiteExtra] = React.useState('');
   const [isSaving, setIsSaving] = React.useState(false);
   const [isDeleting, setIsDeleting] = React.useState(false);
   const [notice, setNotice] = React.useState(null);
@@ -80,6 +81,7 @@ export function OrderDetailPage({ orderId, onBack, onEdit, onNav, onOpenOrder })
       setSelectedRequestedTime(order.requested_time || '');
       setSelectedPaymentStatus(order.payment_status || '');
       setSelectedPartnerPaymentStatus(order.partner_payment_status || '');
+      setSelectedOnsiteExtra(order.onsite_extra_amount != null ? String(order.onsite_extra_amount) : '');
     }
   }, [order]);
 
@@ -92,6 +94,7 @@ export function OrderDetailPage({ orderId, onBack, onEdit, onNav, onOpenOrder })
     || selectedRequestedTime !== (order.requested_time || '')
     || selectedPaymentStatus !== (order.payment_status || '')
     || selectedPartnerPaymentStatus !== (order.partner_payment_status || '')
+    || Number(selectedOnsiteExtra || 0) !== Number(order.onsite_extra_amount || 0)
   );
 
   React.useEffect(() => {
@@ -167,9 +170,17 @@ export function OrderDetailPage({ orderId, onBack, onEdit, onNav, onOpenOrder })
 
   const handlePaymentUpdate = async () => {
     await runAction(async () => {
+      // 현장추가금은 총금액에 더해지고, 늘어난 만큼 잔금에 반영한다(계약금=선금은 유지).
+      const onsite = Number(selectedOnsiteExtra || 0);
+      const balance = Math.max(
+        Number(order.total_amount || 0) + onsite - Number(order.deposit_amount || 0),
+        0,
+      );
       await updateAdminOrder(order.id, {
         payment_status: selectedPaymentStatus || null,
         partner_payment_status: selectedPartnerPaymentStatus || null,
+        onsite_extra_amount: onsite,
+        balance_amount: balance,
       });
       setNotice('결제/정산 변경을 타임라인에 기록했습니다.');
       orderResource.reload();
@@ -303,7 +314,12 @@ export function OrderDetailPage({ orderId, onBack, onEdit, onNav, onOpenOrder })
   const isStatusDirty = selectedStatus !== orderWorkflowStatusValue(order.status, order.payment_status);
   const isPartnerDirty = selectedPartnerId !== (order.partner_id || '');
   const isPaymentDirty = selectedPaymentStatus !== (order.payment_status || '')
-    || selectedPartnerPaymentStatus !== (order.partner_payment_status || '');
+    || selectedPartnerPaymentStatus !== (order.partner_payment_status || '')
+    || Number(selectedOnsiteExtra || 0) !== Number(order.onsite_extra_amount || 0);
+  // 현장추가금을 반영한 총금액/잔금(계약금은 그대로). 잔금 = 총금액 - 계약금.
+  const onsiteExtraNumber = Number(selectedOnsiteExtra || 0);
+  const grandTotalWithOnsite = Number(order.total_amount || 0) + onsiteExtraNumber;
+  const recomputedBalance = Math.max(grandTotalWithOnsite - Number(order.deposit_amount || 0), 0);
   const kakaoChannelUrl = normalizeHttpUrl(messageSettingsResource.data?.kakao_channel_url);
 
   return (
@@ -585,6 +601,21 @@ export function OrderDetailPage({ orderId, onBack, onEdit, onNav, onOpenOrder })
                     <option key={status.value} value={status.value}>{status.label}</option>
                   ))}
                 </select>
+              </label>
+              <label style={{ display: 'flex', flexDirection: 'column', gap: 5, marginBottom: 8 }}>
+                <span style={{ fontSize: 10.5, color: 'var(--text-tertiary)', fontWeight: 600 }}>현장 추가금</span>
+                <input
+                  data-testid="detail-onsite-extra"
+                  className="input"
+                  inputMode="numeric"
+                  value={selectedOnsiteExtra}
+                  onChange={(event) => setSelectedOnsiteExtra(event.target.value.replace(/[^\d]/g, ''))}
+                  placeholder="0"
+                  style={{ width: '100%', height: 34 }}
+                />
+                <span style={{ fontSize: 10.5, color: 'var(--text-tertiary)' }}>
+                  총금액 {formatWon(grandTotalWithOnsite)} · 잔금 {formatWon(recomputedBalance)} · 계약금 {formatWon(order.deposit_amount)} 유지
+                </span>
               </label>
               <button
                 className={`btn btn--block ${isPaymentDirty ? 'btn--primary' : 'btn--secondary'}`}
