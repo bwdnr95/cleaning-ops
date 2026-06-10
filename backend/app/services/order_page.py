@@ -64,6 +64,11 @@ class OrderPageResult:
 # frontend isPaymentCheckNeeded(PAYMENT_CHECK_STATUSES)
 _PAYMENT_CHECK_STATUSES = frozenset({"pending", "balance_pending", "unpaid"})
 
+# frontend PAST_PAID_VISIBLE_TABS — 이 탭들에선 '오늘부터' 프리셋에서도 과거 완납을 노출.
+_PAST_PAID_VISIBLE_TABS = frozenset(
+    {"all", "work_done", "final_payment_complete", "done", "monthly_done", "monthly_revenue"}
+)
+
 
 # 방문일 프리셋에서 start/end 를 산출할 때 쓰는 키 집합. 'upcoming'/'all' 은 별도 처리.
 _BOUNDED_VISIT_PRESETS = {"today", "tomorrow", "week", "month"}
@@ -101,6 +106,8 @@ class OrderPageService:
         # 검색어가 있거나(=과거 완납까지 검색 노출) 방문 프리셋이 'all' 이면 과거 완납도 포함.
         keyword = (q or "").strip().lower()
         has_search = bool(keyword)
+        # 과거 완납 노출: 검색 중이거나, 과거완납 노출 탭일 때.
+        include_archived = has_search or (status in _PAST_PAID_VISIBLE_TABS)
 
         all_orders = self._load_orders()
         # 그룹을 일괄 조회해 두고 DTO/검색에서 재사용한다.
@@ -119,7 +126,7 @@ class OrderPageService:
                 preset=visit_preset,
                 visit_from=visit_from,
                 visit_to=visit_to,
-                include_archived_for_search=has_search,
+                include_archived_for_search=include_archived,
             )
         ]
         # 2) 접수일 필터
@@ -148,14 +155,8 @@ class OrderPageService:
         # 5) 상태 탭 카운트 (상태 탭 적용 *전*의 집합 기준)
         status_counts = self._status_counts(rows)
 
-        # 6) 상태 탭 필터 적용 → 최종 집합
-        tab_status = status_tab_value(status)
-        if tab_status is not None:
-            rows = [
-                order
-                for order in rows
-                if order_workflow_status(order.status, order.payment_status) == tab_status
-            ]
+        # 6) 상태 탭 필터 적용 → 최종 집합 (표준 탭 + 대시보드 진입용 특수 탭)
+        rows = [order for order in rows if self._matches_status_tab(order, status)]
 
         total = len(rows)
         summary = self._summarize(rows)
@@ -328,6 +329,36 @@ class OrderPageService:
         if keyword_digits and keyword_digits in digits_only(format_phone(customer_phone)):
             return True
         return False
+
+    # 프론트 status 탭 필터(표준 7탭 + 대시보드 진입용 특수 키)와 동일하게 매칭.
+    # today/tomorrow_notice 의 날짜 조건은 방문일 필터(visit_preset)가 함께 처리한다.
+    _STATUS_ALIASES = {
+        "work": "작업예정",
+        "deliver": "고객전달필요",
+        "photo_review": "고객전달필요",
+        "partner_pending": "협력사확인중",
+        "monthly_done": "서비스완료",
+        "today": "작업예정",
+        "tomorrow_notice": "작업예정",
+    }
+
+    @classmethod
+    def _matches_status_tab(cls, order: Order, status_key: str | None) -> bool:
+        if not status_key or status_key == "all":
+            return True
+        workflow = order_workflow_status(order.status, order.payment_status)
+        if status_key == "payment_check":
+            return order.payment_status in _PAYMENT_CHECK_STATUSES
+        if status_key == "pending":
+            return workflow in ("상담중", "협력사확인중")
+        if status_key in ("monthly_revenue", "done"):
+            return workflow in ("고객전달필요", "서비스완료")
+        if status_key in cls._STATUS_ALIASES:
+            return workflow == cls._STATUS_ALIASES[status_key]
+        tab_status = status_tab_value(status_key)
+        if tab_status is not None:
+            return workflow == tab_status
+        return True
 
     @staticmethod
     def _status_counts(rows: list[Order]) -> dict[str, int]:
