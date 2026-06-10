@@ -396,12 +396,9 @@ export function OrderDetailPage({ orderId, onBack, onEdit, onNav, onOpenOrder })
             <Section title="금액 / 결제" icon="creditCard">
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 0 }}>
                 <Money label="총금액(VAT포함)" value={(Number(order.consumer_price ?? order.total_amount) || 0) + (Number(order.onsite_extra_amount) || 0)}/>
-                <Money label="소비자가" value={order.consumer_price ?? order.total_amount}/>
                 <Money label="현장 추가" value={order.onsite_extra_amount}/>
                 <Money label="계약금" value={order.deposit_amount}/>
                 <Money label="잔금" value={order.balance_amount}/>
-              </div>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 0, marginTop: 8 }}>
                 <Money label="할인가" value={order.discount_amount}/>
               </div>
               <div style={{ marginTop: 10 }}>
