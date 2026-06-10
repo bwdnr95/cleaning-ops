@@ -100,6 +100,9 @@ class PartnerSettlementActionResult(ApiModel):
 
 class PartnerDetailRead(PartnerAdminRead):
     jobs: list[PartnerAssignedOrderRead]
+    # 로그인 계정 신규 생성 시 비밀번호를 자동 생성한 경우에만 1회 노출한다.
+    # 관리자가 직접 입력한 비밀번호는 노출하지 않는다.
+    temporary_password: str | None = None
 
 
 class PartnerPasswordResetRequest(ApiModel):

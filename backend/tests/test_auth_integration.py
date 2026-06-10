@@ -1728,6 +1728,39 @@ def test_customer_photo_ready_message_includes_customer_link_and_timeline() -> N
     assert TimelineEventType.CUSTOMER_LINK_SENT in {event.event_type for event in events}
 
 
+def test_customer_balance_due_message_includes_balance_link_and_timeline() -> None:
+    engine = create_engine(
+        "sqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    TestingSessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+    Base.metadata.create_all(bind=engine)
+
+    with TestingSessionLocal() as db:
+        seed_dev_data(db)
+        order = db.get(Order, "seed-order-2450")
+        original_status = order.status
+        log = MessageService(db).send(
+            MessageSendRequest(
+                order_id="seed-order-2450",
+                message_type=MessageType.CUSTOMER_BALANCE_DUE,
+                recipient_type=RecipientType.CUSTOMER,
+            ),
+            actor_user_id="seed-admin-user",
+        )
+        db.refresh(order)
+        events = TimelineRepository(db).list_for_order("seed-order-2450")
+
+    assert log.status == "sent"
+    assert "잔금:" in log.content
+    assert "http://localhost:5173/c/seed-customer-token-2450" in log.content
+    assert order.status == original_status
+    assert TimelineEventType.MESSAGE_SENT in {event.event_type for event in events}
+    assert TimelineEventType.STATUS_CHANGED not in {event.event_type for event in events}
+    assert TimelineEventType.CUSTOMER_LINK_SENT in {event.event_type for event in events}
+
+
 def test_failed_customer_message_is_logged_without_status_or_link_side_effects() -> None:
     class FailingProvider:
         def send(self, content: str, recipient_phone: str) -> MessageSendResult:
@@ -1878,6 +1911,7 @@ def test_admin_message_settings_reports_solapi_readiness_without_secret_values(m
     monkeypatch.setattr(settings, "solapi_kakao_template_customer_photo_ready", "KA_PHOTO")
     monkeypatch.setattr(settings, "solapi_kakao_template_customer_quote", "KA_QUOTE")
     monkeypatch.setattr(settings, "solapi_kakao_template_partner_customer_info", "KA_PARTNER_CUSTOMER")
+    monkeypatch.setattr(settings, "solapi_kakao_template_customer_balance_due", "KA_BALANCE")
     monkeypatch.setattr(settings, "kakao_channel_url", "https://pf.kakao.com/_cleanjob")
 
     client = make_test_client()

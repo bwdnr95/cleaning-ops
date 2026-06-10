@@ -60,6 +60,16 @@ KAKAO_TEMPLATE_DEFINITIONS: dict[MessageType, KakaoTemplateDefinition] = {
             KakaoTemplateVariable("#{고객링크}", "customer_link"),
         ),
     ),
+    MessageType.CUSTOMER_BALANCE_DUE: KakaoTemplateDefinition(
+        message_type=MessageType.CUSTOMER_BALANCE_DUE,
+        template_id_setting="solapi_kakao_template_customer_balance_due",
+        variables=(
+            KakaoTemplateVariable("#{고객명}", "customer_name"),
+            KakaoTemplateVariable("#{서비스명}", "service_name"),
+            KakaoTemplateVariable("#{잔금}", "balance_amount"),
+            KakaoTemplateVariable("#{고객링크}", "customer_link"),
+        ),
+    ),
     MessageType.CUSTOMER_QUOTE: KakaoTemplateDefinition(
         message_type=MessageType.CUSTOMER_QUOTE,
         template_id_setting="solapi_kakao_template_customer_quote",

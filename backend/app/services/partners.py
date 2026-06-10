@@ -7,7 +7,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.core.security import hash_password
-from app.domain.constants import OrderStatus, UserRole
+from app.domain.constants import AuditEventType, AuditSeverity, OrderStatus, UserRole
 from app.domain.payment_status import PARTNER_SETTLEMENT_PENDING_STATUSES
 from app.domain.phone import normalize_phone
 from app.models.order import Order
@@ -26,6 +26,7 @@ from app.schemas.partner import (
     PartnerPasswordResetRead,
     PartnerUpdate,
 )
+from app.services.audit import AuditService
 
 
 @dataclass(frozen=True)
@@ -59,6 +60,7 @@ class PartnerService:
         self.partners = PartnerRepository(db)
         self.categories = PartnerCategoryRepository(db)
         self.refresh_tokens = RefreshTokenRepository(db)
+        self.audit = AuditService(db)
 
     def list_categories(self, *, include_inactive: bool = False) -> list[PartnerCategoryRead]:
         categories = self.categories.list_categories(include_inactive=include_inactive)
@@ -129,15 +131,35 @@ class PartnerService:
         )
         self.partners.add(partner)
 
+        temporary_password: str | None = None
         if payload.login_phone or payload.login_password:
-            self._upsert_partner_user(
+            # 관리자가 비밀번호를 직접 입력하지 않으면 임시 비밀번호를 자동 생성하고,
+            # 자동 생성한 경우에만 응답으로 1회 노출한다.
+            if payload.login_password:
+                password = payload.login_password
+            else:
+                password = generate_temporary_password()
+                temporary_password = password
+            user = self._upsert_partner_user(
                 partner,
                 login_phone=payload.login_phone or payload.phone,
-                password=payload.login_password or generate_temporary_password(),
+                password=password,
+            )
+            self.audit.record(
+                event_type=AuditEventType.PARTNER_ACCOUNT_CREATED,
+                severity=AuditSeverity.WARNING,
+                user_id=user.id,
+                details={
+                    "partner_id": partner.id,
+                    "auto_generated_password": temporary_password is not None,
+                },
             )
 
         self.db.commit()
-        return self.get_detail(partner.id)
+        detail = self.get_detail(partner.id)
+        if temporary_password is not None:
+            detail = detail.model_copy(update={"temporary_password": temporary_password})
+        return detail
 
     def update(self, partner_id: str, payload: PartnerUpdate) -> PartnerDetailRead:
         partner = self.partners.get(partner_id)
@@ -152,16 +174,43 @@ class PartnerService:
                 value = normalize_phone(value)
             setattr(partner, key, value)
 
+        partner_users = self._list_partner_users(partner_id)
         if "is_active" in changes and changes["is_active"] is False:
-            for user in self._list_partner_users(partner_id):
+            for user in partner_users:
                 user.is_active = False
                 self.refresh_tokens.revoke_active_for_user(user.id)
+            self._record_account_status_audit(
+                partner_id,
+                partner_users,
+                AuditEventType.PARTNER_ACCOUNT_DEACTIVATED,
+            )
         elif "is_active" in changes and changes["is_active"] is True:
-            for user in self._list_partner_users(partner_id):
+            for user in partner_users:
                 user.is_active = True
+            self._record_account_status_audit(
+                partner_id,
+                partner_users,
+                AuditEventType.PARTNER_ACCOUNT_ACTIVATED,
+            )
 
         self.db.commit()
         return self.get_detail(partner_id)
+
+    def _record_account_status_audit(
+        self,
+        partner_id: str,
+        users: list[User],
+        event_type: AuditEventType,
+    ) -> None:
+        if not users:
+            return
+        for user in users:
+            self.audit.record(
+                event_type=event_type,
+                severity=AuditSeverity.WARNING,
+                user_id=user.id,
+                details={"partner_id": partner_id},
+            )
 
     def delete(self, partner_id: str) -> None:
         partner = self.partners.get(partner_id)
@@ -197,6 +246,15 @@ class PartnerService:
         )
         user.is_active = partner.is_active
         self.refresh_tokens.revoke_active_for_user(user.id)
+        self.audit.record(
+            event_type=AuditEventType.PARTNER_PASSWORD_RESET,
+            severity=AuditSeverity.WARNING,
+            user_id=user.id,
+            details={
+                "partner_id": partner.id,
+                "auto_generated_password": password is None,
+            },
+        )
         self.db.commit()
         return PartnerPasswordResetRead(
             partner_id=partner.id,
@@ -359,14 +417,20 @@ class PartnerService:
         )
 
     def _upsert_partner_user(self, partner: Partner, *, login_phone: str, password: str) -> User:
+        normalized_phone = normalize_phone(login_phone)
         user = self._first_partner_user(partner.id)
+        # login_phone(=users.phone)은 유니크(migration 0012)다. 다른 사용자가 이미 쓰는 번호면
+        # IntegrityError(500) 대신 명확한 400으로 막는다.
+        self._ensure_login_phone_available(
+            normalized_phone, exclude_user_id=user.id if user is not None else None
+        )
         if user is None:
             user = User(
                 id=str(uuid4()),
                 role=UserRole.PARTNER,
                 name=partner.manager_name or partner.name,
                 email=None,
-                phone=normalize_phone(login_phone),
+                phone=normalized_phone,
                 password_hash=hash_password(password),
                 partner_id=partner.id,
                 is_active=partner.is_active,
@@ -374,9 +438,20 @@ class PartnerService:
             self.db.add(user)
         else:
             user.name = partner.manager_name or partner.name
-            user.phone = normalize_phone(login_phone)
+            user.phone = normalized_phone
             user.password_hash = hash_password(password)
         return user
+
+    def _ensure_login_phone_available(
+        self, phone: str | None, *, exclude_user_id: str | None = None
+    ) -> None:
+        if not phone:
+            return
+        stmt = select(User).where(User.phone == phone)
+        if exclude_user_id is not None:
+            stmt = stmt.where(User.id != exclude_user_id)
+        if self.db.scalar(stmt.limit(1)) is not None:
+            raise ValueError("login_phone_already_in_use")
 
     def _job_counts(self, partner_id: str) -> dict[str, int]:
         scheduled = scalar_count(

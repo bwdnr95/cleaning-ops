@@ -14,12 +14,29 @@ export const NAV = [
   { key: 'sends',      label: '발송이력',     icon: 'send',     badge: null },
 ];
 
-export function AdminShell({ initialPage = 'dashboard', children, onNav = undefined, onCreateOrder = undefined, navBadges = {} }) {
-  const [page, setPage] = React.useState(initialPage);
+export function AdminShell({
+  initialPage = 'dashboard',
+  page: controlledPage = undefined,
+  onPageChange = undefined,
+  children,
+  onCreateOrder = undefined,
+  navBadges = {},
+  user = undefined,
+  onLogout = undefined,
+}) {
+  const [uncontrolledPage, setUncontrolledPage] = React.useState(initialPage);
+  const page = controlledPage ?? uncontrolledPage;
+
+  const setPage = React.useCallback((nextPage) => {
+    if (onPageChange) {
+      onPageChange(nextPage);
+      return;
+    }
+    setUncontrolledPage(nextPage);
+  }, [onPageChange]);
 
   const handleNav = (k) => {
     setPage(k);
-    if (onNav) onNav(k);
   };
 
   return (
@@ -86,13 +103,21 @@ export function AdminShell({ initialPage = 'dashboard', children, onNav = undefi
         </nav>
 
         <div style={{ padding: 10, borderTop: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 8 }}>
-          <Avatar name="전" size={26} tone="brand"/>
+          <Avatar name={(user?.name || '관')[0]} size={26} tone="brand"/>
           <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontSize: 12, fontWeight: 600 }}>전소영</div>
-            <div style={{ fontSize: 10.5, color: 'var(--text-tertiary)' }}>운영팀 · 매니저</div>
+            <div style={{ fontSize: 12, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{user?.name || '관리자'}</div>
+            <div style={{ fontSize: 10.5, color: 'var(--text-tertiary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{user?.email || '운영 관리자'}</div>
           </div>
-          <button className="btn btn--ghost btn--sm" style={{ padding: '0 6px' }}>
-            <Icon name="settings" size={13}/>
+          <button
+            type="button"
+            data-testid="admin-logout"
+            className="btn btn--ghost btn--sm"
+            aria-label="로그아웃"
+            title="로그아웃"
+            onClick={() => onLogout?.()}
+            style={{ padding: '0 6px' }}
+          >
+            <Icon name="logOut" size={14}/>
           </button>
         </div>
       </aside>

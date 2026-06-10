@@ -30,6 +30,15 @@ class PhotoService:
         if order is None or order.partner_id != partner_id:
             raise ValueError("order_not_found")
 
+        # 활성 작업 구간(작업예정~작업진행)에서만 업로드 허용.
+        # 협력사 업로드 사진은 즉시 자동 공개되므로, 종료/봉인 상태(고객전달완료·서비스완료·취소)나
+        # 사전/검수 단계에 사진이 새로 끼어들어 고객에게 노출되는 것을 막는다.
+        # complete_partner_job 과 동일하게 invalid_status_transition 으로 거절한다.
+        from app.services.orders import PARTNER_PHOTO_UPLOADABLE_STATUSES
+
+        if order.status not in PARTNER_PHOTO_UPLOADABLE_STATUSES:
+            raise ValueError("invalid_status_for_upload")
+
         photo = OrderPhoto(
             id=str(uuid4()),
             uploaded_by_user_id=user_id,

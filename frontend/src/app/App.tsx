@@ -62,15 +62,20 @@ const ADMIN_PAGE_META = {
 };
 
 const DEFAULT_ORDERS_VIEW = { tab: 'all', datePreset: 'upcoming' };
+const ADMIN_PAGE_KEYS = Object.keys(ADMIN_PAGE_META);
+const DEFAULT_ADMIN_ROUTE = {
+  page: 'dashboard',
+  detailOrderId: null,
+  orderForm: null,
+  ordersView: DEFAULT_ORDERS_VIEW,
+};
 
 export function App() {
   const auth = useAuth();
   const isStandaloneCustomerLink = isCustomerLinkRoute();
   const isStandalonePartnerLink = isPartnerLinkRoute();
   const mode = isStandalonePartnerLink ? 'partner' : 'admin';
-  const [detailOrderId, setDetailOrderId] = React.useState(null);
-  const [orderForm, setOrderForm] = React.useState(null);
-  const [ordersView, setOrdersView] = React.useState(DEFAULT_ORDERS_VIEW);
+  const [adminRoute, setAdminRoute] = React.useState(() => readAdminRouteFromLocation());
   const adminSession = auth.getSession('admin');
   const partnerSession = auth.getSession('partner');
   const adminSummaryLoader = React.useCallback(() => {
@@ -89,6 +94,36 @@ export function App() {
     }
   }, [auth, mode]);
 
+  React.useEffect(() => {
+    if (mode !== 'admin' || isStandaloneCustomerLink) {
+      return undefined;
+    }
+
+    if (!window.location.hash) {
+      replaceAdminHistory(adminRoute);
+    }
+
+    const syncRouteFromHistory = () => {
+      setAdminRoute(readAdminRouteFromLocation());
+    };
+    window.addEventListener('popstate', syncRouteFromHistory);
+    window.addEventListener('hashchange', syncRouteFromHistory);
+    return () => {
+      window.removeEventListener('popstate', syncRouteFromHistory);
+      window.removeEventListener('hashchange', syncRouteFromHistory);
+    };
+  }, [adminRoute, isStandaloneCustomerLink, mode]);
+
+  const navigateAdmin = React.useCallback((nextRoute, options = {}) => {
+    const route = normalizeAdminRoute(nextRoute);
+    setAdminRoute(route);
+    writeAdminHistory(route, options);
+  }, []);
+
+  const detailOrderId = adminRoute.detailOrderId;
+  const orderForm = adminRoute.orderForm;
+  const ordersView = adminRoute.ordersView;
+
   if (isStandaloneCustomerLink) {
     return (
       <main style={{ minHeight: '100vh', height: '100vh', width: '100vw', background: '#f7f6f3' }}>
@@ -105,17 +140,12 @@ export function App() {
               <RouteState text="화면을 전환하는 중입니다." />
             ) : adminSession.user?.role === 'admin' ? (
               <AdminShell
-                initialPage="dashboard"
-                onNav={() => {
-                  setDetailOrderId(null);
-                  setOrderForm(null);
-                  setOrdersView(DEFAULT_ORDERS_VIEW);
-                }}
-                onCreateOrder={() => {
-                  setDetailOrderId(null);
-                  setOrderForm({ mode: 'create', orderId: null });
-                }}
+                page={adminRoute.page}
+                onPageChange={(nextPage) => navigateAdmin(toPageRoute(nextPage))}
+                onCreateOrder={() => navigateAdmin(toOrderCreateRoute(adminRoute.page))}
                 navBadges={navBadges}
+                user={adminSession.user}
+                onLogout={() => void auth.logout('admin')}
               >
                 {({ page, setPage }) => {
                   if (orderForm) {
@@ -128,11 +158,15 @@ export function App() {
                         <OrderFormPage
                           mode={orderForm.mode}
                           orderId={orderForm.orderId}
-                          onCancel={() => setOrderForm(null)}
+                          onCancel={() => {
+                            if (orderForm.mode === 'edit' && orderForm.orderId) {
+                              navigateAdmin(toOrderDetailRoute(orderForm.orderId, ordersView));
+                              return;
+                            }
+                            navigateAdmin(toPageRoute(page, ordersView));
+                          }}
                           onSaved={(order) => {
-                            setOrderForm(null);
-                            setDetailOrderId(order.id);
-                            setPage('orders');
+                            navigateAdmin(toOrderDetailRoute(order.id, ordersView));
                           }}
                         />
                       </>
@@ -148,12 +182,10 @@ export function App() {
                         />
                         <OrderDetailPage
                           orderId={detailOrderId}
-                          onBack={() => setDetailOrderId(null)}
-                          onEdit={() => setOrderForm({ mode: 'edit', orderId: detailOrderId })}
-                          onOpenOrder={(nextOrderId) => setDetailOrderId(nextOrderId)}
+                          onBack={() => navigateAdmin(toPageRoute('orders', ordersView))}
+                          onEdit={() => navigateAdmin(toOrderEditRoute(detailOrderId, ordersView))}
+                          onOpenOrder={(nextOrderId) => navigateAdmin(toOrderDetailRoute(nextOrderId, ordersView))}
                           onNav={(nextPage) => {
-                            setDetailOrderId(null);
-                            setOrderForm(null);
                             setPage(nextPage);
                           }}
                         />
@@ -167,39 +199,37 @@ export function App() {
                       <Topbar {...meta} />
                       {page === 'dashboard' && (
                         <Dashboard
-                          onCreateOrder={() => setOrderForm({ mode: 'create', orderId: null })}
+                          userName={adminSession.user?.name}
+                          onCreateOrder={() => navigateAdmin(toOrderCreateRoute('dashboard'))}
                           onNav={(nextPage, options = {}) => {
-                            setDetailOrderId(null);
-                            setOrderForm(null);
+                            let nextOrdersView = DEFAULT_ORDERS_VIEW;
                             if (nextPage === 'orders') {
-                              setOrdersView(toOrdersView(options));
+                              nextOrdersView = toOrdersView(options);
                             }
-                            setPage(nextPage);
+                            navigateAdmin(toPageRoute(nextPage, nextOrdersView));
                           }}
-                          onOpenOrder={(orderId) => setDetailOrderId(orderId)}
+                          onOpenOrder={(orderId) => navigateAdmin(toOrderDetailRoute(orderId, ordersView))}
                         />
                       )}
                       {page === 'orders' && (
                         <OrdersPage
                           initialTab={ordersView.tab}
                           initialDatePreset={ordersView.datePreset}
-                          onOpenOrder={(orderId) => setDetailOrderId(orderId)}
-                          onEditOrder={(orderId) => setOrderForm({ mode: 'edit', orderId })}
-                          onCreateOrder={() => setOrderForm({ mode: 'create', orderId: null })}
+                          onOpenOrder={(orderId) => navigateAdmin(toOrderDetailRoute(orderId, ordersView))}
+                          onEditOrder={(orderId) => navigateAdmin(toOrderEditRoute(orderId, ordersView))}
+                          onCreateOrder={() => navigateAdmin(toOrderCreateRoute('orders', ordersView))}
                         />
                       )}
                       {page === 'calendar' && (
                         <CalendarPage
-                          onOpenOrder={(orderId) => setDetailOrderId(orderId)}
-                          onCreateOrder={() => setOrderForm({ mode: 'create', orderId: null })}
+                          onOpenOrder={(orderId) => navigateAdmin(toOrderDetailRoute(orderId, ordersView))}
+                          onCreateOrder={() => navigateAdmin(toOrderCreateRoute('calendar'))}
                         />
                       )}
                       {page === 'photos' && (
                         <PhotoReviewPage
-                          onOpenOrder={(orderId) => setDetailOrderId(orderId)}
+                          onOpenOrder={(orderId) => navigateAdmin(toOrderDetailRoute(orderId, ordersView))}
                           onNav={(nextPage) => {
-                            setDetailOrderId(null);
-                            setOrderForm(null);
                             setPage(nextPage);
                           }}
                         />
@@ -209,7 +239,7 @@ export function App() {
                       {page === 'reports' && <ReportsPage />}
                       {page === 'sends' && (
                         <MessagesPage
-                          onOpenOrder={(orderId) => setDetailOrderId(orderId)}
+                          onOpenOrder={(orderId) => navigateAdmin(toOrderDetailRoute(orderId, ordersView))}
                         />
                       )}
                       {!['dashboard', 'orders', 'calendar', 'photos', 'products', 'partners', 'reports', 'sends'].includes(page) && (
@@ -259,6 +289,133 @@ function toOrdersView(options) {
     : getDefaultOrdersDatePreset(tab);
 
   return { tab, datePreset };
+}
+
+function toPageRoute(page, ordersView = DEFAULT_ORDERS_VIEW) {
+  return {
+    page,
+    detailOrderId: null,
+    orderForm: null,
+    ordersView,
+  };
+}
+
+function toOrderCreateRoute(_returnPage = 'orders', ordersView = DEFAULT_ORDERS_VIEW) {
+  return {
+    page: 'orders',
+    detailOrderId: null,
+    orderForm: { mode: 'create', orderId: null },
+    ordersView,
+  };
+}
+
+function toOrderDetailRoute(orderId, ordersView = DEFAULT_ORDERS_VIEW) {
+  return {
+    page: 'orders',
+    detailOrderId: orderId,
+    orderForm: null,
+    ordersView,
+  };
+}
+
+function toOrderEditRoute(orderId, ordersView = DEFAULT_ORDERS_VIEW) {
+  return {
+    page: 'orders',
+    detailOrderId: orderId,
+    orderForm: { mode: 'edit', orderId },
+    ordersView,
+  };
+}
+
+function readAdminRouteFromLocation() {
+  if (typeof window === 'undefined') {
+    return DEFAULT_ADMIN_ROUTE;
+  }
+
+  const hash = window.location.hash.replace(/^#\/?/, '');
+  if (!hash) {
+    return DEFAULT_ADMIN_ROUTE;
+  }
+
+  const [pathPart, queryString = ''] = hash.split('?');
+  const segments = pathPart.split('/').filter(Boolean).map((segment) => decodeURIComponent(segment));
+  const params = new URLSearchParams(queryString);
+  const page = ADMIN_PAGE_KEYS.includes(segments[0]) ? segments[0] : DEFAULT_ADMIN_ROUTE.page;
+  const ordersView = toOrdersView({
+    ordersTab: params.get('tab') || undefined,
+    datePreset: params.get('date') || undefined,
+  });
+
+  if (page === 'orders' && segments[1] === 'new') {
+    return normalizeAdminRoute(toOrderCreateRoute('orders', ordersView));
+  }
+  if (page === 'orders' && segments[1]) {
+    const orderId = segments[1];
+    if (segments[2] === 'edit') {
+      return normalizeAdminRoute(toOrderEditRoute(orderId, ordersView));
+    }
+    return normalizeAdminRoute(toOrderDetailRoute(orderId, ordersView));
+  }
+
+  return normalizeAdminRoute(toPageRoute(page, page === 'orders' ? ordersView : DEFAULT_ORDERS_VIEW));
+}
+
+function normalizeAdminRoute(route) {
+  const page = ADMIN_PAGE_KEYS.includes(route?.page) ? route.page : DEFAULT_ADMIN_ROUTE.page;
+  const ordersView = toOrdersView({
+    ordersTab: route?.ordersView?.tab,
+    datePreset: route?.ordersView?.datePreset,
+  });
+  return {
+    page,
+    detailOrderId: route?.detailOrderId || null,
+    orderForm: route?.orderForm || null,
+    ordersView,
+  };
+}
+
+function replaceAdminHistory(route) {
+  writeAdminHistory(route, { replace: true });
+}
+
+function writeAdminHistory(route, { replace = false } = {}) {
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  const hash = adminRouteToHash(route);
+  if (window.location.hash === hash) {
+    return;
+  }
+
+  const url = `${window.location.pathname}${window.location.search}${hash}`;
+  const method = replace ? 'replaceState' : 'pushState';
+  window.history[method]({ cleanOpsAdminRoute: true }, '', url);
+}
+
+function adminRouteToHash(route) {
+  const normalized = normalizeAdminRoute(route);
+  let path = normalized.page;
+  if (normalized.orderForm?.mode === 'create') {
+    path = 'orders/new';
+  } else if (normalized.orderForm?.mode === 'edit' && normalized.orderForm.orderId) {
+    path = `orders/${encodeURIComponent(normalized.orderForm.orderId)}/edit`;
+  } else if (normalized.detailOrderId) {
+    path = `orders/${encodeURIComponent(normalized.detailOrderId)}`;
+  }
+
+  const params = new URLSearchParams();
+  if (path.startsWith('orders')) {
+    if (normalized.ordersView.tab !== DEFAULT_ORDERS_VIEW.tab) {
+      params.set('tab', normalized.ordersView.tab);
+    }
+    if (normalized.ordersView.datePreset !== getDefaultOrdersDatePreset(normalized.ordersView.tab)) {
+      params.set('date', normalized.ordersView.datePreset);
+    }
+  }
+
+  const query = params.toString();
+  return `#${path}${query ? `?${query}` : ''}`;
 }
 
 function getDefaultOrdersDatePreset(tab) {

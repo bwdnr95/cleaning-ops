@@ -6,11 +6,12 @@ import { ORDERS } from '../../../mocks/cleaningOpsData';
 import { bulkDeleteAdminOrders, exportAdminOrders, listAdminOrders, listPartners, updateAdminOrder, type AdminOrderSort } from '../../../api/admin';
 import { sendAdminMessage } from '../../../api/messages';
 import { useApiResource } from '../../../api/useApiResource';
-import { ORDER_STATUSES } from '../../../domain/orderStatus';
+import { ORDER_STATUS_OPTIONS, orderStatusLabel, orderWorkflowStatusValue } from '../../../domain/orderStatus';
 import { isBalanceIncomplete, isPaymentCheckNeeded } from '../../../domain/paymentStatus';
 import { formatQuantity } from '../../../domain/format';
-import { formatPhone } from '../../../domain/phone';
+import { digitsOnly, formatPhone } from '../../../domain/phone';
 import { OrderImportDialog } from './OrderImportDialog';
+import { PartnerFilterSelect } from './PartnerFilterSelect';
 import {
   addDays,
   formatDateValue,
@@ -55,7 +56,7 @@ function StatusDot({ status }) {
         background: color, flexShrink: 0,
         boxShadow: `0 0 0 3px ${color}1a`,
       }}/>
-      <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>{status}</span>
+      <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>{orderStatusLabel(status)}</span>
     </span>
   );
 }
@@ -182,14 +183,22 @@ function ResizableTh({ columnKey, children, onResizeStart, isResizing = false, s
   );
 }
 
-const TODAY_JOB_STATUSES = ['일정확정', '전날안내필요', '전날안내완료', '작업예정', '작업진행'];
-const TOMORROW_NOTICE_STATUSES = ['일정확정', '전날안내필요'];
-const REVENUE_RECOGNIZED_STATUSES = ['고객전달완료', '서비스완료'];
+const ORDER_STATUS_TAB_OPTIONS = [
+  { key: 'consulting_unassigned', status: '상담중', label: '상담중/미배정' },
+  { key: 'schedule_partner_checking', status: '협력사확인중', label: '일정 및 협력사 확인중' },
+  { key: 'schedule_work_confirmed', status: '작업예정', label: '일정 및 작업 확정' },
+  { key: 'work_done', status: '고객전달필요', label: '작업완료' },
+  { key: 'final_payment_complete', status: '서비스완료', label: '최종결제완료' },
+  { key: 'cancel', status: '취소', label: '취소' },
+];
+const ORDER_STATUS_TAB_BY_KEY = new Map(ORDER_STATUS_TAB_OPTIONS.map((item) => [item.key, item]));
+const PAST_PAID_VISIBLE_TABS = new Set(['all', 'work_done', 'final_payment_complete', 'done', 'monthly_done', 'monthly_revenue']);
 const BULK_MESSAGE_OPTIONS = [
   { value: 'customer_schedule_confirmed', label: '고객 일정확정 안내', recipient: 'customer' },
   { value: 'customer_day_before', label: '고객 전날 안내', recipient: 'customer' },
   { value: 'partner_assignment', label: '협력사 배정 안내', recipient: 'partner' },
   { value: 'customer_photo_ready', label: '고객 사진 확인 안내', recipient: 'customer' },
+  { value: 'customer_balance_due', label: '고객 잔금 안내', recipient: 'customer' },
 ];
 const ORDER_TABLE_COLUMN_STORAGE_KEY = 'cleaning.ops.orders.columnWidths.v1';
 const ORDER_TABLE_COLUMNS = [
@@ -221,27 +230,32 @@ export function OrdersPage({ onOpenOrder, onCreateOrder, onEditOrder, initialTab
   const [partnerFilter, setPartnerFilter] = React.useState('all');
   const [receivedDateFilter, setReceivedDateFilter] = React.useState(() => createDateFilter('all'));
   const [page, setPage] = React.useState(1);
-  const [pageSize, setPageSize] = React.useState(100);
+  const [pageSize, setPageSize] = React.useState(50);
   const [actionError, setActionError] = React.useState('');
   const [actionNotice, setActionNotice] = React.useState(null);
   const [isSavingAction, setIsSavingAction] = React.useState(false);
   const [isDeleting, setIsDeleting] = React.useState(false);
   const [isExporting, setIsExporting] = React.useState(false);
   const [bulkAction, setBulkAction] = React.useState(null);
-  const [bulkStatus, setBulkStatus] = React.useState('일정확정');
+  const [bulkStatus, setBulkStatus] = React.useState('작업예정');
   const [bulkPartnerId, setBulkPartnerId] = React.useState('');
   const [bulkMessageType, setBulkMessageType] = React.useState('customer_schedule_confirmed');
   const [isImportOpen, setImportOpen] = React.useState(false);
   const [columnWidths, setColumnWidths] = React.useState(getInitialOrderTableColumnWidths);
   const [resizingColumn, setResizingColumn] = React.useState(null);
+  const hasSearchQuery = query.trim().length > 0;
+  const shouldIncludePastPaid = hasSearchQuery || PAST_PAID_VISIBLE_TABS.has(tab);
   const loadOrders = React.useCallback(() => listAdminOrders({
     sort: sortBy,
-    includePastPaid: tab === 'all',
-  }), [sortBy, tab]);
-  const ordersResource = useApiResource(loadOrders, `${sortBy}:${tab === 'all'}`);
+    includePastPaid: shouldIncludePastPaid,
+  }), [sortBy, shouldIncludePastPaid]);
+  const ordersResource = useApiResource(loadOrders, `${sortBy}:${shouldIncludePastPaid}`);
   const partnersResource = useApiResource(listPartners);
-  const orders = ordersResource.data ? ordersResource.data.map(toOrderRow) : ORDERS.map(toMockOrderRow);
-  const statusTabs = getStatusTabs(orders);
+  const orders = React.useMemo(
+    () => (ordersResource.data ? ordersResource.data.map(toOrderRow) : ORDERS.map(toMockOrderRow)),
+    [ordersResource.data],
+  );
+  const statusTabs = React.useMemo(() => getStatusTabs(orders), [orders]);
   const isDateFilterActive = dateFilter.start !== '' || dateFilter.end !== '';
   const isReceivedDateFilterActive = receivedDateFilter.start !== '' || receivedDateFilter.end !== '';
   const partners = React.useMemo(() => partnersResource.data || [], [partnersResource.data]);
@@ -366,7 +380,7 @@ export function OrdersPage({ onOpenOrder, onCreateOrder, onEditOrder, initialTab
 
   const handleBulkStatusChange = async () => {
     await runSelectedOrdersAction({
-      successLabel: `${bulkStatus} 상태로 변경했습니다.`,
+      successLabel: `${orderStatusLabel(bulkStatus)} 상태로 변경했습니다.`,
       execute: (orderId) => updateAdminOrder(orderId, { status: bulkStatus }),
     });
   };
@@ -424,29 +438,40 @@ export function OrdersPage({ onOpenOrder, onCreateOrder, onEditOrder, initialTab
     }
   };
 
-  const filtered = sortOrders(
-    orders
-      .filter((o) => {
-        if (tab === 'today') return isTodayDate(o.scheduledDate) && TODAY_JOB_STATUSES.includes(o.status);
-        if (tab === 'tomorrow_notice') return isTomorrowDate(o.scheduledDate) && TOMORROW_NOTICE_STATUSES.includes(o.status);
-        if (tab === 'partner_pending') return o.status === '협력사확인중';
-        if (tab === 'photo_review') return o.status === '사진검수대기';
-        if (tab === 'pending') return ['신규접수', '상담중', '협력사확인중'].includes(o.status);
-        if (tab === 'work') return ['일정확정', '전날안내필요', '전날안내완료', '작업예정', '작업진행', '사진검수대기'].includes(o.status);
-        if (tab === 'deliver') return ['고객전달필요'].includes(o.status);
-        if (tab === 'payment_check') return isPaymentCheckNeeded(o.paymentStatus);
-        if (tab === 'monthly_done') return o.status === '서비스완료';
-        if (tab === 'monthly_revenue') return REVENUE_RECOGNIZED_STATUSES.includes(o.status);
-        if (tab === 'done') return ['고객전달완료', '서비스완료'].includes(o.status);
-        if (tab === 'cancel') return o.status === '취소';
-        return true;
-      })
-      .filter((o) => matchesVisitDateFilter(o, dateFilter))
-      .filter((o) => matchesReceivedDateFilter(o.receivedRaw, receivedDateFilter))
-      .filter((o) => matchesPartnerFilter(o, partnerFilter))
-      .filter((o) => matchesOrderQuery(o, query)),
-    sortBy,
-  );
+  const filtered = React.useMemo(() => sortOrders(
+      orders
+        .filter((o) => {
+          const statusTab = ORDER_STATUS_TAB_BY_KEY.get(tab);
+          if (statusTab) return o.status === statusTab.status;
+          if (tab === 'today') return isTodayDate(o.scheduledDate) && o.status === '작업예정';
+          if (tab === 'tomorrow_notice') return isTomorrowDate(o.scheduledDate) && o.status === '작업예정';
+          if (tab === 'partner_pending') return o.status === '협력사확인중';
+          if (tab === 'photo_review') return o.status === '고객전달필요';
+          if (tab === 'pending') return ['상담중', '협력사확인중'].includes(o.status);
+          if (tab === 'work') return o.status === '작업예정';
+          if (tab === 'deliver') return o.status === '고객전달필요';
+          if (tab === 'payment_check') return isPaymentCheckNeeded(o.paymentStatus);
+          if (tab === 'monthly_done') return o.status === '서비스완료';
+          if (tab === 'monthly_revenue') return ['고객전달필요', '서비스완료'].includes(o.status);
+          if (tab === 'done') return ['고객전달필요', '서비스완료'].includes(o.status);
+          if (tab === 'cancel') return o.status === '취소';
+          return true;
+        })
+        .filter((o) => matchesVisitDateFilter(o, dateFilter, { includeArchivedForSearch: shouldIncludePastPaid }))
+        .filter((o) => matchesReceivedDateFilter(o.receivedRaw, receivedDateFilter))
+        .filter((o) => matchesPartnerFilter(o, partnerFilter))
+        .filter((o) => matchesOrderQuery(o, query)),
+      sortBy,
+    ), [
+      orders,
+      tab,
+      dateFilter,
+      shouldIncludePastPaid,
+      receivedDateFilter,
+      partnerFilter,
+      query,
+      sortBy,
+    ]);
   const groupedFiltered = React.useMemo(() => {
     const sorted = [...filtered];
     const groupStatusMap = new Map();
@@ -478,6 +503,7 @@ export function OrdersPage({ onOpenOrder, onCreateOrder, onEditOrder, initialTab
     [groupedFiltered, page, pageSize],
   );
   const filterSummary = React.useMemo(() => summarizeFilteredOrders(filtered), [filtered]);
+  const visibleActiveTabKey = getVisibleStatusTabKey(tab);
   const selectedPartnerName = partnerFilter === 'all'
     ? '전체 협력사'
     : sortedActivePartners.find((partner) => partner.id === partnerFilter)?.name || '선택 협력사';
@@ -542,9 +568,9 @@ export function OrdersPage({ onOpenOrder, onCreateOrder, onEditOrder, initialTab
           <InsightDivider/>
           <Insight num={orders.filter((order) => order.team === '미배정').length} label="미배정" warn />
           <InsightDivider/>
-          <Insight num={orders.filter((order) => order.status === '사진검수대기').length} label="검수 대기" />
+          <Insight num={orders.filter((order) => order.status === '작업예정').length} label="일정/작업 확정" />
           <InsightDivider/>
-          <Insight num={orders.filter((order) => order.status === '고객전달필요').length} label="고객 전달" />
+          <Insight num={orders.filter((order) => order.status === '고객전달필요').length} label="작업완료" />
           <InsightDivider/>
           <Insight num={formatCompactWon(orders.filter((order) => isPaymentCheckNeeded(order.paymentStatus)).reduce((sum, order) => sum + order.amount, 0))} label="미수금" danger/>
           <InsightDivider/>
@@ -663,32 +689,21 @@ export function OrdersPage({ onOpenOrder, onCreateOrder, onEditOrder, initialTab
         </button>
       </div>
 
-      {/* 협력사 탭 */}
-      <div style={{ padding: '0 10px 8px', background: 'var(--bg)', display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+      {/* 협력사 필터 — 수십 개 협력사를 인라인 칩 대신 검색형 드롭다운으로 제공 */}
+      <div style={{ padding: '0 10px 8px', background: 'var(--bg)', display: 'flex', alignItems: 'center', gap: 6 }}>
         <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, color: 'var(--text-tertiary)', fontSize: 12, fontWeight: 600, whiteSpace: 'nowrap' }}>
           <Icon name="user" size={12}/> 협력사
         </span>
-        <button
-          type="button"
-          data-testid="orders-partner-tab-all"
-          aria-pressed={partnerFilter === 'all'}
-          onClick={() => setPartnerFilter('all')}
-          style={datePresetButton(partnerFilter === 'all')}
-        >
-          전체
-        </button>
-        {sortedActivePartners.map((partner) => (
-          <button
-            key={partner.id}
-            type="button"
-            data-testid={`orders-partner-tab-${partner.id}`}
-            aria-pressed={partnerFilter === partner.id}
-            onClick={() => setPartnerFilter(partner.id)}
-            style={datePresetButton(partnerFilter === partner.id)}
-          >
-            {partner.name}
+        <PartnerFilterSelect
+          partners={sortedActivePartners}
+          value={partnerFilter}
+          onChange={setPartnerFilter}
+        />
+        {partnerFilter !== 'all' && (
+          <button type="button" data-testid="orders-partner-clear" style={softGhostBtn} onClick={() => setPartnerFilter('all')}>
+            해제
           </button>
-        ))}
+        )}
       </div>
 
       {shouldShowFilterSummary && (
@@ -752,7 +767,7 @@ export function OrdersPage({ onOpenOrder, onCreateOrder, onEditOrder, initialTab
         display: 'flex', gap: 2,
       }}>
         {statusTabs.map((t) => {
-          const active = tab === t.key;
+          const active = visibleActiveTabKey === t.key;
           return (
             <button
               key={t.key}
@@ -871,7 +886,7 @@ export function OrdersPage({ onOpenOrder, onCreateOrder, onEditOrder, initialTab
           <tbody>
             {!ordersResource.isLoading && !ordersResource.error && pagedRows.map((o) => {
               const isUnassigned = o.team === '미배정';
-              const isUnpaid = o.paid === 'pending' && o.amount > 0 && !['취소', '신규접수', '상담중'].includes(o.status);
+              const isUnpaid = o.paid === 'pending' && o.amount > 0 && !['취소', '상담중'].includes(o.status);
               const isCancelled = o.status === '취소';
               return (
                 <tr key={o.id}
@@ -1064,7 +1079,7 @@ function FilterSummaryLine({ label, summary }) {
   const items = [
     ['건수', `${summary.count.toLocaleString()}건`],
     ['소비자가', formatWon(summary.consumerTotal)],
-    ['도급가', formatWon(summary.partnerTotal)],
+    ['도급가(VAT 포함)', formatWon(summary.partnerTotal)],
     ['이윤', formatWon(summary.profitTotal)],
   ];
 
@@ -1140,7 +1155,7 @@ function BulkActionPanel({
         <>
           <span style={panelLabelStyle}>선택 주문 상태</span>
           <select data-testid="orders-bulk-status-select" className="input" value={bulkStatus} onChange={(event) => onStatusChange(event.target.value)} style={{ width: 180, height: 32 }}>
-            {ORDER_STATUSES.map((status) => <option key={status} value={status}>{status}</option>)}
+            {ORDER_STATUS_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
           </select>
           <button data-testid="orders-bulk-status-apply" className="btn btn--primary btn--sm" disabled={isSaving} onClick={onApplyStatus}>
             {isSaving ? '처리 중' : '적용'}
@@ -1201,19 +1216,29 @@ function ListNotice({ text, tone = 'muted', testId = undefined }) {
 function getStatusTabs(orders) {
   return [
     { key: 'all', label: '전체', count: orders.length },
-    { key: 'today', label: '오늘 작업', count: orders.filter((o) => isTodayDate(o.scheduledDate) && TODAY_JOB_STATUSES.includes(o.status)).length },
-    { key: 'tomorrow_notice', label: '내일 안내', count: orders.filter((o) => isTomorrowDate(o.scheduledDate) && TOMORROW_NOTICE_STATUSES.includes(o.status)).length },
-    { key: 'partner_pending', label: '협력사 확인', count: orders.filter((o) => o.status === '협력사확인중').length },
-    { key: 'photo_review', label: '사진 검수', count: orders.filter((o) => o.status === '사진검수대기').length },
-    { key: 'pending', label: '확인 대기', count: orders.filter((o) => ['신규접수', '상담중', '협력사확인중'].includes(o.status)).length },
-    { key: 'work', label: '작업/검수', count: orders.filter((o) => ['일정확정', '전날안내필요', '전날안내완료', '작업예정', '작업진행', '사진검수대기'].includes(o.status)).length },
-    { key: 'deliver', label: '고객 전달', count: orders.filter((o) => ['고객전달필요'].includes(o.status)).length },
-    { key: 'payment_check', label: '결제 확인', count: orders.filter((o) => isPaymentCheckNeeded(o.paymentStatus)).length },
-    { key: 'monthly_done', label: '이번달 완료', count: orders.filter((o) => o.status === '서비스완료' && isCurrentMonthDate(o.scheduledDate)).length },
-    { key: 'monthly_revenue', label: '이번달 계약', count: orders.filter((o) => REVENUE_RECOGNIZED_STATUSES.includes(o.status) && isCurrentMonthDate(o.scheduledDate)).length },
-    { key: 'done', label: '완료', count: orders.filter((o) => ['고객전달완료', '서비스완료'].includes(o.status)).length },
-    { key: 'cancel', label: '취소', count: orders.filter((o) => o.status === '취소').length },
+    ...ORDER_STATUS_TAB_OPTIONS.map((option) => ({
+      key: option.key,
+      label: option.label,
+      count: orders.filter((order) => order.status === option.status).length,
+    })),
   ];
+}
+
+function getVisibleStatusTabKey(tab) {
+  if (tab === 'all' || ORDER_STATUS_TAB_BY_KEY.has(tab)) {
+    return tab;
+  }
+  const legacyMap = {
+    today: 'schedule_work_confirmed',
+    tomorrow_notice: 'schedule_work_confirmed',
+    partner_pending: 'schedule_partner_checking',
+    photo_review: 'work_done',
+    pending: 'consulting_unassigned',
+    work: 'schedule_work_confirmed',
+    deliver: 'work_done',
+    monthly_done: 'final_payment_complete',
+  };
+  return legacyMap[tab] || null;
 }
 
 function matchesOrderQuery(order, query) {
@@ -1222,8 +1247,9 @@ function matchesOrderQuery(order, query) {
     return true;
   }
 
-  return [
-    order.status,
+  const textMatched = [
+    orderStatusLabel(order.status),
+    order.rawStatus,
     order.serviceName,
     order.sizeOrQuantity,
     order.address,
@@ -1231,6 +1257,12 @@ function matchesOrderQuery(order, query) {
     order.phone,
     order.team,
   ].some((value) => String(value || '').toLowerCase().includes(keyword));
+  if (textMatched) {
+    return true;
+  }
+
+  const keywordDigits = digitsOnly(keyword);
+  return Boolean(keywordDigits && digitsOnly(order.phone).includes(keywordDigits));
 }
 
 function normalizeActionError(error) {
@@ -1267,9 +1299,12 @@ function downloadExportBlob(blob, filename) {
   }
 }
 
-function matchesVisitDateFilter(order, dateFilter) {
+function matchesVisitDateFilter(order, dateFilter, { includeArchivedForSearch = false } = {}) {
   const value = order.scheduledDate;
   if (dateFilter.preset === 'upcoming') {
+    if (includeArchivedForSearch) {
+      return true;
+    }
     // 오늘부터: 오늘·미래 일정과 과거 잔금 미완납을 함께 보여주고, 과거 완납은 전체에서만 본다.
     const today = getAppTodayValue();
     return !value || value >= today || hasPastIncompleteBalance(order, today);
@@ -1421,11 +1456,14 @@ function hasPastIncompleteBalance(order, today) {
 
 function toOrderRow(order) {
   const sizeOrQuantity = formatQuantity(order.size_or_quantity);
+  const rawStatus = order.status;
+  const status = orderWorkflowStatusValue(rawStatus, order.payment_status);
   return {
     id: order.id,
     groupId: order.group_id || null,
     partnerId: order.partner_id || null,
-    status: order.status,
+    status,
+    rawStatus,
     receivedRaw: order.received_date,
     received: formatDate(order.received_date),
     visit: formatDate(order.scheduled_date) || '미정',
@@ -1445,14 +1483,18 @@ function toOrderRow(order) {
     vatType: order.vat_type || 'included',
     paymentStatus: order.payment_status,
     paid: toPaidState(order.payment_status),
-    photo: toPhotoState(order.status),
-    delivered: toDeliveredState(order.status),
+    photo: toPhotoState(rawStatus),
+    delivered: toDeliveredState(rawStatus),
   };
 }
 
 function toMockOrderRow(order) {
+  const rawStatus = order.status;
+  const status = orderWorkflowStatusValue(rawStatus, order.paymentStatus);
   return {
     ...order,
+    status,
+    rawStatus,
     groupId: order.groupId || null,
     partnerId: order.partnerId || null,
     receivedRaw: mockDateToValue(order.received),
@@ -1561,15 +1603,6 @@ function isTodayDate(value) {
 
 function isTomorrowDate(value) {
   return isRelativeAppDateValue(value, 1);
-}
-
-function isCurrentMonthDate(value) {
-  const date = parseDateValue(value);
-  if (!date) {
-    return false;
-  }
-  const today = getAppTodayDate();
-  return date.getFullYear() === today.getFullYear() && date.getMonth() === today.getMonth();
 }
 
 function formatDate(value) {

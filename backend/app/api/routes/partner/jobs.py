@@ -132,6 +132,14 @@ async def upload_photo(
             user_id=user.id,
             partner_id=partner_id,
         )
+    except ValueError as exc:
+        db.rollback()
+        storage.delete(stored_file.storage_key)
+        if str(exc) == "invalid_status_for_upload":
+            raise HTTPException(status_code=409, detail="invalid_status_for_upload") from exc
+        if str(exc) == "order_not_found":
+            raise HTTPException(status_code=404, detail="order_not_found") from exc
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     except Exception:
         db.rollback()
         storage.delete(stored_file.storage_key)

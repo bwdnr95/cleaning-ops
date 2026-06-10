@@ -38,6 +38,17 @@ from app.services.timeline import TimelineService
 
 logger = logging.getLogger(__name__)
 
+# 본문/카카오 템플릿에 고객 링크(customer_token 기반)가 포함되는 고객 메시지 타입.
+# 이 타입들은 customer_token 이 없으면 죽은 링크를 보내지 않고 발송 실패로 처리한다.
+MESSAGE_TYPES_WITH_CUSTOMER_LINK: frozenset[MessageType] = frozenset(
+    {
+        MessageType.CUSTOMER_SCHEDULE_CONFIRMED,
+        MessageType.CUSTOMER_DAY_BEFORE,
+        MessageType.CUSTOMER_PHOTO_READY,
+        MessageType.CUSTOMER_BALANCE_DUE,
+    }
+)
+
 
 @dataclass(frozen=True)
 class MessageSendResult:
@@ -558,6 +569,42 @@ def parse_solapi_datetime(value: object) -> datetime | None:
         return None
 
 
+# 메시지 배송 수명주기 순서. 솔라피 배송 리포트가 순서를 뒤집어 도착해도
+# (예: DELIVERED 이후 늦게 SENT 가 들어오는 경우) 상태가 후퇴하지 않도록 강제한다.
+# FAILED/DELIVERY_FAILED 는 종결 상태로 취급하여 더 이상 전이하지 않는다.
+MESSAGE_LIFECYCLE_ORDER: dict[MessageStatus, int] = {
+    MessageStatus.PENDING: 10,
+    MessageStatus.SENT: 20,
+    MessageStatus.DELIVERED: 30,
+}
+
+# 종결(terminal) 상태: 한 번 진입하면 배송 리포트로 덮어쓰지 않는다.
+MESSAGE_TERMINAL_STATUSES: frozenset[MessageStatus] = frozenset(
+    {MessageStatus.FAILED, MessageStatus.DELIVERY_FAILED}
+)
+
+
+def is_monotonic_delivery_transition(
+    current: MessageStatus,
+    next_status: MessageStatus,
+) -> bool:
+    """배송 리포트로 적용하려는 next_status 가 수명주기를 전진시키는지 판단한다.
+
+    - 현재 상태가 종결 상태면 어떤 전이도 허용하지 않는다.
+    - DELIVERY_FAILED 로의 전이는 (실패 기록 목적) 항상 허용한다.
+    - 그 외에는 정의된 순서상 더 앞으로 나아갈 때만 허용한다.
+    """
+    if current in MESSAGE_TERMINAL_STATUSES:
+        return False
+    if next_status == MessageStatus.DELIVERY_FAILED:
+        return True
+    current_rank = MESSAGE_LIFECYCLE_ORDER.get(current)
+    next_rank = MESSAGE_LIFECYCLE_ORDER.get(next_status)
+    if current_rank is None or next_rank is None:
+        return False
+    return next_rank > current_rank
+
+
 def solapi_delivery_status(status_code: str | None) -> MessageStatus | None:
     if status_code == "4000":
         return MessageStatus.DELIVERED
@@ -718,6 +765,36 @@ class MessageService:
 
         recipient_type, recipient_name, recipient_phone = self._resolve_recipient(order, payload)
         partner = self.partners.get(order.partner_id) if order.partner_id else None
+
+        # FIX 1: 수신자 전화번호가 비어 있으면 IntegrityError(500) 대신
+        # FAILED 로그 + timeline 을 남기고 깨끗한 실패 결과를 반환한다.
+        if not normalize_phone(recipient_phone):
+            return self._record_presend_failure(
+                payload,
+                recipient_type=recipient_type,
+                recipient_name=recipient_name,
+                recipient_phone=recipient_phone,
+                error_code="recipient_phone_missing",
+                error_message="수신자 전화번호가 없어 메시지를 발송할 수 없습니다.",
+                actor_user_id=actor_user_id,
+            )
+
+        # FIX 6: 고객 링크가 포함되는 고객 메시지인데 customer_token 이 없으면
+        # '.../c/None' 같은 죽은 링크를 보내지 않고 발송 실패로 기록한다.
+        if (
+            payload.message_type in MESSAGE_TYPES_WITH_CUSTOMER_LINK
+            and not (order.customer_token or "").strip()
+        ):
+            return self._record_presend_failure(
+                payload,
+                recipient_type=recipient_type,
+                recipient_name=recipient_name,
+                recipient_phone=recipient_phone,
+                error_code="customer_token_missing",
+                error_message="고객 링크 토큰이 없어 메시지를 발송할 수 없습니다.",
+                actor_user_id=actor_user_id,
+            )
+
         customer_link = self._build_customer_link(order.customer_token)
         context = self._build_template_context(
             order,
@@ -803,6 +880,76 @@ class MessageService:
         )
         if result.status == MessageStatus.SENT:
             self._apply_sent_side_effects(order, payload, log, actor_user_id=actor_user_id)
+
+        self.db.commit()
+        self.db.refresh(log)
+        return log
+
+    def _record_presend_failure(
+        self,
+        payload: MessageSendRequest,
+        *,
+        recipient_type: RecipientType,
+        recipient_name: str | None,
+        recipient_phone: str | None,
+        error_code: str,
+        error_message: str,
+        actor_user_id: str | None,
+    ) -> MessageLog:
+        """발송 전 검증 실패를 FAILED 로그 + timeline 으로 기록한다.
+
+        recipient_name/recipient_phone 은 NOT NULL 컬럼이므로
+        값이 없으면 안전한 placeholder('미상'/'')로 채워 IntegrityError 를 피한다.
+        provider 실패와 동일한 timeline 경로(MESSAGE_SENT)를 사용해
+        '실패는 반드시 로깅한다' 규칙을 만족시킨다.
+        """
+        requested_at = datetime.now(UTC)
+        provider_name = getattr(self.provider, "provider_name", "unknown")
+
+        log = MessageLog(
+            id=str(uuid4()),
+            order_id=payload.order_id,
+            recipient_type=recipient_type,
+            recipient_name=recipient_name or "미상",
+            recipient_phone=recipient_phone or "",
+            message_type=payload.message_type,
+            channel=payload.channel,
+            content="",
+            status=MessageStatus.FAILED,
+            error_message=error_message,
+            provider=provider_name,
+            provider_message_id=None,
+            provider_group_id=None,
+            provider_error_code=error_code,
+            provider_status_code=None,
+            provider_status_message=None,
+            provider_response=None,
+            requested_at=requested_at,
+            provider_reported_at=None,
+            sent_at=None,
+            delivered_at=None,
+        )
+        self.messages.add(log)
+
+        self.timeline.record(
+            order_id=payload.order_id,
+            actor_user_id=actor_user_id,
+            event_type=TimelineEventType.MESSAGE_SENT,
+            title="메시지 발송",
+            description=self._message_sent_description(
+                payload.message_type, MessageStatus.FAILED
+            ),
+            metadata={
+                "message_log_id": log.id,
+                "message_type": payload.message_type,
+                "recipient_type": recipient_type,
+                "status": MessageStatus.FAILED,
+                "provider": provider_name,
+                "provider_group_id": None,
+                "provider_error_code": error_code,
+                "provider_status_code": None,
+            },
+        )
 
         self.db.commit()
         self.db.refresh(log)
@@ -908,8 +1055,15 @@ class MessageService:
         )
         received_at = parse_solapi_datetime(event.get("dateReceived"))
 
-        if next_status is not None:
-            log.status = next_status
+        # 상태 전이가 수명주기를 전진시킬 때만 status 를 갱신한다.
+        # 순서가 뒤바뀐 리포트(DELIVERED → SENT)나 동일 상태 재수신은 무시하여
+        # 상태 후퇴와 timeline 이벤트 중복 발행을 막는다.
+        apply_status = (
+            next_status is not None
+            and is_monotonic_delivery_transition(old_status, next_status)
+        )
+
+        # provider 메타데이터는 최신 리포트로 갱신하되, status 후퇴는 막는다.
         log.provider = "solapi"
         log.provider_message_id = string_value(event.get("messageId")) or log.provider_message_id
         log.provider_group_id = string_value(event.get("groupId")) or log.provider_group_id
@@ -917,6 +1071,11 @@ class MessageService:
         log.provider_status_message = status_message
         log.provider_reported_at = reported_at
         log.provider_response = event
+
+        if not apply_status:
+            return
+
+        log.status = next_status
 
         if next_status == MessageStatus.DELIVERED:
             log.delivered_at = received_at or reported_at
@@ -926,7 +1085,7 @@ class MessageService:
             log.error_message = status_message or f"solapi_delivery_failed: {status_code}"
             log.provider_error_code = status_code or "solapi_delivery_failed"
 
-        if next_status is not None and old_status != next_status:
+        if old_status != next_status:
             self._record_delivery_status_event(
                 log,
                 status=next_status,
@@ -993,6 +1152,10 @@ class MessageService:
         if payload.message_type == MessageType.CUSTOMER_PHOTO_READY:
             # 정책 변경(2026-05-18): 사진 링크 발송은 메시지/timeline만 남기고
             # 주문 상태는 자동 advance 하지 않는다. 재전송 가능성을 보장하기 위함.
+            self._record_customer_link_sent(order, payload, log, actor_user_id=actor_user_id)
+            return
+
+        if payload.message_type == MessageType.CUSTOMER_BALANCE_DUE:
             self._record_customer_link_sent(order, payload, log, actor_user_id=actor_user_id)
             return
 
@@ -1169,6 +1332,12 @@ class MessageService:
                 f"[클린잡] {order.customer_name}님, {order.service_name} 작업 사진 확인이 준비되었습니다.\n"
                 f"아래 링크에서 연락처 뒷자리 인증 후 확인해주세요.\n{customer_link}"
             )
+        if payload.message_type == MessageType.CUSTOMER_BALANCE_DUE:
+            return (
+                f"[클린잡] {order.customer_name}님, {format_service_name(order)} 작업이 완료되었습니다.\n"
+                f"잔금: {format_money(order.balance_amount)}\n"
+                f"결제 및 작업 내역 확인: {customer_link}"
+            )
         if payload.message_type == MessageType.CUSTOMER_SCHEDULE_CONFIRMED:
             return (
                 f"[클린잡] {order.customer_name}님, 예약 일정이 확정되었습니다.\n"
@@ -1214,8 +1383,8 @@ class MessageService:
             )
         return f"[클린잡] {payload.message_type.value}: {format_service_name(order)}"
 
-    def _build_customer_link(self, customer_token: str) -> str:
-        return f"{settings.frontend_url.rstrip('/')}/c/{customer_token}"
+    def _build_customer_link(self, customer_token: str | None) -> str:
+        return f"{settings.frontend_url.rstrip('/')}/c/{customer_token or ''}"
 
     def _message_sent_description(self, message_type: MessageType, status: MessageStatus) -> str:
         label = {
@@ -1223,6 +1392,7 @@ class MessageService:
             MessageType.CUSTOMER_DAY_BEFORE: "고객 전날 안내",
             MessageType.PARTNER_ASSIGNMENT: "협력사 배정 안내",
             MessageType.CUSTOMER_PHOTO_READY: "고객 사진 확인 안내",
+            MessageType.CUSTOMER_BALANCE_DUE: "고객 잔금 안내",
             MessageType.CUSTOMER_QUOTE: "고객 견적서",
             MessageType.PARTNER_CUSTOMER_INFO: "협력사 고객정보",
         }.get(message_type, message_type.value)

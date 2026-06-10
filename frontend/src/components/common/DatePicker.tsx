@@ -1,20 +1,67 @@
 import React from 'react';
+import { createPortal } from 'react-dom';
 
 import { formatDateValue, getAppTodayDate, parseDateValue } from '../../domain/time';
 import { Icon } from './ui';
 
 const WEEKDAYS = ['일', '월', '화', '수', '목', '금', '토'];
+const PICKER_WIDTH = 286;
+const PICKER_HEIGHT = 318;
+const PICKER_OFFSET = 6;
+const VIEWPORT_GAP = 8;
 
 export function DatePicker({ value, onChange, placeholder = '날짜 선택', testId, ariaLabel = '날짜 선택', compact = false, style = undefined }) {
   const rootRef = React.useRef(null);
+  const popupRef = React.useRef(null);
   const [isOpen, setIsOpen] = React.useState(false);
+  const [popupPosition, setPopupPosition] = React.useState(null);
   const [viewDate, setViewDate] = React.useState(() => parseDateValue(value) || getAppTodayDate());
+
+  const updatePopupPosition = React.useCallback(() => {
+    const root = rootRef.current;
+    if (!root) {
+      return;
+    }
+
+    const rect = root.getBoundingClientRect();
+    const viewportWidth = window.innerWidth || document.documentElement.clientWidth;
+    const viewportHeight = window.innerHeight || document.documentElement.clientHeight;
+    const spaceBelow = viewportHeight - rect.bottom - PICKER_OFFSET - VIEWPORT_GAP;
+    const spaceAbove = rect.top - PICKER_OFFSET - VIEWPORT_GAP;
+    const shouldOpenAbove = spaceBelow < PICKER_HEIGHT && spaceAbove > spaceBelow;
+    const rawTop = shouldOpenAbove
+      ? rect.top - PICKER_HEIGHT - PICKER_OFFSET
+      : rect.bottom + PICKER_OFFSET;
+    const top = Math.max(VIEWPORT_GAP, Math.min(rawTop, viewportHeight - PICKER_HEIGHT - VIEWPORT_GAP));
+    const left = Math.max(
+      VIEWPORT_GAP,
+      Math.min(rect.left, viewportWidth - PICKER_WIDTH - VIEWPORT_GAP),
+    );
+
+    setPopupPosition({ top, left });
+  }, []);
 
   React.useEffect(() => {
     if (isOpen) {
       setViewDate(parseDateValue(value) || getAppTodayDate());
+      updatePopupPosition();
     }
-  }, [isOpen, value]);
+  }, [isOpen, updatePopupPosition, value]);
+
+  React.useLayoutEffect(() => {
+    if (!isOpen) {
+      setPopupPosition(null);
+      return undefined;
+    }
+
+    updatePopupPosition();
+    window.addEventListener('resize', updatePopupPosition);
+    window.addEventListener('scroll', updatePopupPosition, true);
+    return () => {
+      window.removeEventListener('resize', updatePopupPosition);
+      window.removeEventListener('scroll', updatePopupPosition, true);
+    };
+  }, [isOpen, updatePopupPosition]);
 
   React.useEffect(() => {
     if (!isOpen) {
@@ -22,7 +69,10 @@ export function DatePicker({ value, onChange, placeholder = '날짜 선택', tes
     }
 
     const handleDocumentMouseDown = (event) => {
-      if (rootRef.current && !rootRef.current.contains(event.target)) {
+      const target = event.target;
+      const isInsideRoot = rootRef.current && rootRef.current.contains(target);
+      const isInsidePopup = popupRef.current && popupRef.current.contains(target);
+      if (!isInsideRoot && !isInsidePopup) {
         setIsOpen(false);
       }
     };
@@ -90,14 +140,15 @@ export function DatePicker({ value, onChange, placeholder = '날짜 선택', tes
         <Icon name={isOpen ? 'chevronUp' : 'chevronDown'} size={11}/>
       </button>
 
-      {isOpen && (
+      {isOpen && popupPosition && createPortal((
         <div
+          ref={popupRef}
           style={{
-            position: 'absolute',
-            top: 'calc(100% + 6px)',
-            left: 0,
-            zIndex: 40,
-            width: 286,
+            position: 'fixed',
+            top: popupPosition.top,
+            left: popupPosition.left,
+            zIndex: 1000,
+            width: PICKER_WIDTH,
             padding: 10,
             border: '1px solid var(--border)',
             borderRadius: 8,
@@ -172,7 +223,7 @@ export function DatePicker({ value, onChange, placeholder = '날짜 선택', tes
             </button>
           </div>
         </div>
-      )}
+      ), document.body)}
     </div>
   );
 }

@@ -20,11 +20,11 @@ test('R14 order form calculates consumer price, partner price, VAT, and sends qu
   await page.getByTestId('order-line-0-vat-type').selectOption('excluded');
 
   await expect(page.getByTestId('order-line-0-total-amount')).toHaveValue('520,000');
-  await expect(page.getByTestId('order-line-0-partner-payment-amount')).toHaveValue('392,000');
+  await expect(page.getByTestId('order-line-0-partner-payment-amount')).toHaveValue('431,200');
 
   await page.getByTestId('order-send-quote').click();
   await expect(page.getByTestId('admin-order-detail-page')).toBeVisible({ timeout: 15_000 });
   await expect(page.getByText(/견적서 · R14 견적 E2E · Mock/)).toBeVisible();
   await expect(page.getByText('₩520,000')).toBeVisible();
-  await expect(page.getByText(/도급가 ₩392,000/)).toBeVisible();
+  await expect(page.getByText(/도급가\(VAT 포함\) ₩431,200/)).toBeVisible();
 });

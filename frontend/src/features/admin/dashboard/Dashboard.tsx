@@ -9,7 +9,7 @@ import { addDays, formatAppTime, getAppNowDate, getAppTodayDate, isSameDateValue
 
 // Admin Dashboard — KPI grid + work queues + today/tomorrow + recent
 
-export function Dashboard({ onOpenOrder, onNav, onCreateOrder }) {
+export function Dashboard({ onOpenOrder, onNav, onCreateOrder, userName = undefined }) {
   const summary = useApiResource(getDashboardSummary);
   const orders = useApiResource(listAdminOrders);
   const recentActivity = useApiResource(getDashboardRecentActivity);
@@ -30,7 +30,7 @@ export function Dashboard({ onOpenOrder, onNav, onCreateOrder }) {
           <div>
             <div style={{ fontSize: 11.5, color: 'var(--text-tertiary)', marginBottom: 2 }}>{formatDashboardDate(getAppNowDate())}</div>
             <h2 style={{ margin: 0, fontSize: 18, fontWeight: 600, letterSpacing: '-0.02em' }}>
-              안녕하세요 전소영님 <span style={{ color: 'var(--text-tertiary)', fontWeight: 400 }}>— 지금 처리할 일 {summary.isLoading ? '-' : workCount}건이 있습니다</span>
+              안녕하세요 {userName || '관리자'}님 <span style={{ color: 'var(--text-tertiary)', fontWeight: 400 }}>— 지금 처리할 일 {summary.isLoading ? '-' : workCount}건이 있습니다</span>
             </h2>
           </div>
           <div style={{ display: 'flex', gap: 6 }}>
@@ -47,8 +47,8 @@ export function Dashboard({ onOpenOrder, onNav, onCreateOrder }) {
           </div>
         </div>
 
-        {/* KPI grid — 7 cards in one row, last one wider */}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 10, marginBottom: 16 }}>
+        {/* KPI grid — 넓은 화면에선 7열, 좁아지면 칸을 줄여 자동 줄바꿈(글자 세로 쪼개짐 방지) */}
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 10, marginBottom: 16 }}>
           {kpis.map((k, i) => (
             <button
               key={k.key || i}
@@ -78,14 +78,14 @@ export function Dashboard({ onOpenOrder, onNav, onCreateOrder }) {
                 e.currentTarget.style.boxShadow = 'none';
               }}
             >
-              <div style={{ fontSize: 11.5, color: 'var(--text-tertiary)', fontWeight: 500, letterSpacing: '-0.005em' }}>{k.label}</div>
+              <div style={{ fontSize: 11.5, color: 'var(--text-tertiary)', fontWeight: 500, letterSpacing: '-0.005em', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{k.label}</div>
               <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, marginTop: 4 }}>
                 <span style={{ fontSize: 22, fontWeight: 600, letterSpacing: '-0.03em', color: 'var(--text)' }}>{k.value}</span>
                 {k.suffix && <span style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>{k.suffix}</span>}
               </div>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 6 }}>
                 <span style={{
-                  fontSize: 10.5, fontWeight: 600,
+                  fontSize: 10.5, fontWeight: 600, whiteSpace: 'nowrap',
                   color: k.delta.startsWith('+') ? 'var(--success-fg)' : k.delta.startsWith('-') ? 'var(--danger-fg)' : 'var(--text-tertiary)',
                 }}>{k.delta}</span>
                 <Sparkline values={k.trend} color={`var(--${k.tone === 'brand' ? 'brand' : k.tone === 'success' ? 'success-fg' : k.tone === 'danger' ? 'danger-fg' : k.tone === 'warn' ? 'warn-fg' : k.tone === 'purple' ? 'purple-fg' : 'info-fg'})`} width={50} height={18}/>
@@ -100,7 +100,7 @@ export function Dashboard({ onOpenOrder, onNav, onCreateOrder }) {
             <h3 style={{ margin: 0, fontSize: 13, fontWeight: 600, letterSpacing: '-0.01em' }}>업무 큐</h3>
             <span style={{ fontSize: 11.5, color: 'var(--text-tertiary)' }}>클릭하면 해당 필터로 이동합니다</span>
           </div>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: 10 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', gap: 10 }}>
             {queues.map((q) => (
               <button key={q.key} onClick={() => onNav && onNav(q.targetPage || 'orders', {
                 ordersTab: q.ordersTab || 'all',
@@ -422,6 +422,7 @@ function messageTypeLabel(type) {
     customer_day_before: '전날안내',
     partner_assignment: '협력사배정',
     customer_photo_ready: '완료사진',
+    customer_balance_due: '잔금안내',
   };
   return labels[type] || type;
 }

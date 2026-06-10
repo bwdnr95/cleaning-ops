@@ -25,6 +25,7 @@ from app.db.session import SessionLocal
 from app.domain.constants import OrderStatus, TimelineEventType, UserRole, VatType
 from app.domain.partner_category import DEFAULT_PARTNER_CATEGORIES, infer_partner_category_id
 from app.domain.payment_status import PaymentStatus, PartnerPaymentStatus
+from app.domain.partner_vat import gross_up_partner_vat_amount, should_gross_up_partner_vat_amount
 from app.domain.phone import normalize_phone
 from app.models import Order, OrderGroup, OrderTimeline, Partner, PartnerCategory, User
 
@@ -340,6 +341,12 @@ def parse_row(
         received_date=received_date,
         scheduled_date=scheduled_date,
     )
+    if should_gross_up_partner_vat_amount(
+        scheduled_date=scheduled_date,
+        partner_payment_status=partner_status,
+        partner_settled_at=settled_at,
+    ):
+        partner_amount = gross_up_partner_vat_amount(partner_amount)
 
     payment_memo = join_text(
         clean_text(cell(values, spec.payment_memo)) if spec.payment_memo else None,

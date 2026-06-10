@@ -279,7 +279,11 @@ export function PartnersPage() {
       setForm(toPartnerForm(created));
       setCategoryFilter(created.partner_category_id || UNCLASSIFIED_CATEGORY_FILTER);
       setResetLoginPhone(created.login_phone || created.phone || '');
-      setNotice('새 협력사를 등록했습니다.');
+      if (created.temporary_password) {
+        setNotice(`새 협력사를 등록했습니다. 임시 비밀번호: ${created.temporary_password}`);
+      } else {
+        setNotice('새 협력사를 등록했습니다.');
+      }
       partnersResource.reload();
     } catch (requestError) {
       setError(partnerErrorMessage(requestError, '협력사 등록에 실패했습니다.'));
@@ -742,7 +746,7 @@ export function PartnersPage() {
                         <MiniMetric label="미정산" value={`${detail.unpaid_partner_order_count || 0}건`} />
                       </div>
                       <div style={{ marginTop: 8, padding: 8, borderRadius: 6, background: 'var(--settlement-unpaid-bg)', color: 'var(--settlement-unpaid-fg)', fontSize: 12, fontWeight: 700 }}>
-                        미정산 도급가 합계 {formatWon(detail.unpaid_partner_amount_total)}
+                        미정산 도급가(VAT 포함) 합계 {formatWon(detail.unpaid_partner_amount_total)}
                       </div>
                       <button
                         type="button"
@@ -805,7 +809,7 @@ export function PartnersPage() {
                 ) : (
                   <div className="scroll" style={{ overflowX: 'auto' }}>
                     <div style={{ display: 'grid', gridTemplateColumns: '34px 100px 110px 1fr 90px 110px 110px 120px 210px', minWidth: 1090, fontSize: 12 }}>
-                    {['', '방문일', '상태', '작업', '고객', '소비자가', '도급가', '정산상태', '액션'].map((header) => <GridHead key={header}>{header}</GridHead>)}
+                    {['', '방문일', '상태', '작업', '고객', '소비자가', '도급가(VAT 포함)', '정산상태', '액션'].map((header) => <GridHead key={header}>{header}</GridHead>)}
                     {settlements.items.map((job) => {
                       const isPaid = job.partner_payment_status === 'paid';
                       return (

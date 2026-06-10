@@ -42,7 +42,7 @@ ORDER_EXPORT_HEADERS: tuple[str, ...] = (
     "증빙메모",
     "협력사ID",
     "담당팀",
-    "협력사 지급액",
+    "협력사 지급액(VAT 포함)",
     "정산상태",
     "정산일",
     "이윤",
@@ -58,7 +58,7 @@ ORDER_EXPORT_NUMBER_HEADERS: tuple[str, ...] = (
     "계약금",
     "잔금",
     "현장추가",
-    "협력사 지급액",
+    "협력사 지급액(VAT 포함)",
     "이윤",
 )
 ORDER_EXPORT_WRAP_HEADERS: tuple[str, ...] = (
@@ -87,7 +87,7 @@ ORDER_EXPORT_WIDTH_OVERRIDES: dict[str, float] = {
     "입금메모": 26,
     "증빙메모": 26,
     "내부메모": 26,
-    "협력사 지급액": 15,
+    "협력사 지급액(VAT 포함)": 18,
     "고객 결제 공개": 15,
 }
 

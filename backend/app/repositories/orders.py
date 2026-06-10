@@ -1,6 +1,6 @@
 from datetime import date
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from app.core.time import business_today
@@ -31,17 +31,15 @@ class OrderRepository(Repository[Order]):
     ) -> list[Order]:
         today = business_today()
         stmt = select(Order).where(Order.deleted_at.is_(None))
-        rows = list(self.db.scalars(stmt))
         if not include_past_paid:
-            rows = [
-                order
-                for order in rows
-                if not (
-                    order.scheduled_date is not None
-                    and order.scheduled_date < today
-                    and not is_overdue_unpaid_order(order, today)
+            stmt = stmt.where(
+                or_(
+                    Order.scheduled_date.is_(None),
+                    Order.scheduled_date >= today,
+                    Order.payment_status.in_(OVERDUE_UNPAID_PAYMENT_STATUSES),
                 )
-            ]
+            )
+        rows = list(self.db.scalars(stmt))
 
         if sort in {"received_asc", "received_desc"}:
             rows.sort(

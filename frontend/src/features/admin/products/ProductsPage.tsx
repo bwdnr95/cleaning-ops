@@ -338,7 +338,7 @@ export function ProductsPage() {
               {selectedCategory && items.length === 0 && <StateLine text="등록된 상품이 없습니다." />}
               {selectedCategory && items.length > 0 && (
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 72px 110px 110px 80px 172px', fontSize: 12, overflowX: 'auto' }}>
-                  {['상품명', '단위', '기준가', '도급가', '상태', '관리'].map((header) => <GridHead key={header}>{header}</GridHead>)}
+                  {['상품명', '단위', '기준가', '도급가(VAT 포함)', '상태', '관리'].map((header) => <GridHead key={header}>{header}</GridHead>)}
                   {pagedItems.map((item) => (
                     <React.Fragment key={item.id}>
                       <GridCell>
@@ -406,7 +406,7 @@ export function ProductsPage() {
                     </select>
                   </label>
                   <FormField testId="products-item-base-price" label="기준가" type="number" value={itemForm.base_price} onChange={(value) => setItemForm({ ...itemForm, base_price: value })} />
-                  <FormField testId="products-item-partner-base-price" label="도급가" type="number" value={itemForm.partner_base_price} onChange={(value) => setItemForm({ ...itemForm, partner_base_price: value })} />
+                  <FormField testId="products-item-partner-base-price" label="도급가 (VAT 포함)" type="number" value={itemForm.partner_base_price} onChange={(value) => setItemForm({ ...itemForm, partner_base_price: value })} />
                   <FormField testId="products-item-sort-order" label="정렬" type="number" value={itemForm.sort_order} onChange={(value) => setItemForm({ ...itemForm, sort_order: value })} />
                   <button data-testid="products-save-item" className="btn btn--primary btn--sm" disabled={isSaving || !itemForm.name.trim()}>
                     <Icon name="check" size={12} /> 저장

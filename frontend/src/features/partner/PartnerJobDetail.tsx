@@ -12,10 +12,14 @@ const PHOTO_UPLOAD_ERROR_MESSAGES = {
   unsupported_photo_type: 'JPG/PNG/WebP만 업로드 가능합니다.',
   photo_too_large: '파일 용량이 초과되었습니다.',
   order_not_found: '배정된 작업을 찾을 수 없습니다.',
+  invalid_status_for_upload: '현재 작업 상태에서는 사진을 업로드할 수 없습니다.',
 };
 
 const STARTABLE_JOB_STATUSES = ['일정확정', '전날안내필요', '전날안내완료', '작업예정'];
 const COMPLETABLE_JOB_STATUSES = ['작업진행'];
+// 사진 업로드 허용 상태(백엔드 PARTNER_PHOTO_UPLOADABLE_STATUSES와 일치).
+// 활성 작업 구간(시작 가능 상태 + 작업진행)에서만 업로드 버튼을 활성화한다.
+const PHOTO_UPLOADABLE_JOB_STATUSES = [...STARTABLE_JOB_STATUSES, ...COMPLETABLE_JOB_STATUSES];
 
 export function PartnerJobDetail() {
   const [selectedJobId, setSelectedJobId] = React.useState(null);
@@ -159,6 +163,8 @@ export function PartnerJobDetail() {
 
   const canStart = STARTABLE_JOB_STATUSES.includes(job.status);
   const canComplete = COMPLETABLE_JOB_STATUSES.includes(job.status);
+  const canUploadPhotos = PHOTO_UPLOADABLE_JOB_STATUSES.includes(job.status);
+  const photoUploadDisabled = isUploading || !canUploadPhotos;
   const statusLock = getPartnerStatusLock(job.status);
   const jobAddress = formatJobAddress(job);
 
@@ -214,12 +220,18 @@ export function PartnerJobDetail() {
           </div>
         </Panel>
 
+        {!canUploadPhotos && (
+          <div data-testid="partner-photo-upload-locked" style={{ margin: '0 2px 10px', padding: '8px 10px', border: '1px solid var(--border)', borderRadius: 8, background: 'var(--bg-subtle)', color: 'var(--text-secondary)', fontSize: 11.5, lineHeight: 1.45 }}>
+            {photoUploadLockMessage(job.status)}
+          </div>
+        )}
+
         <PhotoPanel
           title="비포 사진"
           tone="neutral"
           photos={photoGroups.before}
           onAdd={() => beforeInputRef.current?.click()}
-          disabled={isUploading}
+          disabled={photoUploadDisabled}
         />
         <input ref={beforeInputRef} data-testid="partner-before-photo-input" type="file" accept="image/jpeg,image/png,image/webp" capture="environment" multiple style={{ display: 'none' }} onChange={(event) => void handlePhotoSelected('before', event)} />
 
@@ -228,7 +240,7 @@ export function PartnerJobDetail() {
           tone="success"
           photos={photoGroups.after}
           onAdd={() => afterInputRef.current?.click()}
-          disabled={isUploading}
+          disabled={photoUploadDisabled}
         />
         <input ref={afterInputRef} data-testid="partner-after-photo-input" type="file" accept="image/jpeg,image/png,image/webp" capture="environment" multiple style={{ display: 'none' }} onChange={(event) => void handlePhotoSelected('after', event)} />
         <PhotoPanel
@@ -236,7 +248,7 @@ export function PartnerJobDetail() {
           tone="brand"
           photos={photoGroups.etc}
           onAdd={() => etcInputRef.current?.click()}
-          disabled={isUploading}
+          disabled={photoUploadDisabled}
         />
         <input ref={etcInputRef} data-testid="partner-etc-photo-input" type="file" accept="image/jpeg,image/png,image/webp" capture="environment" multiple style={{ display: 'none' }} onChange={(event) => void handlePhotoSelected('etc', event)} />
         {isUploading && (
@@ -452,6 +464,19 @@ function toPhotoUploadErrorMessage(error) {
   }
 
   return '사진 업로드를 처리하지 못했습니다.';
+}
+
+function photoUploadLockMessage(status) {
+  if (status === '취소') {
+    return '취소된 작업이라 사진을 업로드할 수 없습니다.';
+  }
+  if (['고객전달완료', '서비스완료'].includes(status)) {
+    return '완료된 작업이라 사진 업로드가 잠겼습니다. 추가 사진이 필요하면 운영팀에 요청해주세요.';
+  }
+  if (['사진검수대기', '고객전달필요'].includes(status)) {
+    return '작업 완료 처리되어 사진 업로드가 잠겼습니다. 잘못 올린 사진은 운영팀에 비공개 처리를 요청해주세요.';
+  }
+  return '일정이 확정되어 작업 구간에 들어서면 사진을 업로드할 수 있습니다.';
 }
 
 function photoTypeLabel(type) {

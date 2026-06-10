@@ -1,3 +1,5 @@
+from collections.abc import Iterable
+
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -24,6 +26,16 @@ class OrderGroupRepository(Repository[OrderGroup]):
             OrderGroup.deleted_at.is_(None),
         )
         return self.db.scalar(stmt)
+
+    def list_by_ids(self, group_ids: Iterable[str]) -> dict[str, OrderGroup]:
+        unique_ids = list(dict.fromkeys(group_id for group_id in group_ids if group_id))
+        if not unique_ids:
+            return {}
+        stmt = select(OrderGroup).where(
+            OrderGroup.id.in_(unique_ids),
+            OrderGroup.deleted_at.is_(None),
+        )
+        return {group.id: group for group in self.db.scalars(stmt)}
 
     def list_lines(self, group_id: str) -> list[Order]:
         stmt = (

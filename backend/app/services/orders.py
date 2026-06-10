@@ -47,6 +47,16 @@ PARTNER_JOB_COMPLETABLE_STATUSES = {
     OrderStatus.IN_PROGRESS.value,
 }
 
+# 협력사 사진 업로드 허용 상태 집합.
+# 시작 가능(STARTABLE) 상태 + 작업진행(IN_PROGRESS)을 합친 "활성 작업 구간"으로 정의한다.
+# - STARTABLE 포함: 현재 플로우에서 협력사가 '작업 시작'을 누르기 전(작업예정 등)에도 사진을 올릴 수 있도록 허용.
+# - IN_PROGRESS 포함: 멀티 배치 업로드를 허용하는 invariant 보장(작업진행 중 여러 번 나눠 업로드).
+# - 제외: 사전/상담 상태(신규접수·상담중·협력사확인중), 검수/전달 단계(사진검수대기·고객전달필요),
+#   종료/봉인 상태(고객전달완료·서비스완료·취소)에는 자동 공개 사진이 새로 올라오지 못하게 막는다.
+PARTNER_PHOTO_UPLOADABLE_STATUSES = (
+    PARTNER_JOB_STARTABLE_STATUSES | PARTNER_JOB_COMPLETABLE_STATUSES
+)
+
 
 @dataclass(frozen=True)
 class BulkDeleteFailure:

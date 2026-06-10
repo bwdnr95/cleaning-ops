@@ -13,7 +13,7 @@ import { useApiResource } from '../../../api/useApiResource';
 import { AddressInput } from '../../../components/AddressInput';
 import { DatePicker } from '../../../components/common/DatePicker';
 import { Icon } from '../../../components/common/ui';
-import { ORDER_STATUSES } from '../../../domain/orderStatus';
+import { ORDER_STATUS_OPTIONS, ORDER_STATUSES, orderWorkflowStatusValue } from '../../../domain/orderStatus';
 import { PARTNER_PAYMENT_STATUSES, PAYMENT_STATUSES } from '../../../domain/paymentStatus';
 import { getAppTodayValue } from '../../../domain/time';
 import { useOrderFormDraft } from './useOrderFormDraft';
@@ -412,7 +412,7 @@ function LineEditor({
         <FieldGrid>
           <Field label="주문 상태">
             <select className="input" value={line.status} onChange={(event) => onFieldChange(lineIndex, 'status', event.target.value)}>
-              {ORDER_STATUSES.map((status) => <option key={status} value={status}>{status}</option>)}
+              {ORDER_STATUS_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
             </select>
           </Field>
           <Field label="협력사">
@@ -447,7 +447,7 @@ function LineEditor({
               <option value="">직접 입력</option>
               {serviceItems.map((item) => (
                 <option key={item.id} value={item.id}>
-                  {item.name} · 소비자가 {formatWon(item.base_price)} · 도급가 {formatWon(item.partner_base_price)}
+                  {item.name} · 소비자가 {formatWon(item.base_price)} · 도급가(VAT 포함) {formatWon(item.partner_base_price)}
                 </option>
               ))}
             </select>
@@ -489,7 +489,7 @@ function LineEditor({
           </Field>
           <TextField label="결제 메모" span={2} multiline value={line.payment_memo} onChange={(value) => onFieldChange(lineIndex, 'payment_memo', value)} />
           <TextField label="증빙 메모" span={2} multiline value={line.evidence_memo} onChange={(value) => onFieldChange(lineIndex, 'evidence_memo', value)} />
-          <TextField testId={`order-line-${lineIndex}-partner-payment-amount`} label="도급가" inputMode="numeric" value={line.partner_payment_amount} onChange={(value) => onMoneyChange(lineIndex, 'partner_payment_amount', value)} />
+          <TextField testId={`order-line-${lineIndex}-partner-payment-amount`} label="도급가 (VAT 포함)" inputMode="numeric" value={line.partner_payment_amount} onChange={(value) => onMoneyChange(lineIndex, 'partner_payment_amount', value)} />
           <Field label="협력사 정산 상태">
             <select className="input" value={line.partner_payment_status} onChange={(event) => onFieldChange(lineIndex, 'partner_payment_status', event.target.value)}>
               <option value="">미입력</option>
@@ -639,7 +639,7 @@ function toForm(order) {
 function toLineForm(order) {
   return {
     ...createEmptyLineForm(),
-    status: order.status || ORDER_STATUSES[0],
+    status: orderWorkflowStatusValue(order.status, order.payment_status) || ORDER_STATUSES[0],
     received_date: order.received_date || todayString(),
     scheduled_date: order.scheduled_date || '',
     requested_time: order.requested_time || '',

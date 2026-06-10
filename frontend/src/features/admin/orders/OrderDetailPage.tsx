@@ -8,7 +8,7 @@ import {
 } from '../../../api/messages';
 import { DatePicker } from '../../../components/common/DatePicker';
 import { Avatar, Badge, Icon, StatusBadge } from '../../../components/common/ui';
-import { ORDER_STATUSES } from '../../../domain/orderStatus';
+import { ORDER_STATUS_OPTIONS, orderStatusLabel, orderWorkflowStatusValue } from '../../../domain/orderStatus';
 import {
   PARTNER_PAYMENT_STATUSES,
   PAYMENT_STATUSES,
@@ -47,6 +47,9 @@ const MESSAGE_ACTIONS = {
   },
 };
 
+const WORK_DONE_STATUS = '고객전달필요';
+const BALANCE_NOTICE_MESSAGE_TYPE = 'customer_balance_due';
+
 export function OrderDetailPage({ orderId, onBack, onEdit, onNav, onOpenOrder }) {
   const loadOrder = React.useCallback(() => getAdminOrder(orderId), [orderId]);
   const orderResource = useApiResource(loadOrder, orderId);
@@ -71,7 +74,7 @@ export function OrderDetailPage({ orderId, onBack, onEdit, onNav, onOpenOrder })
 
   React.useEffect(() => {
     if (order) {
-      setSelectedStatus(order.status);
+      setSelectedStatus(orderWorkflowStatusValue(order.status, order.payment_status));
       setSelectedPartnerId(order.partner_id || '');
       setSelectedScheduledDate(order.scheduled_date || '');
       setSelectedRequestedTime(order.requested_time || '');
@@ -80,10 +83,61 @@ export function OrderDetailPage({ orderId, onBack, onEdit, onNav, onOpenOrder })
     }
   }, [order]);
 
+  // 섹션별 저장이 분리돼 있어, 여러 곳을 고치고 일부만 저장한 채 이동하면 나머지 변경이 유실된다.
+  // 미저장 변경이 있으면 새로고침/창닫기와 화면 이동을 가드한다.
+  const hasUnsavedChanges = Boolean(order) && (
+    selectedStatus !== orderWorkflowStatusValue(order.status, order.payment_status)
+    || selectedPartnerId !== (order.partner_id || '')
+    || selectedScheduledDate !== (order.scheduled_date || '')
+    || selectedRequestedTime !== (order.requested_time || '')
+    || selectedPaymentStatus !== (order.payment_status || '')
+    || selectedPartnerPaymentStatus !== (order.partner_payment_status || '')
+  );
+
+  React.useEffect(() => {
+    if (!hasUnsavedChanges) {
+      return undefined;
+    }
+    const handleBeforeUnload = (event) => {
+      event.preventDefault();
+      event.returnValue = '';
+    };
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [hasUnsavedChanges]);
+
+  const confirmLeaveIfDirty = React.useCallback(
+    () => !hasUnsavedChanges || window.confirm('저장하지 않은 변경이 있습니다. 저장하지 않고 이동할까요?'),
+    [hasUnsavedChanges],
+  );
+
+  const navigateWithGuard = React.useCallback(
+    (page) => { if (confirmLeaveIfDirty()) { onNav?.(page); } },
+    [confirmLeaveIfDirty, onNav],
+  );
+
   const handleStatusChange = async () => {
     await runAction(async () => {
+      const shouldSendBalanceNotice = selectedStatus === WORK_DONE_STATUS && order.status !== WORK_DONE_STATUS;
+      const selectedStatusLabel = orderStatusLabel(selectedStatus);
       await updateAdminOrder(order.id, { status: selectedStatus });
-      setNotice('상태 변경을 타임라인에 기록했습니다.');
+      let noticeText = `${selectedStatusLabel} 상태 변경을 타임라인에 기록했습니다.`;
+
+      if (shouldSendBalanceNotice) {
+        try {
+          const sent = await sendAdminMessage(order.id, BALANCE_NOTICE_MESSAGE_TYPE, 'customer', 'sms');
+          const channelLabel = messageChannelLabel(sent.channel || 'sms');
+          if (isMessageFailure(sent.status)) {
+            setError(`상태는 변경됐지만 잔금 안내 발송 결과: ${messageStatusLabel(sent.status)} (${channelLabel}) - ${messageProviderErrorText(sent)}`);
+          } else {
+            noticeText = `${selectedStatusLabel} 상태로 변경했고 잔금 안내를 발송했습니다. (${channelLabel})`;
+          }
+        } catch (sendError) {
+          setError(`상태는 변경됐지만 잔금 안내 발송 실패: ${toActionErrorMessage(sendError)}`);
+        }
+      }
+
+      setNotice(noticeText);
       orderResource.reload();
     });
   };
@@ -246,6 +300,10 @@ export function OrderDetailPage({ orderId, onBack, onEdit, onNav, onOpenOrder })
   const timeline = order.timeline || [];
   const selectedPartner = (partnersResource.data || []).find((partner) => partner.id === order.partner_id);
   const hasScheduleChanges = selectedScheduledDate !== (order.scheduled_date || '') || selectedRequestedTime !== (order.requested_time || '');
+  const isStatusDirty = selectedStatus !== orderWorkflowStatusValue(order.status, order.payment_status);
+  const isPartnerDirty = selectedPartnerId !== (order.partner_id || '');
+  const isPaymentDirty = selectedPaymentStatus !== (order.payment_status || '')
+    || selectedPartnerPaymentStatus !== (order.partner_payment_status || '');
   const kakaoChannelUrl = normalizeHttpUrl(messageSettingsResource.data?.kakao_channel_url);
 
   return (
@@ -258,21 +316,31 @@ export function OrderDetailPage({ orderId, onBack, onEdit, onNav, onOpenOrder })
         alignItems: 'center',
         gap: 10,
       }}>
-        <button className="btn btn--ghost btn--sm" onClick={onBack} style={{ padding: '0 6px' }}>
+        <button className="btn btn--ghost btn--sm" onClick={() => { if (confirmLeaveIfDirty()) onBack(); }} style={{ padding: '0 6px' }}>
           <Icon name="chevronLeft" size={13}/> 목록
         </button>
         <span style={{ width: 1, height: 16, background: 'var(--border)' }}/>
         <span className="mono" style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>{order.id}</span>
         <h2 style={{ margin: 0, fontSize: 14, fontWeight: 600 }}>{formatService(order)}</h2>
-        <StatusBadge status={order.status}/>
+        <StatusBadge status={orderWorkflowStatusValue(order.status, order.payment_status)}/>
+        {hasUnsavedChanges && (
+          <span data-testid="detail-unsaved-indicator" style={{
+            display: 'inline-flex', alignItems: 'center', gap: 5,
+            fontSize: 11, fontWeight: 600, color: 'var(--warn-fg)',
+            background: 'var(--warn-bg)', borderRadius: 5, padding: '2px 8px',
+          }}>
+            <span style={{ width: 5, height: 5, borderRadius: '50%', background: 'var(--warn-fg)' }}/>
+            저장 안 한 변경
+          </span>
+        )}
         <div style={{ flex: 1 }}/>
         <button className="btn btn--ghost btn--sm" onClick={orderResource.reload}>
           <Icon name="refresh" size={12}/> 새로고침
         </button>
-        <button data-testid="order-detail-edit" className="btn btn--secondary btn--sm" onClick={onEdit}>
+        <button data-testid="order-detail-edit" className="btn btn--secondary btn--sm" onClick={() => { if (confirmLeaveIfDirty()) onEdit(); }}>
           수정
         </button>
-        <button className="btn btn--ghost btn--sm" onClick={() => onNav?.('calendar')}>
+        <button className="btn btn--ghost btn--sm" onClick={() => navigateWithGuard('calendar')}>
           <Icon name="calendar" size={12}/> 일정표
         </button>
         <button
@@ -354,7 +422,7 @@ export function OrderDetailPage({ orderId, onBack, onEdit, onNav, onOpenOrder })
                     협력사 ID: {order.partner_id || '-'} · 정산 상태: {partnerPaymentStatusLabel(order.partner_payment_status)}
                   </div>
                   <div style={{ fontSize: 11.5, color: 'var(--text-tertiary)', marginTop: 2 }}>
-                    도급가 {formatWon(order.partner_price ?? order.partner_payment_amount)} · 정산일 {order.partner_settled_at ? formatDateTime(order.partner_settled_at) : '-'}
+                    도급가(VAT 포함) {formatWon(order.partner_price ?? order.partner_payment_amount)} · 정산일 {order.partner_settled_at ? formatDateTime(order.partner_settled_at) : '-'}
                   </div>
                 </div>
                 <Badge tone={order.partner_id ? 'success' : 'warn'} dot>
@@ -434,7 +502,7 @@ export function OrderDetailPage({ orderId, onBack, onEdit, onNav, onOpenOrder })
                         <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 12.5, fontWeight: 600 }}>
                           {sibling.service_name}
                         </span>
-                        <StatusBadge status={sibling.status} dot={false}/>
+                        <StatusBadge status={orderWorkflowStatusValue(sibling.status, sibling.payment_status)} dot={false}/>
                       </div>
                       <div style={{ fontSize: 11.5, color: 'var(--text-tertiary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                         {sibling.team_name || '미배정'} · {formatWon(sibling.total_amount)}
@@ -446,30 +514,30 @@ export function OrderDetailPage({ orderId, onBack, onEdit, onNav, onOpenOrder })
             )}
 
             <div className="card" style={{ padding: 14 }}>
-              <PanelTitle>상태 변경</PanelTitle>
-              <select className="input" value={selectedStatus} onChange={(event) => setSelectedStatus(event.target.value)} style={{ width: '100%', height: 34, marginBottom: 8 }}>
-                {ORDER_STATUSES.map((status) => <option key={status} value={status}>{status}</option>)}
+              <PanelTitle dirty={isStatusDirty}>상태 변경</PanelTitle>
+              <select data-testid="detail-status-select" className="input" value={selectedStatus} onChange={(event) => setSelectedStatus(event.target.value)} style={{ width: '100%', height: 34, marginBottom: 8 }}>
+                {ORDER_STATUS_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
               </select>
-              <button className="btn btn--primary btn--block" disabled={isSaving || selectedStatus === order.status} onClick={() => void handleStatusChange()}>
+              <button data-testid="detail-status-save" className={`btn btn--block ${isStatusDirty ? 'btn--primary' : 'btn--secondary'}`} disabled={isSaving || !isStatusDirty} onClick={() => void handleStatusChange()}>
                 <Icon name="check" size={13}/> 상태 저장
               </button>
             </div>
 
             <div className="card" style={{ padding: 14 }}>
-              <PanelTitle>협력사 배정</PanelTitle>
+              <PanelTitle dirty={isPartnerDirty}>협력사 배정</PanelTitle>
               <select className="input" value={selectedPartnerId} onChange={(event) => setSelectedPartnerId(event.target.value)} style={{ width: '100%', height: 34, marginBottom: 8 }}>
                 <option value="">미배정</option>
                 {(partnersResource.data || []).map((partner) => (
                   <option key={partner.id} value={partner.id}>{partner.name}</option>
                 ))}
               </select>
-              <button className="btn btn--secondary btn--block" disabled={isSaving || selectedPartnerId === (order.partner_id || '')} onClick={() => void handlePartnerAssign()}>
+              <button className={`btn btn--block ${isPartnerDirty ? 'btn--primary' : 'btn--secondary'}`} disabled={isSaving || !isPartnerDirty} onClick={() => void handlePartnerAssign()}>
                 <Icon name="user" size={13}/> 배정 저장
               </button>
             </div>
 
             <div className="card" style={{ padding: 14 }}>
-              <PanelTitle>방문 일정</PanelTitle>
+              <PanelTitle dirty={hasScheduleChanges}>방문 일정</PanelTitle>
               <label style={{ display: 'flex', flexDirection: 'column', gap: 5, marginBottom: 8 }}>
                 <span style={{ fontSize: 10.5, color: 'var(--text-tertiary)', fontWeight: 600 }}>방문 예정일</span>
                 <DatePicker
@@ -492,7 +560,7 @@ export function OrderDetailPage({ orderId, onBack, onEdit, onNav, onOpenOrder })
               </label>
               <button
                 data-testid="detail-schedule-save"
-                className="btn btn--secondary btn--block"
+                className={`btn btn--block ${hasScheduleChanges ? 'btn--primary' : 'btn--secondary'}`}
                 disabled={isSaving || !hasScheduleChanges}
                 onClick={() => void handleScheduleUpdate()}
               >
@@ -501,7 +569,7 @@ export function OrderDetailPage({ orderId, onBack, onEdit, onNav, onOpenOrder })
             </div>
 
             <div className="card" style={{ padding: 14 }}>
-              <PanelTitle>결제 / 정산</PanelTitle>
+              <PanelTitle dirty={isPaymentDirty}>결제 / 정산</PanelTitle>
               <label style={{ display: 'flex', flexDirection: 'column', gap: 5, marginBottom: 8 }}>
                 <span style={{ fontSize: 10.5, color: 'var(--text-tertiary)', fontWeight: 600 }}>고객 결제 상태</span>
                 <select className="input" value={selectedPaymentStatus} onChange={(event) => setSelectedPaymentStatus(event.target.value)} style={{ width: '100%', height: 34 }}>
@@ -521,14 +589,8 @@ export function OrderDetailPage({ orderId, onBack, onEdit, onNav, onOpenOrder })
                 </select>
               </label>
               <button
-                className="btn btn--secondary btn--block"
-                disabled={
-                  isSaving
-                  || (
-                    selectedPaymentStatus === (order.payment_status || '')
-                    && selectedPartnerPaymentStatus === (order.partner_payment_status || '')
-                  )
-                }
+                className={`btn btn--block ${isPaymentDirty ? 'btn--primary' : 'btn--secondary'}`}
+                disabled={isSaving || !isPaymentDirty}
                 onClick={() => void handlePaymentUpdate()}
               >
                 <Icon name="creditCard" size={13}/> 결제/정산 저장
@@ -553,13 +615,13 @@ export function OrderDetailPage({ orderId, onBack, onEdit, onNav, onOpenOrder })
             <div className="card" style={{ padding: 14 }}>
               <PanelTitle>관련 화면</PanelTitle>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                <button data-testid="detail-nav-calendar" className="btn btn--secondary btn--block" onClick={() => onNav?.('calendar')}>
+                <button data-testid="detail-nav-calendar" className="btn btn--secondary btn--block" onClick={() => navigateWithGuard('calendar')}>
                   <Icon name="calendar" size={13}/> 일정 캘린더
                 </button>
-                <button data-testid="detail-nav-photos" className="btn btn--secondary btn--block" onClick={() => onNav?.('photos')}>
+                <button data-testid="detail-nav-photos" className="btn btn--secondary btn--block" onClick={() => navigateWithGuard('photos')}>
                   <Icon name="image" size={13}/> 사진검수
                 </button>
-                <button data-testid="detail-nav-messages" className="btn btn--secondary btn--block" onClick={() => onNav?.('sends')}>
+                <button data-testid="detail-nav-messages" className="btn btn--secondary btn--block" onClick={() => navigateWithGuard('sends')}>
                   <Icon name="send" size={13}/> 발송이력
                 </button>
               </div>
@@ -569,6 +631,9 @@ export function OrderDetailPage({ orderId, onBack, onEdit, onNav, onOpenOrder })
               <PanelTitle>고객 전달</PanelTitle>
               <div className="mono" style={{ padding: '7px 9px', background: 'var(--bg-subtle)', border: '1px solid var(--border)', borderRadius: 6, fontSize: 10.5, color: 'var(--text-tertiary)', marginBottom: 8, overflow: 'hidden', textOverflow: 'ellipsis' }}>
                 /c/{order.customer_token}
+              </div>
+              <div style={{ marginBottom: 8 }}>
+                <CopyLinkButton testId="copy-customer-link" link={`${window.location.origin}/c/${order.customer_token}`} />
               </div>
               <button data-testid="send-customer-photo-ready" className="btn btn--secondary btn--block" disabled={isSaving || isPreviewLoading} onClick={() => void openMessagePreview(MESSAGE_ACTIONS.customerPhotoReady)}>
                 <Icon name="send" size={13}/> 사진 링크 발송
@@ -837,8 +902,43 @@ function Section({ title, icon, badge = null, children }) {
   );
 }
 
-function PanelTitle({ children }) {
-  return <div style={{ fontSize: 11, color: 'var(--text-tertiary)', fontWeight: 600, letterSpacing: '0.04em', marginBottom: 8 }}>{children}</div>;
+function PanelTitle({ children, dirty = false }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
+      <span style={{ fontSize: 11, color: 'var(--text-tertiary)', fontWeight: 600, letterSpacing: '0.04em' }}>{children}</span>
+      {dirty && (
+        <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--warn-fg)', background: 'var(--warn-bg)', borderRadius: 4, padding: '1px 5px' }}>
+          변경됨
+        </span>
+      )}
+    </div>
+  );
+}
+
+// 고객 링크를 운영자가 손으로 드래그·복사하지 않도록 클립보드 복사 버튼을 제공한다.
+function CopyLinkButton({ link, testId = undefined }) {
+  const [copied, setCopied] = React.useState(false);
+
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(link);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1500);
+    } catch {
+      setCopied(false);
+    }
+  };
+
+  return (
+    <button
+      type="button"
+      data-testid={testId}
+      className="btn btn--secondary btn--block"
+      onClick={() => void handleCopy()}
+    >
+      <Icon name={copied ? 'check' : 'copy'} size={13}/> {copied ? '복사됨' : '링크 복사'}
+    </button>
+  );
 }
 
 function KV({ children, col = 2 }) {
@@ -899,6 +999,7 @@ function messageTypeLabel(type) {
   if (type === 'customer_day_before') return '전날안내';
   if (type === 'partner_assignment') return '협력사배정';
   if (type === 'customer_photo_ready') return '사진전달';
+  if (type === 'customer_balance_due') return '잔금안내';
   if (type === 'customer_quote') return '견적서';
   if (type === 'partner_customer_info') return '협력사 고객정보';
   return type;

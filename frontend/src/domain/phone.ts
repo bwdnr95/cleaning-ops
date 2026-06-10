@@ -8,6 +8,11 @@ export function formatPhone(phone) {
     return phone;
   }
 
+  // 0으로만 채워진 값은 일괄 등록 시 들어간 플레이스홀더이므로 미등록으로 표시한다.
+  if (/^0+$/.test(digits)) {
+    return '-';
+  }
+
   if (digits.startsWith('02')) {
     if (digits.length === 9) {
       return `${digits.slice(0, 2)}-${digits.slice(2, 5)}-${digits.slice(5)}`;

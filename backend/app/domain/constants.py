@@ -38,6 +38,7 @@ class MessageType(StrEnum):
     CUSTOMER_DAY_BEFORE = "customer_day_before"
     PARTNER_ASSIGNMENT = "partner_assignment"
     CUSTOMER_PHOTO_READY = "customer_photo_ready"
+    CUSTOMER_BALANCE_DUE = "customer_balance_due"
     CUSTOMER_QUOTE = "customer_quote"
     PARTNER_CUSTOMER_INFO = "partner_customer_info"
 
@@ -85,6 +86,10 @@ class AuditEventType(StrEnum):
     TOKEN_REFRESH = "token_refresh"
     PASSWORD_CHANGE = "password_change"
     ACCESS_DENIED = "access_denied"
+    PARTNER_ACCOUNT_CREATED = "partner_account_created"
+    PARTNER_PASSWORD_RESET = "partner_password_reset"
+    PARTNER_ACCOUNT_ACTIVATED = "partner_account_activated"
+    PARTNER_ACCOUNT_DEACTIVATED = "partner_account_deactivated"
 
 
 class AuditSeverity(StrEnum):

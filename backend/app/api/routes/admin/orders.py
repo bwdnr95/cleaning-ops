@@ -76,12 +76,14 @@ def list_orders(
     _: CurrentUser = Depends(require_admin),
 ) -> list:
     group_repo = OrderGroupRepository(db)
+    orders = OrderRepository(db).list_orders(
+        sort=sort,
+        include_past_paid=include_past_paid,
+    )
+    groups_by_id = group_repo.list_by_ids(order.group_id for order in orders)
     return [
-        to_admin_order_dto(order, group=group_repo.get(order.group_id))
-        for order in OrderRepository(db).list_orders(
-            sort=sort,
-            include_past_paid=include_past_paid,
-        )
+        to_admin_order_dto(order, group=groups_by_id.get(order.group_id))
+        for order in orders
     ]
 
 

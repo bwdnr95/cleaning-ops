@@ -170,14 +170,14 @@ def ensure_service_catalog(db: Session) -> tuple[ServiceCategory, ServiceItem]:
             name="입주청소",
             unit="평",
             base_price=280000,
-            partner_base_price=196000,
+            partner_base_price=215600,
             description="기본 입주청소 상품",
             is_active=True,
             sort_order=10,
         )
         db.add(item)
     elif not item.partner_base_price:
-        item.partner_base_price = 196000
+        item.partner_base_price = 215600
 
     return category, item
 

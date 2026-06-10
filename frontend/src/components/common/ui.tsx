@@ -1,27 +1,14 @@
+import { orderStatusLabel, orderStatusTone } from '../../domain/orderStatus';
+
 // Shared components for Cleaning Ops Control Center
 
-export const STATUS_MAP = {
-  '신규접수':     { tone: 'neutral', label: '신규접수' },
-  '상담중':       { tone: 'purple',  label: '상담중' },
-  '협력사확인중': { tone: 'warn',    label: '협력사확인중' },
-  '일정확정':     { tone: 'info',    label: '일정확정' },
-  '전날안내필요': { tone: 'warn',    label: '전날안내필요' },
-  '전날안내완료': { tone: 'info',    label: '전날안내완료' },
-  '작업예정':     { tone: 'info',    label: '작업예정' },
-  '작업진행':     { tone: 'info',    label: '작업진행' },
-  '사진검수대기': { tone: 'warn',    label: '사진검수대기' },
-  '고객전달필요': { tone: 'warn',    label: '고객전달필요' },
-  '고객전달완료': { tone: 'success', label: '고객전달완료' },
-  '서비스완료':   { tone: 'success', label: '서비스완료' },
-  '취소':         { tone: 'danger',  label: '취소' },
-};
-
 export function StatusBadge({ status, dot = true }) {
-  const cfg = STATUS_MAP[status] || { tone: 'neutral', label: status };
+  const tone = orderStatusTone(status);
+  const label = orderStatusLabel(status);
   return (
-    <span className={`badge badge--${cfg.tone}`}>
+    <span className={`badge badge--${tone}`}>
       {dot && <span className="dot"></span>}
-      {cfg.label}
+      {label}
     </span>
   );
 }
@@ -46,6 +33,8 @@ export function Icon({ name, size = 16, color = 'currentColor', strokeWidth = 1.
     chevronLeft: <><path d="m15 6-6 6 6 6"/></>,
     bell: <><path d="M6 8a6 6 0 1 1 12 0c0 7 3 7 3 9H3c0-2 3-2 3-9Z"/><path d="M10 21a2 2 0 0 0 4 0"/></>,
     check: <><path d="m5 12 5 5 9-11"/></>,
+    copy: <><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></>,
+    logOut: <><path d="M15 4h3a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-3"/><path d="M10 17l5-5-5-5"/><path d="M15 12H3"/></>,
     x: <><path d="M6 6l12 12M18 6L6 18"/></>,
     camera: <><rect x="3" y="6" width="18" height="14" rx="2"/><circle cx="12" cy="13" r="4"/><path d="M8 6V4h8v2"/></>,
     image: <><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-5-5L5 21"/></>,

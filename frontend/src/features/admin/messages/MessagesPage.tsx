@@ -14,6 +14,7 @@ const MESSAGE_TYPE_OPTIONS = [
   { value: 'customer_day_before', label: '전날안내' },
   { value: 'partner_assignment', label: '협력사배정' },
   { value: 'customer_photo_ready', label: '사진전달' },
+  { value: 'customer_balance_due', label: '잔금안내' },
 ];
 
 const STATUS_OPTIONS = [
@@ -445,7 +446,7 @@ function toStats(messages) {
   return {
     sent: messages.filter((message) => ['sent', 'delivered'].includes(message.status)).length,
     failed: messages.filter((message) => ['failed', 'delivery_failed'].includes(message.status)).length,
-    customerLinks: messages.filter((message) => ['customer_schedule_confirmed', 'customer_day_before', 'customer_photo_ready'].includes(message.message_type)).length,
+    customerLinks: messages.filter((message) => ['customer_schedule_confirmed', 'customer_day_before', 'customer_photo_ready', 'customer_balance_due'].includes(message.message_type)).length,
   };
 }
 
@@ -513,6 +514,7 @@ function messageTypeLabel(type) {
   if (type === 'customer_day_before') return '전날 안내';
   if (type === 'partner_assignment') return '협력사 배정';
   if (type === 'customer_photo_ready') return '사진 전달';
+  if (type === 'customer_balance_due') return '잔금 안내';
   return type;
 }
 
@@ -587,8 +589,16 @@ function formatDateTime(value) {
   return formatAppDateTime(value);
 }
 
+// 친화적 주문번호(cleanjob-0358, seed-order-2450 등)는 그대로 보여주고,
+// UUID처럼 긴 무작위 식별자만 앞 8자로 줄인다.
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 function shortOrderId(orderId) {
-  return String(orderId || '').slice(0, 8);
+  const id = String(orderId || '');
+  if (UUID_PATTERN.test(id)) {
+    return `${id.slice(0, 8)}…`;
+  }
+  return id;
 }
 
 function toActionErrorMessage(error) {

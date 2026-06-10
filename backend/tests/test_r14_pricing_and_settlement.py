@@ -55,8 +55,8 @@ def test_service_item_pricing_auto_fills_order_consumer_and_partner_prices() -> 
     assert line["total_amount"] == 280000
     assert line["discount_amount"] == 25000
     assert line["consumer_price"] == 280000
-    assert line["partner_payment_amount"] == 196000
-    assert line["partner_price"] == 196000
+    assert line["partner_payment_amount"] == 215600
+    assert line["partner_price"] == 215600
     assert line["vat_type"] == "excluded"
 
 

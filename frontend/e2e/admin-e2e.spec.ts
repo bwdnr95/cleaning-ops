@@ -63,21 +63,74 @@ test('dashboard KPI cards open the matching operational filters', async ({ page 
   await loginAsAdmin(page);
 
   for (const item of [
-    ['dashboard-kpi-today_jobs', 'orders-tab-today', 'orders-date-preset-today'],
-    ['dashboard-kpi-tomorrow_notice', 'orders-tab-tomorrow_notice', 'orders-date-preset-tomorrow'],
-    ['dashboard-kpi-photo_review', 'orders-tab-photo_review', 'orders-date-preset-all'],
-    ['dashboard-kpi-customer_delivery', 'orders-tab-deliver', 'orders-date-preset-all'],
-    ['dashboard-kpi-payment_check', 'orders-tab-payment_check', 'orders-date-preset-all'],
-    ['dashboard-kpi-monthly_done', 'orders-tab-monthly_done', 'orders-date-preset-month'],
-    ['dashboard-kpi-monthly_revenue', 'orders-tab-monthly_revenue', 'orders-date-preset-month'],
+    ['dashboard-kpi-today_jobs', 'orders-date-preset-today'],
+    ['dashboard-kpi-tomorrow_notice', 'orders-date-preset-tomorrow'],
+    ['dashboard-kpi-photo_review', 'orders-date-preset-all'],
+    ['dashboard-kpi-customer_delivery', 'orders-date-preset-all'],
+    ['dashboard-kpi-payment_check', 'orders-date-preset-all'],
+    ['dashboard-kpi-monthly_done', 'orders-date-preset-month'],
+    ['dashboard-kpi-monthly_revenue', 'orders-date-preset-month'],
   ]) {
     await page.getByTestId(item[0]).click();
     await expect(page.getByTestId('admin-orders-page')).toBeVisible();
     await expect(page.getByTestId(item[1])).toHaveAttribute('aria-pressed', 'true');
-    await expect(page.getByTestId(item[2])).toHaveAttribute('aria-pressed', 'true');
     await page.getByTestId('admin-nav-dashboard').click();
     await expect(page.getByTestId('admin-dashboard-page')).toBeVisible();
   }
+});
+
+test('admin order status tabs use the simplified workflow states only', async ({ page, request }) => {
+  const unpaidCompletedOrder = await createUnpaidCompletedOrder(request);
+
+  await loginAsAdmin(page);
+  await page.getByTestId('admin-nav-orders').click();
+  await expect(page.getByTestId('admin-orders-page')).toBeVisible();
+
+  const expectedTabs = [
+    ['orders-tab-all', '전체'],
+    ['orders-tab-consulting_unassigned', '상담중/미배정'],
+    ['orders-tab-schedule_partner_checking', '일정 및 협력사 확인중'],
+    ['orders-tab-schedule_work_confirmed', '일정 및 작업 확정'],
+    ['orders-tab-work_done', '작업완료'],
+    ['orders-tab-final_payment_complete', '최종결제완료'],
+    ['orders-tab-cancel', '취소'],
+  ];
+
+  for (const [testId, label] of expectedTabs) {
+    await expect(page.getByTestId(testId)).toBeVisible();
+    await expect(page.getByTestId(testId)).toContainText(label);
+  }
+
+  for (const oldTab of [
+    'orders-tab-today',
+    'orders-tab-tomorrow_notice',
+    'orders-tab-partner_pending',
+    'orders-tab-photo_review',
+    'orders-tab-payment_check',
+    'orders-tab-monthly_done',
+    'orders-tab-monthly_revenue',
+  ]) {
+    await expect(page.getByTestId(oldTab)).toHaveCount(0);
+  }
+
+  await page.getByTestId('orders-tab-work_done').click();
+  await expect(page.getByTestId(`admin-order-row-${unpaidCompletedOrder.id}`)).toBeVisible();
+  await expect(page.getByTestId(`admin-order-row-${unpaidCompletedOrder.id}`)).toContainText('작업완료');
+
+  await page.getByTestId('orders-tab-final_payment_complete').click();
+  await expect(page.getByTestId(`admin-order-row-${unpaidCompletedOrder.id}`)).toHaveCount(0);
+});
+
+test('dashboard monthly revenue KPI shows current-month completed paid orders', async ({ page, request }) => {
+  const order = await createMonthlyRevenueOrder(request);
+
+  await loginAsAdmin(page);
+  await page.getByTestId('dashboard-kpi-monthly_revenue').click();
+
+  await expect(page.getByTestId('admin-orders-page')).toBeVisible();
+  await expect(page.getByTestId('orders-date-preset-month')).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByTestId(`admin-order-row-${order.id}`)).toBeVisible();
+  await expect(page.getByTestId(`admin-order-row-${order.id}`)).toContainText(order.customer_name);
 });
 
 test('dashboard today and tomorrow work lists open matching order queues', async ({ page }) => {
@@ -85,15 +138,35 @@ test('dashboard today and tomorrow work lists open matching order queues', async
 
   await page.getByRole('button', { name: '큐 보기' }).first().click();
   await expect(page.getByTestId('admin-orders-page')).toBeVisible();
-  await expect(page.getByTestId('orders-tab-today')).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByTestId('orders-tab-schedule_work_confirmed')).toHaveAttribute('aria-pressed', 'true');
   await expect(page.getByTestId('orders-date-preset-today')).toHaveAttribute('aria-pressed', 'true');
 
   await page.getByTestId('admin-nav-dashboard').click();
   await expect(page.getByTestId('admin-dashboard-page')).toBeVisible();
   await page.getByRole('button', { name: '큐 보기' }).nth(1).click();
   await expect(page.getByTestId('admin-orders-page')).toBeVisible();
-  await expect(page.getByTestId('orders-tab-tomorrow_notice')).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByTestId('orders-tab-schedule_work_confirmed')).toHaveAttribute('aria-pressed', 'true');
   await expect(page.getByTestId('orders-date-preset-tomorrow')).toHaveAttribute('aria-pressed', 'true');
+});
+
+test('browser back stays inside admin navigation history', async ({ page }) => {
+  await loginAsAdmin(page);
+
+  await page.getByTestId('admin-nav-orders').click();
+  await expect(page.getByTestId('admin-orders-page')).toBeVisible();
+  await expect(page).toHaveURL(/#orders$/);
+
+  await page.getByTestId('admin-nav-calendar').click();
+  await expect(page.getByTestId('admin-calendar-page')).toBeVisible();
+  await expect(page).toHaveURL(/#calendar$/);
+
+  await page.goBack();
+  await expect(page.getByTestId('admin-orders-page')).toBeVisible();
+  await expect(page).toHaveURL(/#orders$/);
+
+  await page.goBack();
+  await expect(page.getByTestId('admin-dashboard-page')).toBeVisible();
+  await expect(page).toHaveURL(/#dashboard$/);
 });
 
 test('dashboard recent photo thumbnails load from backend assets', async ({ page, request }) => {
@@ -159,6 +232,22 @@ test('admin can filter orders by visit date with the custom date picker', async 
 
   await page.getByTestId('orders-date-clear').click();
   await expect(page.getByTestId(`admin-order-row-${outsideOrder.id}`)).toBeVisible();
+});
+
+test('admin order search finds past fully paid customers hidden from the default queue', async ({ page, request }) => {
+  const order = await createPastPaidSearchOrder(request);
+
+  await loginAsAdmin(page);
+  await page.getByTestId('admin-nav-orders').click();
+  await expect(page.getByTestId('admin-orders-page')).toBeVisible();
+  await expect(page.getByTestId('orders-date-preset-upcoming')).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByTestId(`admin-order-row-${order.id}`)).toHaveCount(0);
+
+  await page.getByLabel('주문 검색').fill(order.customer_name);
+  await expect(page.getByTestId(`admin-order-row-${order.id}`)).toBeVisible();
+
+  await page.getByLabel('주문 검색').fill('01090901234');
+  await expect(page.getByTestId(`admin-order-row-${order.id}`)).toBeVisible();
 });
 
 test('admin order list fits the desktop viewport and exposes received-date sorting', async ({ page }) => {
@@ -244,7 +333,7 @@ test('admin can run selected order bulk operations from the order list', async (
   await page.getByTestId('orders-bulk-status-open').click();
   await page.getByTestId('orders-bulk-status-select').selectOption('상담중');
   await page.getByTestId('orders-bulk-status-apply').click();
-  await expect(page.getByTestId('orders-bulk-notice')).toContainText('2건 상담중 상태로 변경했습니다.');
+  await expect(page.getByTestId('orders-bulk-notice')).toContainText('2건 상담중/미배정 상태로 변경했습니다.');
   await expect.poll(() => getOrderStatuses(request, orders)).toEqual(['상담중', '상담중']);
 
   await selectOrderRows(page, orders);
@@ -292,6 +381,20 @@ test('admin can adjust schedule from order detail and jump to related ops pages'
     scheduledDate: '2026-05-06',
     requestedTime: '16:30',
     hasScheduleTimeline: true,
+  });
+
+  await page.getByTestId('detail-status-select').selectOption('고객전달필요');
+  await page.getByTestId('detail-status-save').click();
+  await expect(page.getByTestId('admin-action-notice')).toContainText('잔금 안내를 발송했습니다');
+  await expect.poll(async () => {
+    const [detail] = await getOrderDetails(request, [order]);
+    return {
+      status: detail.status,
+      messageTypes: detail.message_logs.map((message) => message.message_type),
+    };
+  }).toEqual({
+    status: '고객전달필요',
+    messageTypes: ['customer_balance_due'],
   });
 
   await page.getByTestId('detail-nav-calendar').click();
@@ -377,7 +480,9 @@ test('admin can edit and delete an unused partner explicitly', async ({ page }) 
   await expect(page.getByTestId('admin-partners-page')).toBeVisible();
 
   await page.getByTestId('partner-category-create').click();
+  await expect(page.getByTestId('partner-category-name')).toHaveValue('새 대분류');
   await page.getByTestId('partner-category-name').fill(categoryName);
+  await expect(page.getByTestId('partner-category-name')).toHaveValue(categoryName);
   await page.getByTestId('partner-category-save').click();
   await expect(page.getByRole('button', { name: new RegExp(categoryName) }).first()).toBeVisible();
 
@@ -394,6 +499,20 @@ test('admin can edit and delete an unused partner explicitly', async ({ page }) 
 
   await page.getByRole('button', { name: `${partnerName} 수정` }).click();
   await expect(page.getByTestId('partner-detail-name')).toHaveValue(partnerName);
+  await page.getByTestId('partner-settlement-from').click();
+  const settlementDays = page.locator('[data-testid^="date-picker-day-"]');
+  await expect(settlementDays.last()).toBeVisible();
+  const popupBounds = await settlementDays.evaluateAll((nodes) => {
+    const boxes = nodes.map((node) => node.getBoundingClientRect());
+    return {
+      top: Math.min(...boxes.map((box) => box.top)),
+      bottom: Math.max(...boxes.map((box) => box.bottom)),
+      viewportHeight: window.innerHeight,
+    };
+  });
+  expect(popupBounds.top).toBeGreaterThanOrEqual(0);
+  expect(popupBounds.bottom).toBeLessThanOrEqual(popupBounds.viewportHeight);
+  await settlementDays.last().click();
 
   await page.getByTestId('partner-detail-name').fill(updatedPartnerName);
   await page.getByTestId('partner-save').click();
@@ -588,6 +707,75 @@ async function createDateFilterOrders(request) {
   }));
 
   return { targetOrder, outsideOrder };
+}
+
+async function createPastPaidSearchOrder(request) {
+  const adminSession = await loginViaApi(request, 'admin');
+  const adminHeaders = authHeaders(adminSession.access_token);
+  const suffix = Date.now();
+  return checkedJson(await request.post(`${backendUrl}/api/admin/orders`, {
+    headers: adminHeaders,
+    data: {
+      status: '서비스완료',
+      received_date: '2024-01-10',
+      scheduled_date: '2024-01-15',
+      requested_time: '13:00',
+      service_name: 'Past Paid Search QA',
+      customer_name: `Past Paid Search Customer ${suffix}`,
+      customer_phone: '010-9090-1234',
+      customer_address: 'Seoul Past Paid Search QA',
+      customer_visible_payment: false,
+      payment_status: 'paid',
+      total_amount: 77000,
+      partner_payment_amount: 33000,
+    },
+  }));
+}
+
+async function createMonthlyRevenueOrder(request) {
+  const adminSession = await loginViaApi(request, 'admin');
+  const adminHeaders = authHeaders(adminSession.access_token);
+  const suffix = Date.now();
+  return checkedJson(await request.post(`${backendUrl}/api/admin/orders`, {
+    headers: adminHeaders,
+    data: {
+      status: '서비스완료',
+      received_date: '2026-06-01',
+      scheduled_date: '2026-06-01',
+      requested_time: '10:00',
+      service_name: 'Monthly Revenue QA',
+      customer_name: `Monthly Revenue Customer ${suffix}`,
+      customer_phone: '010-9191-0601',
+      customer_address: 'Seoul Monthly Revenue QA',
+      customer_visible_payment: false,
+      payment_status: 'paid',
+      total_amount: 88000,
+      partner_payment_amount: 33000,
+    },
+  }));
+}
+
+async function createUnpaidCompletedOrder(request) {
+  const adminSession = await loginViaApi(request, 'admin');
+  const adminHeaders = authHeaders(adminSession.access_token);
+  const suffix = Date.now();
+  return checkedJson(await request.post(`${backendUrl}/api/admin/orders`, {
+    headers: adminHeaders,
+    data: {
+      status: '서비스완료',
+      received_date: '2026-06-01',
+      scheduled_date: '2026-06-22',
+      requested_time: '14:00',
+      service_name: 'Unpaid Completed QA',
+      customer_name: `Unpaid Completed Customer ${suffix}`,
+      customer_phone: '010-9292-0622',
+      customer_address: 'Seoul Unpaid Completed QA',
+      customer_visible_payment: false,
+      payment_status: 'unpaid',
+      total_amount: 99000,
+      partner_payment_amount: 44000,
+    },
+  }));
 }
 
 async function createPaginationOrders(request) {
