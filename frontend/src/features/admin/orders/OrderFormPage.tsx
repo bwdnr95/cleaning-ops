@@ -217,9 +217,10 @@ export function OrderFormPage({ mode = 'create', orderId = null, onCancel, onSav
   };
 
   const hasPartnerPriceWarning = form.lines.some((line) => {
-    const total = parseMoneyInput(line.total_amount) || 0;
+    // 소비자가 필드는 정가(할인 전)라 도급가와 비교는 할인 적용 후(net)로 한다.
+    const net = Math.max((parseMoneyInput(line.total_amount) || 0) - (parseMoneyInput(line.discount_amount) || 0), 0);
     const partnerPrice = parseMoneyInput(line.partner_payment_amount) || 0;
-    return total > 0 && partnerPrice > total;
+    return net > 0 && partnerPrice > net;
   });
 
   const handleQuoteSend = async () => {
@@ -468,7 +469,7 @@ function LineEditor({
 
         <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-tertiary)' }}>결제 / 정산</div>
         <FieldGrid>
-          <TextField testId={`order-line-${lineIndex}-total-amount`} label="소비자가 (현장추가 별도)" inputMode="numeric" value={line.total_amount} onChange={(value) => onMoneyChange(lineIndex, 'total_amount', value)} />
+          <TextField testId={`order-line-${lineIndex}-total-amount`} label="소비자가 (할인 전 정가)" inputMode="numeric" value={line.total_amount} onChange={(value) => onMoneyChange(lineIndex, 'total_amount', value)} />
           <TextField testId={`order-line-${lineIndex}-discount-amount`} label="할인가" inputMode="numeric" value={line.discount_amount} onChange={(value) => onMoneyChange(lineIndex, 'discount_amount', value)} />
           <TextField testId={`order-line-${lineIndex}-deposit-amount`} label="계약금" inputMode="numeric" value={line.deposit_amount} onChange={(value) => onMoneyChange(lineIndex, 'deposit_amount', value)} />
           <TextField label="잔금" inputMode="numeric" value={line.balance_amount} onChange={(value) => onMoneyChange(lineIndex, 'balance_amount', value)} />
@@ -479,7 +480,7 @@ function LineEditor({
               className="input"
               style={{ display: 'flex', alignItems: 'center', fontWeight: 700, background: 'var(--bg-subtle)', color: 'var(--text)' }}
             >
-              {formatWon((parseMoneyInput(line.total_amount) || 0) + (parseMoneyInput(line.onsite_extra_amount) || 0))}
+              {formatWon(Math.max((parseMoneyInput(line.total_amount) || 0) - (parseMoneyInput(line.discount_amount) || 0), 0) + (parseMoneyInput(line.onsite_extra_amount) || 0))}
             </div>
           </Field>
           <Field label="결제 상태">
@@ -660,7 +661,10 @@ function toLineForm(order) {
     size_or_quantity: order.size_or_quantity || '',
     service_detail: order.service_detail || '',
     special_request: order.special_request || '',
-    total_amount: toInputNumber(order.total_amount),
+    // 저장값 total_amount 는 net(할인 후). 폼 소비자가 필드는 정가(=net+할인)로 복원한다.
+    total_amount: order.total_amount == null
+      ? toInputNumber(order.total_amount)
+      : toInputNumber((Number(order.total_amount) || 0) + (Number(order.discount_amount) || 0)),
     discount_amount: toInputNumber(order.discount_amount),
     deposit_amount: toInputNumber(order.deposit_amount),
     balance_amount: toInputNumber(order.balance_amount),
@@ -708,7 +712,8 @@ function toLinePayload(line) {
     size_or_quantity: emptyToNull(line.size_or_quantity),
     service_detail: emptyToNull(line.service_detail),
     special_request: emptyToNull(line.special_request),
-    total_amount: numberOrNull(line.total_amount),
+    // 소비자가 필드는 정가(할인 전). 저장 total_amount 는 할인 적용 후(net)로 보낸다.
+    total_amount: netConsumerAmount(line),
     discount_amount: numberOrNull(line.discount_amount) || 0,
     deposit_amount: numberOrNull(line.deposit_amount),
     balance_amount: numberOrNull(line.balance_amount),
@@ -738,6 +743,16 @@ function emptyToNull(value) {
 
 function numberOrNull(value) {
   return parseMoneyInput(value);
+}
+
+// 폼의 소비자가 필드는 정가(할인 전)다. 저장할 total_amount 는 할인 적용 후(net).
+function netConsumerAmount(line) {
+  const gross = parseMoneyInput(line.total_amount);
+  if (gross === null) {
+    return null;
+  }
+  const discount = parseMoneyInput(line.discount_amount) || 0;
+  return Math.max(gross - discount, 0);
 }
 
 function toInputNumber(value) {
@@ -797,9 +812,9 @@ function recalculateLine(line, { source }) {
   const partnerUnitPrice = Number(line.partner_unit_price || 0);
   const discount = parseMoneyInput(line.discount_amount) || 0;
   const onsiteExtra = parseMoneyInput(line.onsite_extra_amount) || 0;
-  // 소비자가(total_amount)는 현장추가 제외 순수 계약가. 총금액(VAT포함)=소비자가+현장추가로
-  // 계약금/잔금을 계산한다(현장추가가 고객 총액에 반영되도록).
-  const calculatedConsumer = Math.max(Math.round(baseUnitPrice * quantity) - discount, 0);
+  // 소비자가(total_amount 필드)는 할인 전 정가(gross). 총금액(VAT포함)=소비자가-할인+현장추가.
+  // 계약금/잔금은 총금액 기준으로 잡고, 저장은 net(=소비자가-할인)으로 한다(buildPayload).
+  const calculatedConsumer = Math.max(Math.round(baseUnitPrice * quantity), 0);
   const calculatedPartnerPrice = Math.max(Math.round(partnerUnitPrice * quantity), 0);
   const next = { ...line };
 
@@ -813,7 +828,8 @@ function recalculateLine(line, { source }) {
     next.partner_payment_amount_touched = false;
   }
 
-  const grandTotal = (parseMoneyInput(next.total_amount) || 0) + onsiteExtra;
+  const netConsumer = Math.max((parseMoneyInput(next.total_amount) || 0) - discount, 0);
+  const grandTotal = netConsumer + onsiteExtra;
 
   if (next.total_amount !== '' && (!next.deposit_amount_touched || next.deposit_amount === '')) {
     next.deposit_amount = formatMoneyInput(Math.round(grandTotal * 0.3));

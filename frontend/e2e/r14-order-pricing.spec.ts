@@ -19,8 +19,8 @@ test('R14 order form calculates consumer price, partner price, VAT, and sends qu
   await page.getByTestId('order-line-0-onsite-extra-amount').fill('20000');
   await page.getByTestId('order-line-0-vat-type').selectOption('excluded');
 
-  // 소비자가는 현장추가 제외(순수 계약가), 총금액(VAT포함)=소비자가+현장추가.
-  await expect(page.getByTestId('order-line-0-total-amount')).toHaveValue('500,000');
+  // 소비자가는 할인 전 정가(gross), 총금액(VAT포함)=소비자가-할인+현장추가.
+  await expect(page.getByTestId('order-line-0-total-amount')).toHaveValue('560,000');
   await expect(page.getByTestId('order-line-0-grand-total')).toHaveText('₩520,000');
   await expect(page.getByTestId('order-line-0-partner-payment-amount')).toHaveValue('431,200');
 
