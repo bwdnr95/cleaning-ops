@@ -26,6 +26,8 @@ export interface AdminOrderLineInput {
   payment_status?: string | null;
   payment_memo?: string | null;
   evidence_memo?: string | null;
+  receipt_type?: string | null;
+  receipt_status?: string | null;
   partner_payment_amount?: number | null;
   partner_payment_status?: string | null;
 }

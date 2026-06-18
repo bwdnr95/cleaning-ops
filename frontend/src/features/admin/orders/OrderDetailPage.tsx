@@ -15,6 +15,7 @@ import {
   partnerPaymentStatusLabel,
   paymentStatusLabel,
 } from '../../../domain/paymentStatus';
+import { RECEIPT_STATUSES, RECEIPT_TYPES, receiptBadge } from '../../../domain/receiptType';
 import { formatQuantity } from '../../../domain/format';
 import { formatPhone } from '../../../domain/phone';
 import { formatAppDateTime } from '../../../domain/time';
@@ -62,6 +63,8 @@ export function OrderDetailPage({ orderId, onBack, onEdit, onNav, onOpenOrder })
   const [selectedRequestedTime, setSelectedRequestedTime] = React.useState('');
   const [selectedPaymentStatus, setSelectedPaymentStatus] = React.useState('');
   const [selectedPartnerPaymentStatus, setSelectedPartnerPaymentStatus] = React.useState('');
+  const [selectedReceiptType, setSelectedReceiptType] = React.useState('');
+  const [selectedReceiptStatus, setSelectedReceiptStatus] = React.useState('');
   const [selectedOnsiteExtra, setSelectedOnsiteExtra] = React.useState('');
   const [isSaving, setIsSaving] = React.useState(false);
   const [isDeleting, setIsDeleting] = React.useState(false);
@@ -81,6 +84,8 @@ export function OrderDetailPage({ orderId, onBack, onEdit, onNav, onOpenOrder })
       setSelectedRequestedTime(order.requested_time || '');
       setSelectedPaymentStatus(order.payment_status || '');
       setSelectedPartnerPaymentStatus(order.partner_payment_status || '');
+      setSelectedReceiptType(order.receipt_type || '');
+      setSelectedReceiptStatus(order.receipt_status || '');
       setSelectedOnsiteExtra(order.onsite_extra_amount != null ? String(order.onsite_extra_amount) : '');
     }
   }, [order]);
@@ -179,6 +184,10 @@ export function OrderDetailPage({ orderId, onBack, onEdit, onNav, onOpenOrder })
       await updateAdminOrder(order.id, {
         payment_status: selectedPaymentStatus || null,
         partner_payment_status: selectedPartnerPaymentStatus || null,
+        receipt_type: selectedReceiptType || null,
+        receipt_status: selectedReceiptType === 'none'
+          ? 'not_applicable'
+          : (selectedReceiptStatus || null),
         onsite_extra_amount: onsite,
         balance_amount: balance,
       });
@@ -315,6 +324,8 @@ export function OrderDetailPage({ orderId, onBack, onEdit, onNav, onOpenOrder })
   const isPartnerDirty = selectedPartnerId !== (order.partner_id || '');
   const isPaymentDirty = selectedPaymentStatus !== (order.payment_status || '')
     || selectedPartnerPaymentStatus !== (order.partner_payment_status || '')
+    || selectedReceiptType !== (order.receipt_type || '')
+    || selectedReceiptStatus !== (order.receipt_status || '')
     || Number(selectedOnsiteExtra || 0) !== Number(order.onsite_extra_amount || 0);
   // 현장추가금을 반영한 총금액/잔금(계약금은 그대로). 잔금 = 총금액 - 계약금.
   const onsiteExtraNumber = Number(selectedOnsiteExtra || 0);
@@ -420,6 +431,7 @@ export function OrderDetailPage({ orderId, onBack, onEdit, onNav, onOpenOrder })
               <div style={{ marginTop: 10 }}>
                 <KV col={2}>
                   <KVItem label="결제 상태" value={paymentStatusLabel(order.payment_status)}/>
+                  <KVItem label="증빙 자료" value={receiptBadge(order.receipt_type, order.receipt_status).text}/>
                   <KVItem label="VAT" value={order.vat_type || '-'}/>
                   <KVItem label="결제 메모" value={order.payment_memo || '-'} span={2} multiline/>
                   <KVItem label="증빙 메모" value={order.evidence_memo || '-'} span={2} multiline/>
@@ -590,6 +602,40 @@ export function OrderDetailPage({ orderId, onBack, onEdit, onNav, onOpenOrder })
                   <option value="">미입력</option>
                   {PAYMENT_STATUSES.map((status) => (
                     <option key={status.value} value={status.value}>{status.label}</option>
+                  ))}
+                </select>
+              </label>
+              <label style={{ display: 'flex', flexDirection: 'column', gap: 5, marginBottom: 8 }}>
+                <span style={{ fontSize: 10.5, color: 'var(--text-tertiary)', fontWeight: 600 }}>증빙 자료</span>
+                <select
+                  data-testid="detail-receipt-type"
+                  className="input"
+                  value={selectedReceiptType}
+                  onChange={(event) => {
+                    const next = event.target.value;
+                    setSelectedReceiptType(next);
+                    // 발급X면 2차 상태를 '해당없음'으로 자동 고정.
+                    if (next === 'none') setSelectedReceiptStatus('not_applicable');
+                    else if (selectedReceiptStatus === 'not_applicable') setSelectedReceiptStatus('');
+                  }}
+                  style={{ width: '100%', height: 34 }}
+                >
+                  <option value="">미입력</option>
+                  {RECEIPT_TYPES.map((item) => (
+                    <option key={item.value} value={item.value}>{item.label}</option>
+                  ))}
+                </select>
+                <select
+                  data-testid="detail-receipt-status"
+                  className="input"
+                  value={selectedReceiptStatus}
+                  disabled={selectedReceiptType === 'none' || selectedReceiptType === ''}
+                  onChange={(event) => setSelectedReceiptStatus(event.target.value)}
+                  style={{ width: '100%', height: 34 }}
+                >
+                  <option value="">발급 상태 선택</option>
+                  {RECEIPT_STATUSES.map((item) => (
+                    <option key={item.value} value={item.value}>{item.label}</option>
                   ))}
                 </select>
               </label>
