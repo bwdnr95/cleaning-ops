@@ -417,6 +417,12 @@ export function PartnersPage() {
     });
   };
 
+  const allSettlementIds = settlements ? settlements.items.map((job) => job.order_id) : [];
+  const allSettlementsSelected = allSettlementIds.length > 0 && allSettlementIds.every((id) => settlementSelection.has(id));
+  const toggleAllSettlements = () => {
+    setSettlementSelection(() => (allSettlementsSelected ? new Set() : new Set(allSettlementIds)));
+  };
+
   const handleSettle = async (orderIds) => {
     if (!detail || orderIds.length === 0) {
       return;
@@ -809,7 +815,8 @@ export function PartnersPage() {
                 ) : (
                   <div className="scroll" style={{ overflowX: 'auto' }}>
                     <div style={{ display: 'grid', gridTemplateColumns: '34px 100px 110px 1fr 90px 110px 110px 120px 210px', minWidth: 1090, fontSize: 12 }}>
-                    {['', '방문일', '상태', '작업', '고객', '소비자가', '도급가(VAT 포함)', '정산상태', '액션'].map((header) => <GridHead key={header}>{header}</GridHead>)}
+                    <GridHead><input data-testid="partner-settlement-select-all" type="checkbox" checked={allSettlementsSelected} onChange={toggleAllSettlements} /></GridHead>
+                    {['방문일', '상태', '작업', '고객', '소비자가', '도급가(VAT 포함)', '정산상태', '액션'].map((header) => <GridHead key={header}>{header}</GridHead>)}
                     {settlements.items.map((job) => {
                       const isPaid = job.partner_payment_status === 'paid';
                       return (
