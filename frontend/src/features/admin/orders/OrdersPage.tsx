@@ -8,6 +8,7 @@ import { useApiResource } from '../../../api/useApiResource';
 import { ORDER_STATUS_OPTIONS, orderStatusLabel, orderWorkflowStatusValue } from '../../../domain/orderStatus';
 import { formatQuantity } from '../../../domain/format';
 import { receiptBadge } from '../../../domain/receiptType';
+import { PAYMENT_STATUSES, paymentStatusLabel } from '../../../domain/paymentStatus';
 import { formatPhone } from '../../../domain/phone';
 import { OrderImportDialog } from './OrderImportDialog';
 import { PartnerFilterSelect } from './PartnerFilterSelect';
@@ -250,6 +251,8 @@ export function OrdersPage({ onOpenOrder, onCreateOrder, onEditOrder, initialTab
   const [bulkStatus, setBulkStatus] = React.useState('작업예정');
   const [bulkPartnerId, setBulkPartnerId] = React.useState('');
   const [bulkMessageType, setBulkMessageType] = React.useState('customer_schedule_confirmed');
+  const [bulkPaymentStatus, setBulkPaymentStatus] = React.useState('paid');
+  const [bulkScheduledDate, setBulkScheduledDate] = React.useState('');
   const [isImportOpen, setImportOpen] = React.useState(false);
   const [columnWidths, setColumnWidths] = React.useState(getInitialOrderTableColumnWidths);
   const [resizingColumn, setResizingColumn] = React.useState(null);
@@ -458,6 +461,24 @@ export function OrdersPage({ onOpenOrder, onCreateOrder, onEditOrder, initialTab
     await runSelectedOrdersAction({
       successLabel: `${partner.name}에 배정했습니다.`,
       execute: (orderId) => updateAdminOrder(orderId, { partner_id: partner.id, team_name: partner.name }),
+    });
+  };
+
+  const handleBulkPaymentStatusChange = async () => {
+    await runSelectedOrdersAction({
+      successLabel: `${paymentStatusLabel(bulkPaymentStatus)} 결제상태로 변경했습니다.`,
+      execute: (orderId) => updateAdminOrder(orderId, { payment_status: bulkPaymentStatus }),
+    });
+  };
+
+  const handleBulkScheduleChange = async () => {
+    if (!bulkScheduledDate) {
+      setActionNotice({ tone: 'danger', text: '변경할 방문일을 선택해주세요.' });
+      return;
+    }
+    await runSelectedOrdersAction({
+      successLabel: `방문일을 ${bulkScheduledDate}(으)로 변경했습니다.`,
+      execute: (orderId) => updateAdminOrder(orderId, { scheduled_date: bulkScheduledDate }),
     });
   };
 
@@ -848,6 +869,8 @@ export function OrdersPage({ onOpenOrder, onCreateOrder, onEditOrder, initialTab
           <button data-testid="orders-bulk-status-open" style={bulkActionButton(bulkAction === 'status')} onClick={() => setBulkAction(bulkAction === 'status' ? null : 'status')}>상태 변경</button>
           <button data-testid="orders-bulk-message-open" style={bulkActionButton(bulkAction === 'message')} onClick={() => setBulkAction(bulkAction === 'message' ? null : 'message')}>메시지</button>
           <button data-testid="orders-bulk-partner-open" style={bulkActionButton(bulkAction === 'partner')} onClick={() => setBulkAction(bulkAction === 'partner' ? null : 'partner')}>협력사 배정</button>
+          <button data-testid="orders-bulk-payment-open" style={bulkActionButton(bulkAction === 'payment')} onClick={() => setBulkAction(bulkAction === 'payment' ? null : 'payment')}>결제상태</button>
+          <button data-testid="orders-bulk-schedule-open" style={bulkActionButton(bulkAction === 'schedule')} onClick={() => setBulkAction(bulkAction === 'schedule' ? null : 'schedule')}>일정 변경</button>
           <button
             data-testid="orders-bulk-delete"
             style={{ ...bulkActionButton(false), color: 'var(--danger-fg)' }}
@@ -871,10 +894,16 @@ export function OrdersPage({ onOpenOrder, onCreateOrder, onEditOrder, initialTab
           partners={partners}
           bulkMessageType={bulkMessageType}
           onMessageTypeChange={setBulkMessageType}
+          bulkPaymentStatus={bulkPaymentStatus}
+          onPaymentStatusChange={setBulkPaymentStatus}
+          bulkScheduledDate={bulkScheduledDate}
+          onScheduledDateChange={setBulkScheduledDate}
           isSaving={isSavingAction}
           onApplyStatus={() => void handleBulkStatusChange()}
           onApplyPartner={() => void handleBulkPartnerAssign()}
           onApplyMessage={() => void handleBulkMessageSend()}
+          onApplyPaymentStatus={() => void handleBulkPaymentStatusChange()}
+          onApplySchedule={() => void handleBulkScheduleChange()}
         />
       )}
 
@@ -1173,10 +1202,16 @@ function BulkActionPanel({
   partners,
   bulkMessageType,
   onMessageTypeChange,
+  bulkPaymentStatus,
+  onPaymentStatusChange,
+  bulkScheduledDate,
+  onScheduledDateChange,
   isSaving,
   onApplyStatus,
   onApplyPartner,
   onApplyMessage,
+  onApplyPaymentStatus,
+  onApplySchedule,
 }) {
   return (
     <div
@@ -1212,6 +1247,35 @@ function BulkActionPanel({
           </select>
           <button data-testid="orders-bulk-partner-apply" className="btn btn--primary btn--sm" disabled={isSaving} onClick={onApplyPartner}>
             {isSaving ? '처리 중' : '배정'}
+          </button>
+        </>
+      )}
+
+      {action === 'payment' && (
+        <>
+          <span style={panelLabelStyle}>선택 주문 결제상태</span>
+          <select data-testid="orders-bulk-payment-select" className="input" value={bulkPaymentStatus} onChange={(event) => onPaymentStatusChange(event.target.value)} style={{ width: 180, height: 32 }}>
+            {PAYMENT_STATUSES.map((status) => <option key={status.value} value={status.value}>{status.label}</option>)}
+          </select>
+          <button data-testid="orders-bulk-payment-apply" className="btn btn--primary btn--sm" disabled={isSaving} onClick={onApplyPaymentStatus}>
+            {isSaving ? '처리 중' : '적용'}
+          </button>
+        </>
+      )}
+
+      {action === 'schedule' && (
+        <>
+          <span style={panelLabelStyle}>선택 주문 방문일</span>
+          <DatePicker
+            compact
+            testId="orders-bulk-schedule-date"
+            ariaLabel="일괄 방문일"
+            placeholder="방문일 선택"
+            value={bulkScheduledDate}
+            onChange={(value) => onScheduledDateChange(value)}
+          />
+          <button data-testid="orders-bulk-schedule-apply" className="btn btn--primary btn--sm" disabled={isSaving} onClick={onApplySchedule}>
+            {isSaving ? '처리 중' : '적용'}
           </button>
         </>
       )}
