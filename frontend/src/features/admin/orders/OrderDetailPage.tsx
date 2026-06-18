@@ -99,6 +99,8 @@ export function OrderDetailPage({ orderId, onBack, onEdit, onDuplicate, onNav, o
     || selectedRequestedTime !== (order.requested_time || '')
     || selectedPaymentStatus !== (order.payment_status || '')
     || selectedPartnerPaymentStatus !== (order.partner_payment_status || '')
+    || selectedReceiptType !== (order.receipt_type || '')
+    || selectedReceiptStatus !== (order.receipt_status || '')
     || Number(selectedOnsiteExtra || 0) !== Number(order.onsite_extra_amount || 0)
   );
 

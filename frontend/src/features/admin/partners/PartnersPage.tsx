@@ -417,10 +417,17 @@ export function PartnersPage() {
     });
   };
 
-  const allSettlementIds = settlements ? settlements.items.map((job) => job.order_id) : [];
-  const allSettlementsSelected = allSettlementIds.length > 0 && allSettlementIds.every((id) => settlementSelection.has(id));
+  // 정산(지급완료 처리)은 서비스완료 + 미지급 행만 가능. 전체선택/체크박스는 이 집합으로 제한해
+  // 비정산 가능 행이 일괄정산에 섞여 배치 전체가 거부되는 일을 막는다.
+  const settleableSettlementIds = settlements
+    ? settlements.items
+        .filter((job) => job.status === '서비스완료' && job.partner_payment_status !== 'paid')
+        .map((job) => job.order_id)
+    : [];
+  const allSettlementsSelected = settleableSettlementIds.length > 0
+    && settleableSettlementIds.every((id) => settlementSelection.has(id));
   const toggleAllSettlements = () => {
-    setSettlementSelection(() => (allSettlementsSelected ? new Set() : new Set(allSettlementIds)));
+    setSettlementSelection(() => (allSettlementsSelected ? new Set() : new Set(settleableSettlementIds)));
   };
 
   const handleSettle = async (orderIds) => {
@@ -821,12 +828,12 @@ export function PartnersPage() {
                     {['방문일', '상태', '작업', '고객', '소비자가', '도급가(VAT 포함)', '정산상태', '액션'].map((header) => <GridHead key={header}>{header}</GridHead>)}
                     {settlements.items.map((job) => {
                       const isPaid = job.partner_payment_status === 'paid';
-                      // 미정산으로 보이더라도 지급완료 처리는 서비스완료 주문만 가능.
-                      const canSettle = job.status === '서비스완료';
+                      // 미정산으로 보이더라도 지급완료 처리는 서비스완료 + 미지급 주문만 가능.
+                      const canSettle = job.status === '서비스완료' && !isPaid;
                       return (
                       <React.Fragment key={job.order_id}>
                         <GridCell testId={`partner-settlement-row-${job.order_id}`}>
-                          <input data-testid={`partner-settlement-select-${job.order_id}`} type="checkbox" checked={settlementSelection.has(job.order_id)} onChange={() => toggleSettlementSelection(job.order_id)} />
+                          <input data-testid={`partner-settlement-select-${job.order_id}`} type="checkbox" disabled={!canSettle} title={canSettle ? undefined : '서비스완료 + 미지급 건만 정산 선택할 수 있습니다.'} checked={settlementSelection.has(job.order_id)} onChange={() => toggleSettlementSelection(job.order_id)} />
                         </GridCell>
                         <GridCell mono>{formatDate(job.scheduled_date)}</GridCell>
                         <GridCell><StatusBadge status={job.status} /></GridCell>
