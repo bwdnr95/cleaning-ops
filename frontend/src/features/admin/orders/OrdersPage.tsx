@@ -7,6 +7,7 @@ import { sendAdminMessage } from '../../../api/messages';
 import { useApiResource } from '../../../api/useApiResource';
 import { ORDER_STATUS_OPTIONS, orderStatusLabel, orderWorkflowStatusValue } from '../../../domain/orderStatus';
 import { formatQuantity } from '../../../domain/format';
+import { receiptBadge } from '../../../domain/receiptType';
 import { formatPhone } from '../../../domain/phone';
 import { OrderImportDialog } from './OrderImportDialog';
 import { PartnerFilterSelect } from './PartnerFilterSelect';
@@ -74,6 +75,18 @@ function PaidPill({ paid, isUnpaid }) {
     }}>
       <span style={{ width: 5, height: 5, borderRadius: '50%', background: c.color }}/>
       {c.label}
+    </span>
+  );
+}
+
+function EvidencePill({ type, status }) {
+  const badge = receiptBadge(type, status);
+  if (badge.text === '-') return <span style={{ color: 'var(--text-quaternary)' }}>—</span>;
+  const color = badge.tone === 'ok' ? '#10b981' : badge.tone === 'warn' ? '#f59e0b' : 'var(--text-quaternary)';
+  return (
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 11, fontWeight: 500, color }}>
+      <span style={{ width: 5, height: 5, borderRadius: '50%', background: color }}/>
+      {badge.text}
     </span>
   );
 }
@@ -207,6 +220,7 @@ const ORDER_TABLE_COLUMNS = [
   { key: 'team', width: 9, min: 6 },
   { key: 'amount', width: 11, min: 8 },
   { key: 'payment', width: 6, min: 4 },
+  { key: 'evidence', width: 8, min: 5 },
   { key: 'progress', width: 6, min: 4.5 },
   { key: 'actions', width: 8.6, min: 6 },
 ];
@@ -903,6 +917,7 @@ export function OrdersPage({ onOpenOrder, onCreateOrder, onEditOrder, initialTab
               <ResizableTh columnKey="team" onResizeStart={handleColumnResizeStart} isResizing={resizingColumn === 'team'}>담당</ResizableTh>
               <ResizableTh columnKey="amount" onResizeStart={handleColumnResizeStart} isResizing={resizingColumn === 'amount'} style={{ textAlign: 'right' }}>금액</ResizableTh>
               <ResizableTh columnKey="payment" onResizeStart={handleColumnResizeStart} isResizing={resizingColumn === 'payment'}>결제</ResizableTh>
+              <ResizableTh columnKey="evidence" onResizeStart={handleColumnResizeStart} isResizing={resizingColumn === 'evidence'}>증빙</ResizableTh>
               <ResizableTh columnKey="progress" onResizeStart={handleColumnResizeStart} isResizing={resizingColumn === 'progress'}>진행</ResizableTh>
               <th data-testid="orders-column-actions">관리</th>
             </tr>
@@ -1022,6 +1037,7 @@ export function OrdersPage({ onOpenOrder, onCreateOrder, onEditOrder, initialTab
                     </div>
                   </td>
                   <td><PaidPill paid={o.paid} isUnpaid={isUnpaid}/></td>
+                  <td><EvidencePill type={o.receiptType} status={o.receiptStatus}/></td>
                   <td>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
                       <SimplePill kind="photo" value={o.photo}/>
@@ -1378,6 +1394,8 @@ function toOrderRow(order) {
     vatType: order.vat_type || 'included',
     paymentStatus: order.payment_status,
     paid: toPaidState(order.payment_status),
+    receiptType: order.receipt_type,
+    receiptStatus: order.receipt_status,
     photo: toPhotoState(rawStatus),
     delivered: toDeliveredState(rawStatus),
   };
