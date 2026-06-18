@@ -309,6 +309,7 @@ class OrderPageService:
         customer_name = (group.customer_name if group else order.customer_name) or ""
         customer_phone = (group.customer_phone if group else order.customer_phone) or ""
         customer_address = (group.customer_address if group else order.customer_address) or ""
+        customer_address_detail = (group.customer_address_detail if group else None) or ""
 
         status_label = _status_label(order.status)
         candidates = [
@@ -317,6 +318,8 @@ class OrderPageService:
             order.service_name,
             format_quantity(order.size_or_quantity),
             customer_address,
+            customer_address_detail,
+            f"{customer_address} {customer_address_detail}".strip(),
             customer_name,
             format_phone(customer_phone),
             order.team_name or "미배정",

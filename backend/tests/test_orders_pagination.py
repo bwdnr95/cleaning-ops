@@ -43,6 +43,7 @@ def _add_order(
     customer_name: str = CUSTOMER_TAG,
     customer_phone: str = "01055556666",
     customer_address: str = "서울특별시 마포구 검증로 7",
+    customer_address_detail: str | None = None,
     service_name: str = "입주청소",
 ) -> None:
     group = OrderGroup(
@@ -51,6 +52,7 @@ def _add_order(
         customer_name=customer_name,
         customer_phone=customer_phone,
         customer_address=customer_address,
+        customer_address_detail=customer_address_detail,
         customer_visible_payment=False,
     )
     db.add(group)
@@ -410,6 +412,29 @@ def test_search_query_no_match() -> None:
     body = _get_page(client, headers, visit_preset="all", q="존재하지않는검색어zzz", page=1, page_size=50)
     assert body["total"] == 0
     assert body["items"] == []
+
+
+def test_search_matches_address_detail() -> None:
+    """주소 검색이 상세주소(customer_address_detail)도 매칭한다."""
+
+    def seed(db: Session) -> None:
+        _add_order(
+            db,
+            order_id="ord-detail-addr",
+            status=OrderStatus.SCHEDULED.value,
+            scheduled_date=business_today(),
+            received_date=business_today(),
+            customer_name="상세주소검증고객",
+            customer_address="서울특별시 송파구 올림픽로 300",
+            customer_address_detail="롯데월드타워 101동 4501호",
+        )
+
+    client = make_test_client(seed)
+    headers = _auth(client)
+
+    body = _get_page(client, headers, visit_preset="all", q="4501호", page=1, page_size=50)
+    ids = {item["id"] for item in body["items"]}
+    assert "ord-detail-addr" in ids
 
 
 def test_search_by_phone_digits() -> None:
