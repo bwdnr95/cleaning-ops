@@ -6,7 +6,7 @@ from uuid import uuid4
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.domain.constants import OrderStatus, TimelineEventType
+from app.domain.constants import OrderStatus, ReceiptStatus, ReceiptType, TimelineEventType
 from app.domain.order_pricing import order_consumer_total
 from app.domain.payment_status import PAYMENT_TRACKED_FIELDS
 from app.domain.phone import normalize_phone
@@ -36,6 +36,12 @@ from app.schemas.order import (
 from app.schemas.photo import PartnerPhotoRead, PhotoRead
 from app.services.service_catalog import ServiceCatalogService
 from app.services.timeline import TimelineService
+
+
+def _normalize_receipt_fields(values: dict) -> None:
+    """증빙 유형이 발급X(NONE)면 발급 상태를 '해당없음'으로 강제한다."""
+    if values.get("receipt_type") == ReceiptType.NONE:
+        values["receipt_status"] = ReceiptStatus.NOT_APPLICABLE
 
 PARTNER_JOB_STARTABLE_STATUSES = {
     OrderStatus.SCHEDULE_CONFIRMED.value,
@@ -173,6 +179,7 @@ class OrderService:
     ) -> Order:
         values = payload.model_dump()
         self._apply_service_catalog(values)
+        _normalize_receipt_fields(values)
         order = Order(
             id=str(uuid4()),
             group_id=group.id,
@@ -208,6 +215,7 @@ class OrderService:
 
         changes = payload.model_dump(exclude_unset=True)
         self._apply_service_catalog(changes)
+        _normalize_receipt_fields(changes)
         old_status = order.status
         payment_changes = collect_payment_changes(order, changes)
         schedule_changes = collect_schedule_changes(order, changes)
@@ -544,6 +552,8 @@ def to_admin_order_dto(
         payment_status=order.payment_status,
         payment_memo=order.payment_memo,
         evidence_memo=order.evidence_memo,
+        receipt_type=order.receipt_type,
+        receipt_status=order.receipt_status,
         partner_payment_amount=order.partner_payment_amount,
         partner_payment_status=order.partner_payment_status,
         consumer_price=order.total_amount,

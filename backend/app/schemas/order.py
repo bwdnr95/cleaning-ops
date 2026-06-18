@@ -2,7 +2,7 @@ from datetime import date, datetime
 
 from pydantic import Field
 
-from app.domain.constants import OrderStatus, PhotoType, VatType
+from app.domain.constants import OrderStatus, PhotoType, ReceiptStatus, ReceiptType, VatType
 from app.schemas.common import ApiModel, TimelineEventRead
 from app.schemas.message import MessageLogRead
 from app.schemas.photo import PartnerPhotoRead, PhotoRead
@@ -57,6 +57,8 @@ class OrderLineBase(ApiModel):
     payment_status: str | None = None
     payment_memo: str | None = None
     evidence_memo: str | None = None
+    receipt_type: ReceiptType | None = None
+    receipt_status: ReceiptStatus | None = None
     partner_payment_amount: float | None = Field(default=None, ge=0)
     partner_payment_status: str | None = None
 
@@ -99,6 +101,8 @@ class OrderUpdate(ApiModel):
     payment_status: str | None = None
     payment_memo: str | None = None
     evidence_memo: str | None = None
+    receipt_type: ReceiptType | None = None
+    receipt_status: ReceiptStatus | None = None
     partner_payment_amount: float | None = Field(default=None, ge=0)
     partner_payment_status: str | None = None
 
