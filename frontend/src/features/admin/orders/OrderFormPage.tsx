@@ -18,16 +18,18 @@ import { PARTNER_PAYMENT_STATUSES, PAYMENT_STATUSES } from '../../../domain/paym
 import { getAppTodayValue } from '../../../domain/time';
 import { useOrderFormDraft } from './useOrderFormDraft';
 
-export function OrderFormPage({ mode = 'create', orderId = null, onCancel, onSaved }) {
+export function OrderFormPage({ mode = 'create', orderId = null, duplicateFromOrderId = null, onCancel, onSaved }) {
+  // 복제: create 저장 경로를 그대로 쓰되, 기존 주문의 고객정보만 복사한다(서비스/일정/협력사는 공란).
+  const isDuplicate = mode === 'create' && Boolean(duplicateFromOrderId);
   const partners = useApiResource(listPartners);
   const serviceCatalog = useApiResource(listServiceCatalog);
   const [form, setForm] = React.useState(() => createEmptyGroupForm());
-  const [isLoadingOrder, setIsLoadingOrder] = React.useState(mode === 'edit');
+  const [isLoadingOrder, setIsLoadingOrder] = React.useState(mode === 'edit' || isDuplicate);
   const [isSaving, setIsSaving] = React.useState(false);
   const [isSendingQuote, setIsSendingQuote] = React.useState(false);
   const [error, setError] = React.useState(null);
   const [notice, setNotice] = React.useState('');
-  const draft = useOrderFormDraft(form, { enabled: mode === 'create' });
+  const draft = useOrderFormDraft(form, { enabled: mode === 'create' && !isDuplicate });
   const activeServiceCategories = React.useMemo(
     () => (serviceCatalog.data || []).filter((category) => category.is_active),
     [serviceCatalog.data],
@@ -36,7 +38,8 @@ export function OrderFormPage({ mode = 'create', orderId = null, onCancel, onSav
   React.useEffect(() => {
     let isCurrent = true;
 
-    if (mode !== 'edit' || !orderId) {
+    const loadId = mode === 'edit' ? orderId : (isDuplicate ? duplicateFromOrderId : null);
+    if (!loadId) {
       setForm(createEmptyGroupForm());
       setIsLoadingOrder(false);
       return () => {
@@ -45,10 +48,10 @@ export function OrderFormPage({ mode = 'create', orderId = null, onCancel, onSav
     }
 
     setIsLoadingOrder(true);
-    getAdminOrder(orderId)
+    getAdminOrder(loadId)
       .then((order) => {
         if (isCurrent) {
-          setForm(toForm(order));
+          setForm(isDuplicate ? toDuplicateForm(order) : toForm(order));
         }
       })
       .catch(() => {
@@ -65,10 +68,10 @@ export function OrderFormPage({ mode = 'create', orderId = null, onCancel, onSav
     return () => {
       isCurrent = false;
     };
-  }, [mode, orderId]);
+  }, [mode, orderId, isDuplicate, duplicateFromOrderId]);
 
   React.useEffect(() => {
-    if (mode !== 'create') return;
+    if (mode !== 'create' || isDuplicate) return;
     const restored = draft.loadDraft();
     if (!restored) return;
     if (form.customer_name === '' && form.customer_phone === '' && form.lines.every((line) => !line.scheduled_date)) {
@@ -265,7 +268,7 @@ export function OrderFormPage({ mode = 'create', orderId = null, onCancel, onSav
         </button>
         <span style={{ width: 1, height: 16, background: 'var(--border)' }}/>
         <h2 style={{ margin: 0, fontSize: 14, fontWeight: 600 }}>
-          {mode === 'edit' ? '주문 수정' : '신규 주문 등록'}
+          {mode === 'edit' ? '주문 수정' : isDuplicate ? '주문 복제' : '신규 주문 등록'}
         </h2>
         <div style={{ flex: 1 }}/>
         <button
@@ -285,6 +288,11 @@ export function OrderFormPage({ mode = 'create', orderId = null, onCancel, onSav
       <div className="scroll" style={{ flex: 1, overflow: 'auto', padding: 20 }}>
         <div className="page-shell" style={{ display: 'grid', gridTemplateColumns: '1fr 300px', gap: 16 }}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            {isDuplicate && (
+              <div data-testid="order-duplicate-banner" style={{ padding: '10px 12px', background: 'var(--brand-bg)', border: '1px solid var(--brand)', borderRadius: 8, fontSize: 12.5, color: 'var(--text)' }}>
+                고객정보만 복사되었습니다. 서비스 / 일정 / 협력사 / 금액을 입력해 새 주문으로 등록하세요.
+              </div>
+            )}
             <Section title="고객 정보">
               <FieldGrid>
                 <TextField testId="order-customer-name" label="고객명" required value={form.customer_name} onChange={(value) => setGroupField('customer_name', value)} />
@@ -643,6 +651,19 @@ function toForm(order) {
     customer_visible_payment: Boolean(order.customer_visible_payment),
     notes: order.group_notes ?? order.notes ?? '',
     lines: [toLineForm(order)],
+  };
+}
+
+// 복제용: 새 주문이므로 그룹/라인 식별자와 서비스/일정/협력사/금액은 비우고 고객정보만 가져온다.
+function toDuplicateForm(order) {
+  return {
+    ...createEmptyGroupForm(),
+    customer_name: order.customer_name || '',
+    customer_phone: order.customer_phone || '',
+    customer_address: order.customer_address || '',
+    customer_address_detail: order.customer_address_detail || '',
+    source_channel: order.source_channel || '',
+    customer_visible_payment: Boolean(order.customer_visible_payment),
   };
 }
 

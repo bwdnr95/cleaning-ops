@@ -51,7 +51,7 @@ const MESSAGE_ACTIONS = {
 const WORK_DONE_STATUS = '고객전달필요';
 const BALANCE_NOTICE_MESSAGE_TYPE = 'customer_balance_due';
 
-export function OrderDetailPage({ orderId, onBack, onEdit, onNav, onOpenOrder }) {
+export function OrderDetailPage({ orderId, onBack, onEdit, onDuplicate, onNav, onOpenOrder }) {
   const loadOrder = React.useCallback(() => getAdminOrder(orderId), [orderId]);
   const orderResource = useApiResource(loadOrder, orderId);
   const partnersResource = useApiResource(listPartners);
@@ -366,6 +366,11 @@ export function OrderDetailPage({ orderId, onBack, onEdit, onNav, onOpenOrder })
         <button data-testid="order-detail-edit" className="btn btn--secondary btn--sm" onClick={() => { if (confirmLeaveIfDirty()) onEdit(); }}>
           수정
         </button>
+        {onDuplicate && (
+          <button data-testid="order-detail-duplicate" className="btn btn--ghost btn--sm" onClick={() => { if (confirmLeaveIfDirty()) onDuplicate(); }}>
+            <Icon name="copy" size={12}/> 복제
+          </button>
+        )}
         <button className="btn btn--ghost btn--sm" onClick={() => navigateWithGuard('calendar')}>
           <Icon name="calendar" size={12}/> 일정표
         </button>

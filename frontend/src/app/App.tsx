@@ -152,12 +152,13 @@ export function App() {
                     return (
                       <>
                         <Topbar
-                          title={orderForm.mode === 'edit' ? '주문 수정' : '신규 주문 등록'}
-                          breadcrumb={['운영', '주문관리', orderForm.mode === 'edit' ? '수정' : '신규']}
+                          title={orderForm.duplicateFromOrderId ? '주문 복제' : orderForm.mode === 'edit' ? '주문 수정' : '신규 주문 등록'}
+                          breadcrumb={['운영', '주문관리', orderForm.duplicateFromOrderId ? '복제' : orderForm.mode === 'edit' ? '수정' : '신규']}
                         />
                         <OrderFormPage
                           mode={orderForm.mode}
                           orderId={orderForm.orderId}
+                          duplicateFromOrderId={orderForm.duplicateFromOrderId || null}
                           onCancel={() => {
                             if (orderForm.mode === 'edit' && orderForm.orderId) {
                               navigateAdmin(toOrderDetailRoute(orderForm.orderId, ordersView));
@@ -184,6 +185,7 @@ export function App() {
                           orderId={detailOrderId}
                           onBack={() => navigateAdmin(toPageRoute('orders', ordersView))}
                           onEdit={() => navigateAdmin(toOrderEditRoute(detailOrderId, ordersView))}
+                          onDuplicate={() => navigateAdmin(toOrderDuplicateRoute(detailOrderId, ordersView))}
                           onOpenOrder={(nextOrderId) => navigateAdmin(toOrderDetailRoute(nextOrderId, ordersView))}
                           onNav={(nextPage) => {
                             setPage(nextPage);
@@ -327,6 +329,16 @@ function toOrderEditRoute(orderId, ordersView = DEFAULT_ORDERS_VIEW) {
   };
 }
 
+function toOrderDuplicateRoute(orderId, ordersView = DEFAULT_ORDERS_VIEW) {
+  // 복제는 create 저장 경로를 쓰되 원본 주문의 고객정보만 복사한다.
+  return {
+    page: 'orders',
+    detailOrderId: null,
+    orderForm: { mode: 'create', orderId: null, duplicateFromOrderId: orderId },
+    ordersView,
+  };
+}
+
 function readAdminRouteFromLocation() {
   if (typeof window === 'undefined') {
     return DEFAULT_ADMIN_ROUTE;
@@ -353,6 +365,9 @@ function readAdminRouteFromLocation() {
     const orderId = segments[1];
     if (segments[2] === 'edit') {
       return normalizeAdminRoute(toOrderEditRoute(orderId, ordersView));
+    }
+    if (segments[2] === 'duplicate') {
+      return normalizeAdminRoute(toOrderDuplicateRoute(orderId, ordersView));
     }
     return normalizeAdminRoute(toOrderDetailRoute(orderId, ordersView));
   }
@@ -396,7 +411,9 @@ function writeAdminHistory(route, { replace = false } = {}) {
 function adminRouteToHash(route) {
   const normalized = normalizeAdminRoute(route);
   let path = normalized.page;
-  if (normalized.orderForm?.mode === 'create') {
+  if (normalized.orderForm?.mode === 'create' && normalized.orderForm.duplicateFromOrderId) {
+    path = `orders/${encodeURIComponent(normalized.orderForm.duplicateFromOrderId)}/duplicate`;
+  } else if (normalized.orderForm?.mode === 'create') {
     path = 'orders/new';
   } else if (normalized.orderForm?.mode === 'edit' && normalized.orderForm.orderId) {
     path = `orders/${encodeURIComponent(normalized.orderForm.orderId)}/edit`;
