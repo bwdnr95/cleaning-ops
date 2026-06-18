@@ -1114,7 +1114,11 @@ class MessageService:
             partner = self.partners.get(order.partner_id)
             if partner is None:
                 raise ValueError("partner_not_found")
-            return RecipientType.PARTNER, partner.manager_name or partner.name, partner.phone
+            # 정산/고객정보 안내는 담당자 연락처로 우선 발송(없으면 대표 연락처).
+            recipient_phone = partner.phone
+            if payload.message_type == MessageType.PARTNER_CUSTOMER_INFO:
+                recipient_phone = partner.manager_phone or partner.phone
+            return RecipientType.PARTNER, partner.manager_name or partner.name, recipient_phone
 
         if payload.recipient_type != RecipientType.CUSTOMER:
             raise ValueError("invalid_recipient_type")

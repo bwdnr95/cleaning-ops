@@ -12,6 +12,7 @@ class PartnerBase(ApiModel):
     partner_category_id: str | None = None
     manager_name: str | None = None
     phone: str
+    manager_phone: str | None = None
     service_areas: str | None = None
     available_services: str | None = None
     memo: str | None = None
@@ -28,6 +29,7 @@ class PartnerUpdate(ApiModel):
     partner_category_id: str | None = None
     manager_name: str | None = None
     phone: str | None = None
+    manager_phone: str | None = None
     service_areas: str | None = None
     available_services: str | None = None
     memo: str | None = None

@@ -670,6 +670,7 @@ export function PartnersPage() {
               <form onSubmit={handleCreate} style={{ padding: 14, display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 10 }}>
                 <FormField testId="partner-create-name" label="협력사명" value={createForm.name} onChange={(value) => setCreateForm({ ...createForm, name: value })} required />
                 <FormField label="담당자" value={createForm.manager_name} onChange={(value) => setCreateForm({ ...createForm, manager_name: value })} />
+                <FormField testId="partner-create-manager-phone" label="담당자 연락처" value={createForm.manager_phone} onChange={(value) => setCreateForm({ ...createForm, manager_phone: value })} />
                 <CategorySelect
                   testId="partner-create-category"
                   label="대분류"
@@ -716,6 +717,7 @@ export function PartnersPage() {
                         onChange={(value) => setForm({ ...form, partner_category_id: value })}
                       />
                       <FormField testId="partner-detail-phone" label="대표 연락처" value={form.phone} onChange={(value) => setForm({ ...form, phone: value })} required />
+                      <FormField testId="partner-detail-manager-phone" label="담당자 연락처" value={form.manager_phone} onChange={(value) => setForm({ ...form, manager_phone: value })} />
                       <FormField label="권역" value={form.service_areas} onChange={(value) => setForm({ ...form, service_areas: value })} />
                     </div>
                     <TextAreaField label="가능 서비스" value={form.available_services} onChange={(value) => setForm({ ...form, available_services: value })} />
@@ -1187,6 +1189,7 @@ function defaultPartnerForm(overrides = {}) {
     partner_category_id: '',
     manager_name: '',
     phone: '',
+    manager_phone: '',
     service_areas: '',
     available_services: '',
     memo: '',
@@ -1203,6 +1206,7 @@ function toPartnerForm(partner) {
     partner_category_id: partner.partner_category_id || '',
     manager_name: partner.manager_name || '',
     phone: partner.phone || '',
+    manager_phone: partner.manager_phone || '',
     service_areas: partner.service_areas || '',
     available_services: partner.available_services || '',
     memo: partner.memo || '',
@@ -1218,6 +1222,7 @@ function toPartnerPayload(form, { includeLogin = false } = {}) {
     partner_category_id: form.partner_category_id || null,
     manager_name: optionalText(form.manager_name),
     phone: form.phone.trim(),
+    manager_phone: optionalText(form.manager_phone),
     service_areas: optionalText(form.service_areas),
     available_services: optionalText(form.available_services),
     memo: optionalText(form.memo),

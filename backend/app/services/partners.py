@@ -125,6 +125,7 @@ class PartnerService:
             name=payload.name,
             manager_name=payload.manager_name,
             phone=normalize_phone(payload.phone),
+            manager_phone=normalize_phone(payload.manager_phone) if payload.manager_phone else None,
             service_areas=payload.service_areas,
             available_services=payload.available_services,
             memo=payload.memo,
@@ -171,7 +172,7 @@ class PartnerService:
         if "partner_category_id" in changes:
             self._require_category(changes["partner_category_id"])
         for key, value in changes.items():
-            if key == "phone" and value is not None:
+            if key in ("phone", "manager_phone") and value:
                 value = normalize_phone(value)
             setattr(partner, key, value)
 
@@ -299,6 +300,7 @@ class PartnerService:
             name=partner.name,
             manager_name=partner.manager_name,
             phone=partner.phone,
+            manager_phone=partner.manager_phone,
             service_areas=partner.service_areas,
             available_services=partner.available_services,
             memo=partner.memo,
