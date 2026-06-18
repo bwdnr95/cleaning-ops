@@ -402,6 +402,7 @@ body.orders-column-resizing {
 .muted { color: var(--text-tertiary); }
 .tnum { font-variant-numeric: tabular-nums; }
 .mono { font-family: var(--font-mono); }
+.multiline-text { white-space: pre-wrap; word-break: break-word; }
 .kbd {
   display: inline-flex;
   align-items: center;

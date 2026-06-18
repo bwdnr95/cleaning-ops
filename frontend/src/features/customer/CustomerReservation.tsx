@@ -697,6 +697,8 @@ const mutedLineStyle = css({
   fontSize: 12,
   marginTop: 3,
   lineHeight: 1.45,
+  whiteSpace: 'pre-wrap',
+  wordBreak: 'break-word',
 });
 
 const guideStyle = css({

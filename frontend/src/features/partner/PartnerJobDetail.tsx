@@ -195,7 +195,7 @@ export function PartnerJobDetail() {
 
           <InfoRow icon="mapPin">
             {jobAddress}<br/>
-            <span style={{ color: 'var(--text-tertiary)' }}>{job.service_detail || '현장 상세 정보 없음'}</span>
+            <span className="multiline-text" style={{ color: 'var(--text-tertiary)' }}>{job.service_detail || '현장 상세 정보 없음'}</span>
           </InfoRow>
 
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
@@ -214,7 +214,7 @@ export function PartnerJobDetail() {
             </div>
           </div>
           <SectionLabel>특별 요청</SectionLabel>
-          <div style={{ padding: 10, background: 'var(--warn-bg)', border: '1px solid var(--warn-border)', borderRadius: 8, fontSize: 12.5, lineHeight: 1.5, color: '#78350f' }}>
+          <div className="multiline-text" style={{ padding: 10, background: 'var(--warn-bg)', border: '1px solid var(--warn-border)', borderRadius: 8, fontSize: 12.5, lineHeight: 1.5, color: '#78350f' }}>
             {job.special_request || '별도 요청 사항이 없습니다.'}
           </div>
         </Panel>

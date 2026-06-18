@@ -989,12 +989,15 @@ function KVItem({ label, value, mono = false, span = undefined, multiline = fals
   return (
     <div style={{ gridColumn: span ? `span ${span}` : 'auto' }}>
       <div style={{ fontSize: 10.5, color: 'var(--text-tertiary)', fontWeight: 500, marginBottom: 3 }}>{label}</div>
-      <div style={{
-        fontSize: 12.5,
-        color: 'var(--text)',
-        fontFamily: mono ? 'var(--font-mono)' : 'inherit',
-        lineHeight: multiline ? 1.5 : 1.4,
-      }}>
+      <div
+        className={multiline ? 'multiline-text' : undefined}
+        style={{
+          fontSize: 12.5,
+          color: 'var(--text)',
+          fontFamily: mono ? 'var(--font-mono)' : 'inherit',
+          lineHeight: multiline ? 1.5 : 1.4,
+        }}
+      >
         {value}
       </div>
     </div>
