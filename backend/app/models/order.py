@@ -44,6 +44,9 @@ class Order(TimestampMixin, Base):
     payment_status: Mapped[str | None] = mapped_column(String(40), index=True)
     payment_memo: Mapped[str | None] = mapped_column(Text)
     evidence_memo: Mapped[str | None] = mapped_column(Text)
+    # 증빙자료(현금영수증/세금계산서) 구조화 상태. evidence_memo(자유텍스트)와 병행.
+    receipt_type: Mapped[str | None] = mapped_column(String(20))
+    receipt_status: Mapped[str | None] = mapped_column(String(30))
     partner_payment_amount: Mapped[Decimal | None] = mapped_column(Numeric(12, 2))
     partner_payment_status: Mapped[str | None] = mapped_column(String(40))
     partner_settled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

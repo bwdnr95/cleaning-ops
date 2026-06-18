@@ -42,6 +42,8 @@ PAYMENT_TRACKED_FIELDS: tuple[str, ...] = (
     "payment_status",
     "payment_memo",
     "evidence_memo",
+    "receipt_type",
+    "receipt_status",
     "partner_payment_amount",
     "partner_payment_status",
     "partner_settled_at",

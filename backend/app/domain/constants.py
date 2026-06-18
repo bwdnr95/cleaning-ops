@@ -33,6 +33,22 @@ class VatType(StrEnum):
     EXCLUDED = "excluded"
 
 
+class ReceiptType(StrEnum):
+    """증빙자료 유형(1차 선택)."""
+
+    CASH_RECEIPT = "cash_receipt"
+    TAX_INVOICE = "tax_invoice"
+    NONE = "none"
+
+
+class ReceiptStatus(StrEnum):
+    """증빙자료 발급 상태(2차 선택). NONE 유형이면 NOT_APPLICABLE."""
+
+    ISSUED = "issued"
+    PENDING = "pending"
+    NOT_APPLICABLE = "not_applicable"
+
+
 class MessageType(StrEnum):
     CUSTOMER_SCHEDULE_CONFIRMED = "customer_schedule_confirmed"
     CUSTOMER_DAY_BEFORE = "customer_day_before"
