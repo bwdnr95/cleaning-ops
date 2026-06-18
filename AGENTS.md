@@ -117,7 +117,8 @@ DB write는 service/action 계층을 통해 수행하고, 그 안에서 권한 �
 
 - 모든 보고서 endpoint는 `require_admin` 가드와 `Order.deleted_at IS NULL` 필터를 강제한다.
 - **매출 정의는 `status IN (CUSTOMER_DELIVERY_DONE, COMPLETED)` 합계**다. `DashboardService.monthly_revenue`와 정확히 동일하게 유지한다. 화면마다 매출이 달라지면 운영자는 회사 매출을 믿을 수 없다.
-- 정산 대기는 `OrderStatus.COMPLETED` + `partner_payment_status`가 `PARTNER_SETTLEMENT_PENDING_STATUSES` 또는 NULL인 주문이다.
+- **미정산 가시성**(정산 탭/협력사 미정산 합계/정산 백로그)은 다음 중 하나다(공통 헬퍼 `unpaid_partner_condition`): (a) `partner_payment_status`가 `PARTNER_SETTLEMENT_PENDING_STATUSES`(명시적 미지급/지급대기) — **주문 상태 무관**, 또는 (b) `OrderStatus.COMPLETED` + `partner_payment_status`가 NULL. 운영자가 미지급으로 표시한 건은 완료 전이라도 미정산으로 보여야 한다.
+- **정산 실행(지급완료 처리)** 가드(`is_unpaid_partner_order`)는 가시성과 분리한다: 미완료 작업을 지급완료로 찍지 못하도록 `OrderStatus.COMPLETED` 주문만 허용한다.
 - 집계는 SQLAlchemy의 `case`/`date_trunc` 같은 DB 방언 함수 대신 Python aggregation (`itertools.groupby` + `Decimal`)으로 구현한다. 운영 데이터량(수십~수백 건) 수준에서 성능 영향 없음 + dialect 무관.
 - Export는 화면의 현재 필터/기간을 query string으로 묶어 호출하고 backend가 content-disposition으로 다운로드시킨다. 파일명은 ASCII (`revenue.csv`).
 - 주문 import는 행별 validate + `group_key` 컬럼으로 묶어 OrderGroup 단위 commit. 한 group 안의 line 하나라도 실패하면 그 group 전체를 rollback한다.

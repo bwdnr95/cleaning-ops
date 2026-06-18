@@ -11,6 +11,7 @@ from app.domain.payment_status import PARTNER_SETTLEMENT_PENDING_STATUSES
 from app.models.order import Order
 from app.models.partner import Partner
 from app.models.service_item import ServiceItem
+from app.services.partner_settlements import unpaid_partner_condition
 from app.schemas.report import (
     PartnerPerformanceReport,
     PartnerPerformanceRow,
@@ -179,16 +180,13 @@ class ReportService:
             select(Order)
             .where(
                 Order.deleted_at.is_(None),
-                Order.status == OrderStatus.COMPLETED,
+                unpaid_partner_condition(),
             )
             .order_by(Order.scheduled_date.asc().nulls_last(), Order.id.asc())
         )
 
         rows: list[SettlementBacklogRow] = []
         for order in self.db.scalars(order_stmt):
-            payment_status = order.partner_payment_status
-            if payment_status is not None and payment_status not in PARTNER_SETTLEMENT_PENDING_STATUSES:
-                continue
             partner = partners.get(order.partner_id or "")
             rows.append(
                 SettlementBacklogRow(

@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 from app.core.security import hash_password
 from app.domain.constants import AuditEventType, AuditSeverity, OrderStatus, UserRole
 from app.domain.order_pricing import order_consumer_total
-from app.domain.payment_status import PARTNER_SETTLEMENT_PENDING_STATUSES
+from app.services.partner_settlements import unpaid_partner_condition
 from app.domain.phone import normalize_phone
 from app.models.order import Order
 from app.models.partner import Partner, PartnerCategory
@@ -387,9 +387,6 @@ class PartnerService:
             partner_id: empty_settlement_summary()
             for partner_id in partner_ids
         }
-        unpaid_condition = Order.partner_payment_status.is_(None) | Order.partner_payment_status.in_(
-            PARTNER_SETTLEMENT_PENDING_STATUSES
-        )
         settlement_stmt = (
             select(
                 Order.partner_id,
@@ -399,8 +396,7 @@ class PartnerService:
             .where(
                 Order.deleted_at.is_(None),
                 Order.partner_id.in_(partner_ids),
-                Order.status == OrderStatus.COMPLETED,
-                unpaid_condition,
+                unpaid_partner_condition(),
             )
             .group_by(Order.partner_id)
         )
@@ -497,17 +493,13 @@ class PartnerService:
         return list(self.db.scalars(stmt))
 
     def _unpaid_settlement_summary(self, partner_id: str) -> dict[str, float | int]:
-        unpaid_condition = Order.partner_payment_status.is_(None) | Order.partner_payment_status.in_(
-            PARTNER_SETTLEMENT_PENDING_STATUSES
-        )
         stmt = select(
             func.count(Order.id),
             func.coalesce(func.sum(Order.partner_payment_amount), 0),
         ).where(
             Order.partner_id == partner_id,
             Order.deleted_at.is_(None),
-            Order.status == OrderStatus.COMPLETED,
-            unpaid_condition,
+            unpaid_partner_condition(),
         )
         count, amount = self.db.execute(stmt).one()
         return {

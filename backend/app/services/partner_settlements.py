@@ -22,6 +22,17 @@ from app.services.timeline import TimelineService
 SETTLEABLE_ORDER_STATUSES = (OrderStatus.COMPLETED,)
 
 
+def unpaid_partner_condition():
+    """미정산 SQL 조건(전 화면 공통).
+
+    - 운영자가 명시적으로 '미지급/지급대기'로 표시한 건은 주문 상태와 무관하게 포함.
+    - '서비스완료'인데 정산상태 미입력(NULL)인 건도 미정산으로 포함.
+    """
+    return Order.partner_payment_status.in_(PARTNER_SETTLEMENT_PENDING_STATUSES) | (
+        (Order.status == OrderStatus.COMPLETED) & Order.partner_payment_status.is_(None)
+    )
+
+
 class PartnerSettlementService:
     def __init__(self, db: Session) -> None:
         self.db = db
@@ -138,7 +149,6 @@ class PartnerSettlementService:
             .where(
                 Order.partner_id == partner_id,
                 Order.deleted_at.is_(None),
-                Order.status.in_(SETTLEABLE_ORDER_STATUSES),
             )
             .order_by(Order.scheduled_date.desc().nulls_last(), Order.id.desc())
         )
@@ -147,13 +157,17 @@ class PartnerSettlementService:
         if to_date is not None:
             stmt = stmt.where(Order.scheduled_date <= to_date)
         if status == "unpaid":
-            unpaid_condition = Order.partner_payment_status.is_(None) | Order.partner_payment_status.in_(
-                PARTNER_SETTLEMENT_PENDING_STATUSES
-            )
-            stmt = stmt.where(unpaid_condition)
+            stmt = stmt.where(unpaid_partner_condition())
         elif status == "paid":
-            stmt = stmt.where(Order.partner_payment_status == PartnerPaymentStatus.PAID)
-        elif status != "all":
+            # 정산완료 이력은 기존대로 서비스완료 주문만 본다.
+            stmt = stmt.where(
+                Order.status.in_(SETTLEABLE_ORDER_STATUSES),
+                Order.partner_payment_status == PartnerPaymentStatus.PAID,
+            )
+        elif status == "all":
+            # 서비스완료 전체(기존) + 상태 무관 명시적 미지급(추가). 행은 추가만, 제거 없음.
+            stmt = stmt.where(Order.status.in_(SETTLEABLE_ORDER_STATUSES) | unpaid_partner_condition())
+        else:
             raise ValueError("invalid_settlement_status")
         return list(self.db.scalars(stmt))
 
@@ -200,6 +214,8 @@ def to_settlement_item(order: Order) -> PartnerSettlementItemRead:
 
 
 def is_unpaid_partner_order(order: Order) -> bool:
+    # 정산 '실행(지급완료 처리)' 가드. 가시성(unpaid_partner_condition)과 달리,
+    # 미완료 작업을 지급완료로 찍지 못하도록 서비스완료 주문만 허용한다.
     return (
         order.deleted_at is None
         and order.status in SETTLEABLE_ORDER_STATUSES

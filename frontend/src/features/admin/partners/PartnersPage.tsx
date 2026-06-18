@@ -821,6 +821,8 @@ export function PartnersPage() {
                     {['방문일', '상태', '작업', '고객', '소비자가', '도급가(VAT 포함)', '정산상태', '액션'].map((header) => <GridHead key={header}>{header}</GridHead>)}
                     {settlements.items.map((job) => {
                       const isPaid = job.partner_payment_status === 'paid';
+                      // 미정산으로 보이더라도 지급완료 처리는 서비스완료 주문만 가능.
+                      const canSettle = job.status === '서비스완료';
                       return (
                       <React.Fragment key={job.order_id}>
                         <GridCell testId={`partner-settlement-row-${job.order_id}`}>
@@ -845,7 +847,7 @@ export function PartnersPage() {
                             {isPaid ? (
                               <button type="button" data-testid={`partner-settlement-revert-${job.order_id}`} className="btn btn--secondary btn--sm" onClick={() => void handleRevertSettlement([job.order_id])}>되돌리기</button>
                             ) : (
-                              <button type="button" data-testid={`partner-settlement-settle-${job.order_id}`} className="btn btn--secondary btn--sm" onClick={() => void handleSettle([job.order_id])}>정산</button>
+                              <button type="button" data-testid={`partner-settlement-settle-${job.order_id}`} className="btn btn--secondary btn--sm" disabled={!canSettle} title={canSettle ? undefined : '서비스완료 후 정산 가능합니다.'} onClick={() => void handleSettle([job.order_id])}>정산</button>
                             )}
                             <button type="button" data-testid={`partner-settlement-notify-${job.order_id}`} className="btn btn--ghost btn--sm" onClick={() => setNotifyTarget(job)}>고객정보 전송</button>
                           </div>

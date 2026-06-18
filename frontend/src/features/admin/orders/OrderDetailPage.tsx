@@ -450,7 +450,7 @@ export function OrderDetailPage({ orderId, onBack, onEdit, onDuplicate, onNav, o
                 <div style={{ flex: 1 }}>
                   <div style={{ fontSize: 13, fontWeight: 600 }}>{order.team_name || selectedPartner?.name || '미배정'}</div>
                   <div style={{ fontSize: 11.5, color: 'var(--text-tertiary)', marginTop: 2 }}>
-                    정산 상태: {partnerPaymentStatusLabel(order.partner_payment_status)}
+                    정산 상태: {order.partner_id && !order.partner_payment_status ? '미정산' : partnerPaymentStatusLabel(order.partner_payment_status)}
                   </div>
                   <div style={{ fontSize: 11.5, color: 'var(--text-tertiary)', marginTop: 2 }}>
                     도급가(VAT 포함) {formatWon(order.partner_price ?? order.partner_payment_amount)} · 정산일 {order.partner_settled_at ? formatDateTime(order.partner_settled_at) : '-'}
