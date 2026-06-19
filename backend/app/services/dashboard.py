@@ -11,15 +11,6 @@ from app.models.order import Order
 from app.models.photo import OrderPhoto
 from app.schemas.dashboard import DashboardRecentActivity, DashboardRecentMessage, DashboardRecentPhoto, DashboardSummary
 
-TODAY_JOB_STATUSES = (
-    OrderStatus.SCHEDULE_CONFIRMED,
-    OrderStatus.DAY_BEFORE_NOTICE_NEEDED,
-    OrderStatus.DAY_BEFORE_NOTICE_DONE,
-    OrderStatus.SCHEDULED,
-    OrderStatus.IN_PROGRESS,
-)
-
-
 class DashboardService:
     def __init__(self, db: Session) -> None:
         self.db = db
@@ -33,9 +24,10 @@ class DashboardService:
         )
 
         return DashboardSummary(
+            # '오늘 작업'은 오늘 방문 예정 전체(취소 제외)로 센다 — 주문 리스트의 '오늘' 보기와 숫자를 일치시킨다.
             today_jobs=self._count(
                 Order.scheduled_date == current,
-                Order.status.in_(TODAY_JOB_STATUSES),
+                Order.status != OrderStatus.CANCELLED,
             ),
             tomorrow_notice_targets=self._count(
                 Order.scheduled_date == tomorrow,

@@ -13,6 +13,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.time import business_today
+from app.domain.constants import OrderStatus
 from app.domain.order_list import (
     ORDER_STATUS_TAB_OPTIONS,
     digits_only,
@@ -198,10 +199,11 @@ class OrderPageService:
                 unpaid_total += amount
             if not (order.team_name or "").strip():
                 unassigned += 1
+            # '오늘 작업'은 오늘 방문 예정 전체(취소 제외) — 대시보드 today_jobs 정의와 일치.
+            if order.status != OrderStatus.CANCELLED and order.scheduled_date == today:
+                today_jobs += 1
             if workflow == "작업예정":
                 schedule_confirmed += 1
-                if order.scheduled_date == today:
-                    today_jobs += 1
             elif workflow == "고객전달필요":
                 work_done += 1
         return OrderPageInsight(

@@ -35,9 +35,9 @@ const ADMIN_PAGE_META = {
     breadcrumb: ['운영', '일정 캘린더'],
   },
   photos: {
-    title: '사진검수',
-    subtitle: '검수 / 고객 전달',
-    breadcrumb: ['운영', '사진검수'],
+    title: '사진/고객전달',
+    subtitle: '사진검수 / 고객 전달 대기',
+    breadcrumb: ['운영', '사진/고객전달'],
   },
   products: {
     title: '상품관리',

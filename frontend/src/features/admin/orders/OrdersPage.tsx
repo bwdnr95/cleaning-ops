@@ -472,13 +472,14 @@ export function OrdersPage({ onOpenOrder, onCreateOrder, onEditOrder, initialTab
   };
 
   const handleBulkScheduleChange = async () => {
-    if (!bulkScheduledDate) {
-      setActionNotice({ tone: 'danger', text: '변경할 방문일을 선택해주세요.' });
+    // 날짜를 비우면(지우기) 방문일을 미배정으로 변경한다.
+    const toUnassigned = !bulkScheduledDate;
+    if (toUnassigned && !window.confirm(`선택한 ${selected.size}건의 방문일을 미배정으로 비울까요?`)) {
       return;
     }
     await runSelectedOrdersAction({
-      successLabel: `방문일을 ${bulkScheduledDate}(으)로 변경했습니다.`,
-      execute: (orderId) => updateAdminOrder(orderId, { scheduled_date: bulkScheduledDate }),
+      successLabel: toUnassigned ? '방문일을 미배정으로 변경했습니다.' : `방문일을 ${bulkScheduledDate}(으)로 변경했습니다.`,
+      execute: (orderId) => updateAdminOrder(orderId, { scheduled_date: bulkScheduledDate || null }),
     });
   };
 
@@ -1277,6 +1278,7 @@ function BulkActionPanel({
           <button data-testid="orders-bulk-schedule-apply" className="btn btn--primary btn--sm" disabled={isSaving} onClick={onApplySchedule}>
             {isSaving ? '처리 중' : '적용'}
           </button>
+          <span style={{ color: 'var(--text-tertiary)', fontSize: 11.5 }}>날짜를 비우면(지우기) 미배정으로 변경</span>
         </>
       )}
 

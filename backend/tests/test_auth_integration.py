@@ -1186,7 +1186,8 @@ def test_dashboard_summary_matches_operational_queue_definitions() -> None:
 
         summary = DashboardService(db).summary(today=date(2026, 5, 4))
 
-    assert summary.today_jobs == 3
+    # 오늘(2026-05-04) 방문 예정 전체(취소 제외): scheduled/confirmed/day-before-done/photo-review = 4.
+    assert summary.today_jobs == 4
     assert summary.tomorrow_notice_targets == 1
     assert summary.partner_pending == 1
     assert summary.photo_review_pending == 0

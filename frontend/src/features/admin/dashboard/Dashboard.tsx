@@ -342,7 +342,7 @@ function toQueues(summary) {
   return [
     { key: 'partner_pending', title: '협력사 확인 필요', count: summary.partner_pending, tone: 'warn', icon: 'clock', desc: '배정 후 확인 대기', targetPage: 'orders', ordersTab: 'partner_pending', datePreset: 'all' },
     { key: 'tomorrow_notify', title: '내일 안내 발송 필요', count: summary.tomorrow_notice_targets, tone: 'warn', icon: 'send', desc: '내일 작업 예정', targetPage: 'orders', ordersTab: 'tomorrow_notice', datePreset: 'tomorrow' },
-    { key: 'today_work', title: '오늘 작업 예정', count: summary.today_jobs, tone: 'info', icon: 'truck', desc: '진행/예정 작업', targetPage: 'orders', ordersTab: 'today', datePreset: 'today' },
+    { key: 'today_work', title: '오늘 작업 예정', count: summary.today_jobs, tone: 'info', icon: 'truck', desc: '오늘 방문 예정 전체', targetPage: 'orders', ordersTab: 'today', datePreset: 'today' },
     { key: 'photo_review', title: '사진 검수 대기', count: summary.photo_review_pending, tone: 'purple', icon: 'image', desc: '관리자 승인 필요', targetPage: 'orders', ordersTab: 'photo_review', datePreset: 'all' },
     { key: 'customer_deliver', title: '고객 전달 필요', count: summary.customer_delivery_needed, tone: 'warn', icon: 'sparkles', desc: '검수 완료 후 전달', targetPage: 'orders', ordersTab: 'deliver', datePreset: 'all' },
     { key: 'payment_check', title: '결제 확인 필요', count: summary.payment_check_needed, tone: 'danger', icon: 'creditCard', desc: '잔금/미수 확인', targetPage: 'orders', ordersTab: 'payment_check', datePreset: 'all' },

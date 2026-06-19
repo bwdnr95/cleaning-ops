@@ -7,7 +7,7 @@ export const NAV = [
   { key: 'dashboard',  label: '대시보드',     icon: 'home' },
   { key: 'orders',     label: '주문관리',     icon: 'inbox' },
   { key: 'calendar',   label: '일정 캘린더',  icon: 'calendar' },
-  { key: 'photos',     label: '사진검수',     icon: 'image' },
+  { key: 'photos',     label: '사진/고객전달', icon: 'image' },
   { key: 'products',   label: '상품관리',     icon: 'package',  badge: null },
   { key: 'partners',   label: '협력사관리',   icon: 'truck',    badge: null },
   { key: 'reports',    label: '보고서',       icon: 'trending', badge: null },
