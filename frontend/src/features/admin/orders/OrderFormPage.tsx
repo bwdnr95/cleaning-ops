@@ -5,7 +5,6 @@ import {
   getAdminOrder,
   listPartners,
   listServiceCatalog,
-  sendOrderQuote,
   updateAdminOrder,
   updateAdminOrderGroup,
 } from '../../../api/admin';
@@ -26,7 +25,6 @@ export function OrderFormPage({ mode = 'create', orderId = null, duplicateFromOr
   const [form, setForm] = React.useState(() => createEmptyGroupForm());
   const [isLoadingOrder, setIsLoadingOrder] = React.useState(mode === 'edit' || isDuplicate);
   const [isSaving, setIsSaving] = React.useState(false);
-  const [isSendingQuote, setIsSendingQuote] = React.useState(false);
   const [error, setError] = React.useState(null);
   const [notice, setNotice] = React.useState('');
   const draft = useOrderFormDraft(form, { enabled: mode === 'create' && !isDuplicate });
@@ -226,29 +224,6 @@ export function OrderFormPage({ mode = 'create', orderId = null, duplicateFromOr
     return net > 0 && partnerPrice > net;
   });
 
-  const handleQuoteSend = async () => {
-    if (hasPartnerPriceWarning) {
-      setError('도급가가 소비자가보다 큰 주문은 견적서를 발송할 수 없습니다.');
-      return;
-    }
-    setIsSendingQuote(true);
-    setError(null);
-    setNotice('');
-    try {
-      const saved = await saveForm();
-      if (!saved?.id) {
-        return;
-      }
-      await sendOrderQuote(saved.id, 'kakao');
-      setNotice('견적서 발송 요청을 보냈습니다. 도급가 변수는 알림톡 템플릿에 포함되지 않습니다.');
-      onSaved?.(saved);
-    } catch (requestError) {
-      setError(requestError?.message || '견적서 발송에 실패했습니다.');
-    } finally {
-      setIsSendingQuote(false);
-    }
-  };
-
   if (isLoadingOrder) {
     return <FormState text="주문 입력 정보를 불러오는 중입니다." onCancel={handleCancel} />;
   }
@@ -271,15 +246,6 @@ export function OrderFormPage({ mode = 'create', orderId = null, duplicateFromOr
           {mode === 'edit' ? '주문 수정' : isDuplicate ? '주문 복제' : '신규 주문 등록'}
         </h2>
         <div style={{ flex: 1 }}/>
-        <button
-          type="button"
-          data-testid="order-send-quote"
-          className="btn btn--secondary btn--sm"
-          disabled={isSaving || isSendingQuote || hasPartnerPriceWarning}
-          onClick={() => void handleQuoteSend()}
-        >
-          <Icon name="send" size={13}/> {isSendingQuote ? '발송 중' : '견적서 발송 (카카오톡)'}
-        </button>
         <button type="submit" data-testid="order-save" className="btn btn--primary btn--sm" disabled={isSaving}>
           <Icon name="check" size={13}/> {isSaving ? '저장 중' : '저장'}
         </button>
@@ -375,7 +341,8 @@ export function OrderFormPage({ mode = 'create', orderId = null, duplicateFromOr
               <div style={{ fontSize: 11, color: 'var(--text-tertiary)', fontWeight: 600, letterSpacing: 0, marginBottom: 8 }}>저장 시 처리</div>
               <div style={{ fontSize: 12, lineHeight: 1.55, color: 'var(--text-secondary)' }}>
                 신규 주문 저장 시 고객 확인 링크가 생성됩니다. 상태와 협력사 변경은 타임라인에 함께 기록됩니다.
-                견적서 알림톡에는 소비자가와 계약금/잔금만 포함되고 도급가는 포함되지 않습니다.
+                견적 안내는 저장 후 주문 상세의 [견적 안내] 버튼에서 미리보기 후 발송합니다.
+                (견적서에는 소비자가와 계약금/잔금만 포함되고 도급가는 포함되지 않습니다.)
               </div>
             </div>
           </aside>

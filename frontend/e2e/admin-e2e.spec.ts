@@ -385,17 +385,27 @@ test('admin can adjust schedule from order detail and jump to related ops pages'
 
   await page.getByTestId('detail-status-select').selectOption('고객전달필요');
   await page.getByTestId('detail-status-save').click();
-  await expect(page.getByTestId('admin-action-notice')).toContainText('잔금 안내를 발송했습니다');
+  // 상태 변경만으로는 잔금 안내가 자동 발송되지 않는다(자동발송 제거).
+  await expect(page.getByTestId('admin-action-notice')).toContainText('잔금 안내가 필요하면');
   await expect.poll(async () => {
     const [detail] = await getOrderDetails(request, [order]);
     return {
       status: detail.status,
-      messageTypes: detail.message_logs.map((message) => message.message_type),
+      balanceSent: detail.message_logs.some((message) => message.message_type === 'customer_balance_due'),
     };
   }).toEqual({
     status: '고객전달필요',
-    messageTypes: ['customer_balance_due'],
+    balanceSent: false,
   });
+
+  // 잔금 안내는 버튼 → 미리보기 → 확인 후에만 발송된다.
+  await page.getByTestId('send-customer-balance-due').click();
+  await expect(page.getByTestId('message-preview-modal')).toBeVisible();
+  await page.getByTestId('message-preview-send').click();
+  await expect.poll(async () => {
+    const [detail] = await getOrderDetails(request, [order]);
+    return detail.message_logs.some((message) => message.message_type === 'customer_balance_due');
+  }).toBe(true);
 
   await page.getByTestId('detail-nav-calendar').click();
   await expect(page.getByTestId('admin-calendar-page')).toBeVisible();

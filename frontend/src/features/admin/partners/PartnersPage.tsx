@@ -17,6 +17,7 @@ import {
   updateAdminPartner,
   updatePartnerCategory,
 } from '../../../api/admin';
+import { previewAdminMessage } from '../../../api/messages';
 import { PaginationBar, paginateItems } from '../../../components/common/Pagination';
 import { DatePicker } from '../../../components/common/DatePicker';
 import { useApiResource } from '../../../api/useApiResource';
@@ -56,6 +57,8 @@ export function PartnersPage() {
   const [settlementsLoading, setSettlementsLoading] = React.useState(false);
   const [settlementSelection, setSettlementSelection] = React.useState(new Set());
   const [notifyTarget, setNotifyTarget] = React.useState(null);
+  const [notifyPreview, setNotifyPreview] = React.useState(null);
+  const [notifyPreviewLoading, setNotifyPreviewLoading] = React.useState(false);
   const [settlementMemo, setSettlementMemo] = React.useState('');
   const [notice, setNotice] = React.useState('');
   const [error, setError] = React.useState('');
@@ -466,6 +469,22 @@ export function PartnersPage() {
       setError(partnerErrorMessage(requestError, '정산 되돌리기에 실패했습니다.'));
     }
   };
+
+  // 협력사 고객정보 전송 모달이 열리면 실제 발송 문구를 미리 불러와 보여준다(확인 후 발송).
+  React.useEffect(() => {
+    if (!notifyTarget) {
+      setNotifyPreview(null);
+      return undefined;
+    }
+    let active = true;
+    setNotifyPreviewLoading(true);
+    setNotifyPreview(null);
+    previewAdminMessage(notifyTarget.order_id, 'partner_customer_info', 'partner', 'sms')
+      .then((preview) => { if (active) setNotifyPreview(preview.content); })
+      .catch(() => { if (active) setNotifyPreview(null); })
+      .finally(() => { if (active) setNotifyPreviewLoading(false); });
+    return () => { active = false; };
+  }, [notifyTarget]);
 
   const handleNotifyPartner = async () => {
     if (!notifyTarget) {
@@ -912,6 +931,16 @@ export function PartnersPage() {
                 <div>미수금: {formatWon(notifyTarget.consumer_price)}</div>
                 <div style={{ marginTop: 8, color: 'var(--warn-fg)' }}>
                   연락처는 백엔드 템플릿에서 마지막 4자리만 남기고 마스킹합니다.
+                </div>
+              </div>
+              <div style={{ marginTop: 10 }}>
+                <div style={{ fontSize: 10.5, color: 'var(--text-tertiary)', fontWeight: 600, marginBottom: 4 }}>발송 미리보기</div>
+                <div
+                  data-testid="partner-notify-preview"
+                  className="multiline-text"
+                  style={{ padding: 10, background: 'var(--bg-subtle)', border: '1px solid var(--border)', borderRadius: 8, fontSize: 12, lineHeight: 1.5, color: 'var(--text)', minHeight: 40 }}
+                >
+                  {notifyPreviewLoading ? '미리보기 불러오는 중…' : (notifyPreview || '미리보기를 불러오지 못했습니다.')}
                 </div>
               </div>
               <textarea

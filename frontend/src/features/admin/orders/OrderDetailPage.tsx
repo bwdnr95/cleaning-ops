@@ -46,10 +46,21 @@ const MESSAGE_ACTIONS = {
     title: '사진 링크 발송',
     successText: '고객 사진 확인 링크를 발송했습니다.',
   },
+  customerBalanceDue: {
+    messageType: 'customer_balance_due',
+    recipientType: 'customer',
+    title: '잔금 안내',
+    successText: '고객 잔금 안내를 발송했습니다.',
+  },
+  customerQuote: {
+    messageType: 'customer_quote',
+    recipientType: 'customer',
+    title: '견적 안내',
+    successText: '고객 견적 안내를 발송했습니다.',
+  },
 };
 
 const WORK_DONE_STATUS = '고객전달필요';
-const BALANCE_NOTICE_MESSAGE_TYPE = 'customer_balance_due';
 
 export function OrderDetailPage({ orderId, onBack, onEdit, onDuplicate, onNav, onOpenOrder }) {
   const loadOrder = React.useCallback(() => getAdminOrder(orderId), [orderId]);
@@ -128,26 +139,16 @@ export function OrderDetailPage({ orderId, onBack, onEdit, onDuplicate, onNav, o
 
   const handleStatusChange = async () => {
     await runAction(async () => {
-      const shouldSendBalanceNotice = selectedStatus === WORK_DONE_STATUS && order.status !== WORK_DONE_STATUS;
+      // 잔금 안내는 더 이상 상태 변경 시 자동 발송하지 않는다(미리보기-확인 발송으로 전환).
+      // '고객전달필요'로 처음 진입하면 아래 '잔금 안내' 버튼으로 보내도록 안내만 한다.
+      const enteredWorkDone = selectedStatus === WORK_DONE_STATUS && order.status !== WORK_DONE_STATUS;
       const selectedStatusLabel = orderStatusLabel(selectedStatus);
       await updateAdminOrder(order.id, { status: selectedStatus });
-      let noticeText = `${selectedStatusLabel} 상태 변경을 타임라인에 기록했습니다.`;
-
-      if (shouldSendBalanceNotice) {
-        try {
-          const sent = await sendAdminMessage(order.id, BALANCE_NOTICE_MESSAGE_TYPE, 'customer', 'sms');
-          const channelLabel = messageChannelLabel(sent.channel || 'sms');
-          if (isMessageFailure(sent.status)) {
-            setError(`상태는 변경됐지만 잔금 안내 발송 결과: ${messageStatusLabel(sent.status)} (${channelLabel}) - ${messageProviderErrorText(sent)}`);
-          } else {
-            noticeText = `${selectedStatusLabel} 상태로 변경했고 잔금 안내를 발송했습니다. (${channelLabel})`;
-          }
-        } catch (sendError) {
-          setError(`상태는 변경됐지만 잔금 안내 발송 실패: ${toActionErrorMessage(sendError)}`);
-        }
-      }
-
-      setNotice(noticeText);
+      setNotice(
+        enteredWorkDone
+          ? `${selectedStatusLabel} 상태로 변경했습니다. 잔금 안내가 필요하면 '잔금 안내' 버튼으로 미리보기 후 발송하세요.`
+          : `${selectedStatusLabel} 상태 변경을 타임라인에 기록했습니다.`,
+      );
       orderResource.reload();
     });
   };
@@ -690,6 +691,12 @@ export function OrderDetailPage({ orderId, onBack, onEdit, onDuplicate, onNav, o
                 </button>
                 <button data-testid="send-partner-assignment" className="btn btn--secondary btn--block" disabled={isSaving || isPreviewLoading || !order.partner_id} onClick={() => void openMessagePreview(MESSAGE_ACTIONS.partnerAssignment)}>
                   <Icon name="truck" size={13}/> 협력사 배정 안내
+                </button>
+                <button data-testid="send-customer-balance-due" className="btn btn--secondary btn--block" disabled={isSaving || isPreviewLoading} onClick={() => void openMessagePreview(MESSAGE_ACTIONS.customerBalanceDue)}>
+                  <Icon name="creditCard" size={13}/> 잔금 안내
+                </button>
+                <button data-testid="send-customer-quote" className="btn btn--secondary btn--block" disabled={isSaving || isPreviewLoading} onClick={() => void openMessagePreview(MESSAGE_ACTIONS.customerQuote)}>
+                  <Icon name="send" size={13}/> 견적 안내
                 </button>
               </div>
             </div>
