@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 
 from app.core.time import business_today
 from app.domain.constants import OrderStatus
+from app.domain.order_metrics import REVENUE_STATUSES
 from app.domain.payment_status import PAYMENT_CHECK_STATUSES
 from app.models.message import MessageLog
 from app.models.order import Order
@@ -43,7 +44,7 @@ class DashboardService:
             monthly_completed=self._count(Order.status == OrderStatus.COMPLETED, *month_filter),
             monthly_revenue=self._sum(
                 Order.total_amount,
-                Order.status.in_([OrderStatus.CUSTOMER_DELIVERY_DONE, OrderStatus.COMPLETED]),
+                Order.status.in_(REVENUE_STATUSES),
                 *month_filter,
             ),
         )

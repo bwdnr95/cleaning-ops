@@ -23,6 +23,8 @@ from app.domain.order_list import (
     order_workflow_status,
     status_tab_value,
 )
+from app.domain.order_metrics import REVENUE_STATUSES
+from app.domain.payment_status import PAYMENT_CHECK_STATUSES
 from app.models.order import Order
 from app.models.order_group import OrderGroup
 from app.repositories.order_groups import OrderGroupRepository
@@ -62,8 +64,8 @@ class OrderPageResult:
     insight: OrderPageInsight = field(default_factory=OrderPageInsight)
 
 
-# frontend isPaymentCheckNeeded(PAYMENT_CHECK_STATUSES)
-_PAYMENT_CHECK_STATUSES = frozenset({"pending", "balance_pending", "unpaid"})
+# 결제확인 상태 집합은 domain/payment_status(단일 출처)를 사용한다.
+_PAYMENT_CHECK_STATUSES = PAYMENT_CHECK_STATUSES
 
 # 완료/정산 중심 탭에서만 '오늘부터' 프리셋에서도 과거 완납을 노출한다.
 # 기본 진입 탭인 'all'은 '오늘부터'의 의미(미래 중심)를 지키도록 과거 완납을 숨기고,
@@ -194,6 +196,10 @@ class OrderPageService:
         unpaid_total = 0.0
         month_total = 0.0
         for order in orders:
+            # 취소건은 기록만 남기고 인사이트(건수·금액) 집계에서 제외한다.
+            # (today_jobs만 취소 제외하고 월매출/미수금은 안 하던 자기모순 버그 수정 — 대시보드 정의와 일치)
+            if order.status == OrderStatus.CANCELLED:
+                continue
             workflow = order_workflow_status(order.status, order.payment_status)
             amount = _to_float(order.total_amount) + _to_float(order.onsite_extra_amount)
             month_total += amount
@@ -201,8 +207,7 @@ class OrderPageService:
                 unpaid_total += amount
             if not (order.team_name or "").strip():
                 unassigned += 1
-            # '오늘 작업'은 오늘 방문 예정 전체(취소 제외) — 대시보드 today_jobs 정의와 일치.
-            if order.status != OrderStatus.CANCELLED and order.scheduled_date == today:
+            if order.scheduled_date == today:
                 today_jobs += 1
             if workflow == "작업예정":
                 schedule_confirmed += 1
@@ -349,7 +354,7 @@ class OrderPageService:
         "deliver": (OrderStatus.CUSTOMER_DELIVERY_NEEDED,),
         "partner_pending": (OrderStatus.PARTNER_CONFIRMING,),
         "monthly_done": (OrderStatus.COMPLETED,),
-        "monthly_revenue": (OrderStatus.CUSTOMER_DELIVERY_DONE, OrderStatus.COMPLETED),
+        "monthly_revenue": REVENUE_STATUSES,
     }
 
     @classmethod

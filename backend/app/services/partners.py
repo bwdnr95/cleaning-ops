@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.core.security import hash_password
 from app.domain.constants import AuditEventType, AuditSeverity, OrderStatus, UserRole
+from app.domain.order_metrics import ACTIVE_JOB_STATUSES, COMPLETED_JOB_STATUSES
 from app.domain.order_pricing import order_consumer_total
 from app.services.partner_settlements import unpaid_partner_condition
 from app.domain.phone import normalize_phone
@@ -38,21 +39,8 @@ class PartnerAdminContext:
     settlements: dict[str, dict[str, float | int]] = field(default_factory=dict)
 
 
-ACTIVE_JOB_STATUSES = (
-    OrderStatus.PARTNER_CONFIRMING,
-    OrderStatus.SCHEDULE_CONFIRMED,
-    OrderStatus.DAY_BEFORE_NOTICE_NEEDED,
-    OrderStatus.DAY_BEFORE_NOTICE_DONE,
-    OrderStatus.SCHEDULED,
-    OrderStatus.IN_PROGRESS,
-    OrderStatus.PHOTO_REVIEW_PENDING,
-    OrderStatus.CUSTOMER_DELIVERY_NEEDED,
-)
-
-COMPLETED_JOB_STATUSES = (
-    OrderStatus.CUSTOMER_DELIVERY_DONE,
-    OrderStatus.COMPLETED,
-)
+# 협력사 작업 상태 집합(ACTIVE_JOB_STATUSES / COMPLETED_JOB_STATUSES)은
+# domain/order_metrics(단일 출처)에서 import 한다. (위 import 참조)
 
 
 class PartnerService:

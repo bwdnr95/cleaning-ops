@@ -7,6 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.domain.constants import OrderStatus
+from app.domain.order_metrics import REVENUE_STATUSES
 from app.domain.payment_status import PARTNER_SETTLEMENT_PENDING_STATUSES
 from app.models.order import Order
 from app.models.partner import Partner
@@ -24,7 +25,8 @@ from app.schemas.report import (
 )
 
 _GRANULARITIES = {"day", "week", "month"}
-_REVENUE_STATUSES = (OrderStatus.CUSTOMER_DELIVERY_DONE, OrderStatus.COMPLETED)
+# 매출 대상 상태는 단일 출처(domain/order_metrics)를 사용한다.
+_REVENUE_STATUSES = REVENUE_STATUSES
 
 
 class ReportService:

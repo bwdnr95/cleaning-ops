@@ -145,7 +145,7 @@ export function Dashboard({ onOpenOrder, onNav, onCreateOrder, userName = undefi
           <div className="card" style={{ overflow: 'hidden' }}>
             <DashList
               title="오늘 작업"
-              subtitle={`오늘 · ${summary.isLoading ? '-' : todayJobs.length}건`}
+              subtitle={`오늘 · ${summary.isLoading ? '-' : (summary.data?.today_jobs ?? todayJobs.length)}건`}
               jobs={todayJobs}
               onOpen={onOpenOrder}
               onQueue={() => onNav && onNav('orders', { ordersTab: 'today', datePreset: 'today' })}
@@ -156,7 +156,7 @@ export function Dashboard({ onOpenOrder, onNav, onCreateOrder, userName = undefi
             <div style={{ height: 1, background: 'var(--divider)' }}/>
             <DashList
               title="내일 작업"
-              subtitle={`내일 · ${summary.isLoading ? '-' : tomorrowJobs.length}건`}
+              subtitle={`내일 · ${summary.isLoading ? '-' : (summary.data?.tomorrow_notice_targets ?? tomorrowJobs.length)}건`}
               jobs={tomorrowJobs}
               onOpen={onOpenOrder}
               onQueue={() => onNav && onNav('orders', { ordersTab: 'tomorrow_notice', datePreset: 'tomorrow' })}
@@ -357,8 +357,10 @@ function toDashJobs(orders, target) {
     .filter((order) => isSameDateValue(order.scheduled_date, wanted))
     .filter((order) => (
       target === 'tomorrow'
+        // '내일 안내 대상' KPI 와 동일 정의(일정확정·전날안내필요)
         ? ['일정확정', '전날안내필요'].includes(order.status)
-        : ['일정확정', '전날안내필요', '전날안내완료', '작업예정', '작업진행'].includes(order.status)
+        // '오늘 작업 예정' KPI 와 동일 정의(오늘 방문 전체, 취소 제외) — 일부 상태만 보이던 불일치 해소
+        : order.status !== '취소'
     ))
     .slice(0, 5)
     .map((order) => ({

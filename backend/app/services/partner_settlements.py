@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.core.time import utc_now
 from app.domain.constants import OrderStatus, TimelineEventType
+from app.domain.order_metrics import SETTLEABLE_ORDER_STATUSES
 from app.domain.order_pricing import order_consumer_total
 from app.domain.payment_status import PARTNER_SETTLEMENT_PENDING_STATUSES, PartnerPaymentStatus
 from app.models.order import Order
@@ -21,7 +22,7 @@ from app.schemas.partner import (
 )
 from app.services.timeline import TimelineService
 
-SETTLEABLE_ORDER_STATUSES = (OrderStatus.COMPLETED,)
+# SETTLEABLE_ORDER_STATUSES 는 domain/order_metrics(단일 출처)에서 import 한다.
 
 
 def unpaid_partner_condition():
