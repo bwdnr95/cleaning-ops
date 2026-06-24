@@ -38,6 +38,7 @@ class ReceiptType(StrEnum):
 
     CASH_RECEIPT = "cash_receipt"
     TAX_INVOICE = "tax_invoice"
+    CARD_PAYMENT = "card_payment"
     NONE = "none"
 
 

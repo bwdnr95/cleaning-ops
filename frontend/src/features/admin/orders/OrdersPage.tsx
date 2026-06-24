@@ -210,15 +210,18 @@ const BULK_MESSAGE_OPTIONS = [
   { value: 'customer_photo_ready', label: '고객 사진 확인 안내', recipient: 'customer' },
   { value: 'customer_balance_due', label: '고객 잔금 안내', recipient: 'customer' },
 ];
-const ORDER_TABLE_COLUMN_STORAGE_KEY = 'cleaning.ops.orders.columnWidths.v1';
+// v2: 담당을 방문/접수~상품 사이로 이동 + 주소 칸 확대. 키를 올려 기존 저장폭을 새 기본값으로 리셋.
+// 폭 재배분 원칙: 내용이 잘리는(말줄임) 상품/고객 칸에서 폭을 빼 주소로 옮기고,
+// 버튼/날짜정렬/금액 등 고정폭이 필요한 칸은 기존 값을 유지해 가로 넘침을 막는다.
+const ORDER_TABLE_COLUMN_STORAGE_KEY = 'cleaning.ops.orders.columnWidths.v2';
 const ORDER_TABLE_COLUMNS = [
   { key: 'select', width: 2.4, min: 2 },
   { key: 'status', width: 8, min: 5.5 },
   { key: 'date', width: 9, min: 7 },
-  { key: 'service', width: 12, min: 7 },
-  { key: 'address', width: 16, min: 10 },
-  { key: 'customer', width: 12, min: 8 },
   { key: 'team', width: 9, min: 6 },
+  { key: 'service', width: 9, min: 6 },
+  { key: 'address', width: 23, min: 12 },
+  { key: 'customer', width: 8, min: 6 },
   { key: 'amount', width: 11, min: 8 },
   { key: 'payment', width: 6, min: 4 },
   { key: 'evidence', width: 8, min: 5 },
@@ -941,10 +944,10 @@ export function OrdersPage({ onOpenOrder, onCreateOrder, onEditOrder, initialTab
               </ResizableTh>
               <ResizableTh columnKey="status" onResizeStart={handleColumnResizeStart} isResizing={resizingColumn === 'status'}>상태</ResizableTh>
               <ResizableTh columnKey="date" onResizeStart={handleColumnResizeStart} isResizing={resizingColumn === 'date'}><DateSortHeader sortBy={sortBy} onSortChange={setSortBy} /></ResizableTh>
+              <ResizableTh columnKey="team" onResizeStart={handleColumnResizeStart} isResizing={resizingColumn === 'team'}>담당</ResizableTh>
               <ResizableTh columnKey="service" onResizeStart={handleColumnResizeStart} isResizing={resizingColumn === 'service'}>상품</ResizableTh>
               <ResizableTh columnKey="address" onResizeStart={handleColumnResizeStart} isResizing={resizingColumn === 'address'}>주소</ResizableTh>
               <ResizableTh columnKey="customer" onResizeStart={handleColumnResizeStart} isResizing={resizingColumn === 'customer'}>고객</ResizableTh>
-              <ResizableTh columnKey="team" onResizeStart={handleColumnResizeStart} isResizing={resizingColumn === 'team'}>담당</ResizableTh>
               <ResizableTh columnKey="amount" onResizeStart={handleColumnResizeStart} isResizing={resizingColumn === 'amount'} style={{ textAlign: 'right' }}>금액</ResizableTh>
               <ResizableTh columnKey="payment" onResizeStart={handleColumnResizeStart} isResizing={resizingColumn === 'payment'}>결제</ResizableTh>
               <ResizableTh columnKey="evidence" onResizeStart={handleColumnResizeStart} isResizing={resizingColumn === 'evidence'}>증빙</ResizableTh>
@@ -1007,6 +1010,20 @@ export function OrdersPage({ onOpenOrder, onCreateOrder, onEditOrder, initialTab
                     </div>
                   </td>
                   <td>
+                    {isUnassigned
+                      ? <span style={{
+                          fontSize: 11.5, fontWeight: 500, color: '#b45309',
+                          display: 'inline-flex', alignItems: 'center', gap: 5,
+                        }}>
+                          <span style={{ width: 5, height: 5, borderRadius: '50%', background: '#f59e0b' }}/>
+                          미배정
+                        </span>
+                      : <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                          <Avatar name={o.team[0]} size={16} tone="info"/>
+                          <span style={{ fontSize: 11.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{o.team}</span>
+                        </span>}
+                  </td>
+                  <td>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}>
                       <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'block' }}>{o.serviceName}</span>
                       {o.sizeOrQuantity && (
@@ -1038,20 +1055,6 @@ export function OrdersPage({ onOpenOrder, onCreateOrder, onEditOrder, initialTab
                         {o.phone}
                       </span>
                     </div>
-                  </td>
-                  <td>
-                    {isUnassigned
-                      ? <span style={{
-                          fontSize: 11.5, fontWeight: 500, color: '#b45309',
-                          display: 'inline-flex', alignItems: 'center', gap: 5,
-                        }}>
-                          <span style={{ width: 5, height: 5, borderRadius: '50%', background: '#f59e0b' }}/>
-                          미배정
-                        </span>
-                      : <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-                          <Avatar name={o.team[0]} size={16} tone="info"/>
-                          <span style={{ fontSize: 11.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{o.team}</span>
-                        </span>}
                   </td>
                   <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
                     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 2 }}>

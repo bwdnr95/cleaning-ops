@@ -77,6 +77,7 @@ class PartnerSettlementItemRead(ApiModel):
     service_name: str
     customer_name: str
     address_short: str
+    address_detail: str | None = None
     consumer_price: float | None = None
     partner_price: float | None = None
     partner_payment_status: str | None = None

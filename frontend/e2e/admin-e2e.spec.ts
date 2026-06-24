@@ -318,6 +318,14 @@ test('admin can page through the full order result set', async ({ page, request 
 
   await page.getByTestId('orders-pagination-page-size').selectOption('100');
   await expect(page.getByTestId(`admin-order-row-${lastOrder.id}`)).toBeVisible();
+
+  // 누적 정리: 이 테스트가 만든 55건을 삭제해 이후 테스트의 목록 1페이지를 오염시키지 않는다.
+  // (방문일 정렬상 과거/미정 주문이 뒤로 밀려 다른 테스트가 자기 주문을 못 찾는 문제 예방)
+  const cleanupSession = await loginViaApi(request, 'admin');
+  await request.post(`${backendUrl}/api/admin/orders/bulk-delete`, {
+    headers: authHeaders(cleanupSession.access_token),
+    data: { order_ids: orders.map((order) => order.id) },
+  });
 });
 
 test('admin can run selected order bulk operations from the order list', async ({ page, request }) => {
@@ -328,6 +336,9 @@ test('admin can run selected order bulk operations from the order list', async (
   await expect(page.getByTestId('admin-orders-page')).toBeVisible();
   await expect(page.getByTestId('orders-date-preset-upcoming')).toHaveAttribute('aria-pressed', 'true');
   await page.getByTestId('orders-date-preset-all').click();
+  // 다른 테스트가 만든 미래일 주문이 누적돼 과거일 대상 주문이 1페이지를 벗어나므로,
+  // 검색으로 본 테스트 주문만 좁혀서 선택한다(방문일 정렬상 과거건이 뒤로 밀림).
+  await page.getByLabel('주문 검색').fill('Bulk Customer');
 
   await selectOrderRows(page, orders);
   await page.getByTestId('orders-bulk-status-open').click();
@@ -362,6 +373,8 @@ test('admin can adjust schedule from order detail and jump to related ops pages'
   await expect(page.getByTestId('admin-orders-page')).toBeVisible();
   await expect(page.getByTestId('orders-date-preset-upcoming')).toHaveAttribute('aria-pressed', 'true');
   await page.getByTestId('orders-date-preset-all').click();
+  // 누적된 미래일 주문 때문에 과거일 대상이 1페이지를 벗어나므로 검색으로 좁힌다.
+  await page.getByLabel('주문 검색').fill('Detail Schedule Customer');
   await page.getByTestId(`admin-order-row-${order.id}`).click();
   await expect(page.getByTestId('admin-order-detail-page')).toBeVisible();
 
@@ -552,7 +565,7 @@ test('admin photo review sends customer links for automatically published photos
   await loginAsAdmin(page);
   await page.getByTestId('admin-nav-photos').click();
   await expect(page.getByTestId('admin-photo-review-page')).toBeVisible();
-  await expect(page.getByText(orderId).first()).toBeVisible();
+  await expect(page.getByTestId(`photo-review-item-${orderId}`)).toBeVisible();
   await expect(page.getByTestId('photo-filter-pending_link')).toHaveAttribute('aria-pressed', 'false');
   await page.getByTestId('photo-filter-pending_link').click();
   await expect(page.getByTestId(`photo-review-item-${orderId}`)).toBeVisible();

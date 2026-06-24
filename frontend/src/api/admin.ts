@@ -115,6 +115,7 @@ export interface PartnerSettlementItem {
   service_name: string;
   customer_name: string;
   address_short: string;
+  address_detail?: string | null;
   consumer_price: number | null;
   partner_price: number | null;
   partner_payment_status: string | null;

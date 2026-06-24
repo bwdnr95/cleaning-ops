@@ -65,9 +65,11 @@ class OrderPageResult:
 # frontend isPaymentCheckNeeded(PAYMENT_CHECK_STATUSES)
 _PAYMENT_CHECK_STATUSES = frozenset({"pending", "balance_pending", "unpaid"})
 
-# frontend PAST_PAID_VISIBLE_TABS — 이 탭들에선 '오늘부터' 프리셋에서도 과거 완납을 노출.
+# 완료/정산 중심 탭에서만 '오늘부터' 프리셋에서도 과거 완납을 노출한다.
+# 기본 진입 탭인 'all'은 '오늘부터'의 의미(미래 중심)를 지키도록 과거 완납을 숨기고,
+# 과거 완납은 검색 또는 '전체' 방문일 프리셋으로 조회한다.
 _PAST_PAID_VISIBLE_TABS = frozenset(
-    {"all", "work_done", "final_payment_complete", "done", "monthly_done", "monthly_revenue"}
+    {"work_done", "final_payment_complete", "done", "monthly_done", "monthly_revenue"}
 )
 
 
@@ -335,31 +337,42 @@ class OrderPageService:
             return True
         return False
 
-    # 프론트 status 탭 필터(표준 7탭 + 대시보드 진입용 특수 키)와 동일하게 매칭.
-    # today/tomorrow_notice 의 날짜 조건은 방문일 필터(visit_preset)가 함께 처리한다.
-    _STATUS_ALIASES = {
-        "work": "작업예정",
-        "deliver": "고객전달필요",
-        "photo_review": "고객전달필요",
-        "partner_pending": "협력사확인중",
-        "monthly_done": "서비스완료",
-        "today": "작업예정",
-        "tomorrow_notice": "작업예정",
+    # 대시보드 KPI 진입용 특수 탭은 KPI 카운트(services/dashboard.py)와 동일하게 *원본 상태*로 필터링한다.
+    # 그래야 KPI 숫자와 클릭 후 목록 행 수가 정확히 일치한다(예: '고객 전달 필요' KPI=목록).
+    # today/tomorrow_notice/monthly_* 의 날짜 조건은 방문일 필터(visit_preset)가 함께 처리한다.
+    _RAW_STATUS_TAB = {
+        "tomorrow_notice": (
+            OrderStatus.SCHEDULE_CONFIRMED,
+            OrderStatus.DAY_BEFORE_NOTICE_NEEDED,
+        ),
+        "photo_review": (OrderStatus.PHOTO_REVIEW_PENDING,),
+        "deliver": (OrderStatus.CUSTOMER_DELIVERY_NEEDED,),
+        "partner_pending": (OrderStatus.PARTNER_CONFIRMING,),
+        "monthly_done": (OrderStatus.COMPLETED,),
+        "monthly_revenue": (OrderStatus.CUSTOMER_DELIVERY_DONE, OrderStatus.COMPLETED),
     }
 
     @classmethod
     def _matches_status_tab(cls, order: Order, status_key: str | None) -> bool:
         if not status_key or status_key == "all":
             return True
-        workflow = order_workflow_status(order.status, order.payment_status)
+        # '오늘 작업' KPI = 오늘 방문 예정 전체(취소 제외). 날짜는 visit_preset 가 건다.
+        if status_key == "today":
+            return order.status != OrderStatus.CANCELLED
         if status_key == "payment_check":
-            return order.payment_status in _PAYMENT_CHECK_STATUSES
+            return (
+                order.status != OrderStatus.CANCELLED
+                and order.payment_status in _PAYMENT_CHECK_STATUSES
+            )
+        if status_key in cls._RAW_STATUS_TAB:
+            return order.status in cls._RAW_STATUS_TAB[status_key]
+        workflow = order_workflow_status(order.status, order.payment_status)
         if status_key == "pending":
             return workflow in ("상담중", "협력사확인중")
-        if status_key in ("monthly_revenue", "done"):
+        if status_key in ("work",):
+            return workflow == "작업예정"
+        if status_key == "done":
             return workflow in ("고객전달필요", "서비스완료")
-        if status_key in cls._STATUS_ALIASES:
-            return workflow == cls._STATUS_ALIASES[status_key]
         tab_status = status_tab_value(status_key)
         if tab_status is not None:
             return workflow == tab_status

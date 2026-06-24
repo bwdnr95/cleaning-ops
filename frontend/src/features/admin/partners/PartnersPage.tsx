@@ -51,7 +51,8 @@ export function PartnersPage() {
   const [isResetting, setIsResetting] = React.useState(false);
   const [resetPassword, setResetPassword] = React.useState('');
   const [resetLoginPhone, setResetLoginPhone] = React.useState('');
-  const [settlementStatusFilter, setSettlementStatusFilter] = React.useState<SettlementStatusFilter>('unpaid');
+  // 기본은 '전체' — 배정된 모든 작업이 바로 보이도록(미정산만 보이던 문제 해결).
+  const [settlementStatusFilter, setSettlementStatusFilter] = React.useState<SettlementStatusFilter>('all');
   const [settlementDateRange, setSettlementDateRange] = React.useState(() => defaultSettlementDateRange());
   const [settlements, setSettlements] = React.useState(null);
   const [settlementsLoading, setSettlementsLoading] = React.useState(false);
@@ -580,8 +581,8 @@ export function PartnersPage() {
           <StatCard label="계정 미연결" value={stats.missingLogin} icon="lock" tone="warn" />
         </div>
 
-        <div style={{ display: 'grid', gridTemplateColumns: 'minmax(360px, 0.95fr) minmax(0, 1.45fr)', gap: 12, alignItems: 'start' }}>
-          <section className="card" style={{ padding: 0, overflow: 'hidden' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'minmax(360px, 0.95fr) minmax(0, 1.45fr)', gap: 12, alignItems: 'stretch' }}>
+          <section className="card" style={{ padding: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
             <SectionHeader
               icon="truck"
               title="협력사 목록"
@@ -598,7 +599,7 @@ export function PartnersPage() {
             {!partnersResource.isLoading && !partnersResource.error && partners.length > 0 && filteredPartners.length === 0 && <StateLine text="선택한 대분류에 협력사가 없습니다." />}
 
             {!partnersResource.isLoading && !partnersResource.error && filteredPartners.length > 0 && (
-              <div className="scroll" style={{ maxHeight: 470, overflow: 'auto' }}>
+              <div className="scroll" style={{ flex: 1, minHeight: 0, overflow: 'auto' }}>
                 <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
                   <thead>
                     <tr>
@@ -691,31 +692,6 @@ export function PartnersPage() {
           </section>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-            <section className="card" style={{ padding: 0, overflow: 'hidden' }}>
-              <SectionHeader icon="plus" title="새 협력사 등록" />
-              <form onSubmit={handleCreate} style={{ padding: 14, display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 10 }}>
-                <FormField testId="partner-create-name" label="협력사명" value={createForm.name} onChange={(value) => setCreateForm({ ...createForm, name: value })} required />
-                <FormField label="담당자" value={createForm.manager_name} onChange={(value) => setCreateForm({ ...createForm, manager_name: value })} />
-                <FormField testId="partner-create-manager-phone" label="담당자 연락처" value={createForm.manager_phone} onChange={(value) => setCreateForm({ ...createForm, manager_phone: value })} />
-                <CategorySelect
-                  testId="partner-create-category"
-                  label="대분류"
-                  categories={categories}
-                  value={createForm.partner_category_id}
-                  onChange={(value) => setCreateForm({ ...createForm, partner_category_id: value })}
-                />
-                <FormField testId="partner-create-phone" label="대표 연락처" value={createForm.phone} onChange={(value) => setCreateForm({ ...createForm, phone: value })} required />
-                <FormField label="로그인 연락처" value={createForm.login_phone} onChange={(value) => setCreateForm({ ...createForm, login_phone: value })} />
-                <FormField label="초기 비밀번호" value={createForm.login_password} onChange={(value) => setCreateForm({ ...createForm, login_password: value })} type="password" />
-                <FormField label="권역" value={createForm.service_areas} onChange={(value) => setCreateForm({ ...createForm, service_areas: value })} />
-                <div style={{ gridColumn: '1 / -1', display: 'flex', justifyContent: 'flex-end' }}>
-                  <button data-testid="partner-create-submit" className="btn btn--primary btn--sm" disabled={isCreating}>
-                    <Icon name="plus" size={12} /> 등록
-                  </button>
-                </div>
-              </form>
-            </section>
-
             <section className="card" style={{ padding: 0, overflow: 'hidden' }}>
               <SectionHeader
                 icon="user"
@@ -847,6 +823,8 @@ export function PartnersPage() {
                     {['방문일', '상태', '작업', '고객', '소비자가', '도급가(VAT 포함)', '정산상태', '액션'].map((header) => <GridHead key={header}>{header}</GridHead>)}
                     {settlements.items.map((job) => {
                       const isPaid = job.partner_payment_status === 'paid';
+                      // 취소건은 기록 보존을 위해 목록엔 남기되 정산 건수/금액에선 제외된다.
+                      const isCancelled = job.status === '취소';
                       // 미정산으로 보이더라도 지급완료 처리는 서비스완료 + 미지급 주문만 가능.
                       const canSettle = job.status === '서비스완료' && !isPaid;
                       return (
@@ -859,14 +837,21 @@ export function PartnersPage() {
                         <GridCell>
                           <div style={{ minWidth: 0 }}>
                             <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{job.service_name}</div>
-                            <div style={{ marginTop: 2, color: 'var(--text-tertiary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{job.address_short}</div>
+                            <div
+                              style={{ marginTop: 2, color: 'var(--text-tertiary)', whiteSpace: 'normal', wordBreak: 'break-word', lineHeight: 1.4 }}
+                              title={settlementFullAddress(job)}
+                            >
+                              {settlementFullAddress(job) || '-'}
+                            </div>
                           </div>
                         </GridCell>
                         <GridCell>{job.customer_name}</GridCell>
                         <GridCell mono>{formatWon(job.consumer_price)}</GridCell>
                         <GridCell mono>{formatWon(job.partner_price)}</GridCell>
                         <GridCell>
-                          <SettlementPill paid={isPaid} settledAt={job.settled_at} />
+                          {isCancelled
+                            ? <span style={{ color: 'var(--text-quaternary)', fontSize: 11.5, fontWeight: 600 }}>정산 제외</span>
+                            : <SettlementPill paid={isPaid} settledAt={job.settled_at} />}
                         </GridCell>
                         <GridCell>
                           <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
@@ -893,6 +878,31 @@ export function PartnersPage() {
                 )}
               </section>
             )}
+
+            <section className="card" style={{ padding: 0, overflow: 'hidden' }}>
+              <SectionHeader icon="plus" title="새 협력사 등록" />
+              <form onSubmit={handleCreate} style={{ padding: 14, display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 10 }}>
+                <FormField testId="partner-create-name" label="협력사명" value={createForm.name} onChange={(value) => setCreateForm({ ...createForm, name: value })} required />
+                <FormField label="담당자" value={createForm.manager_name} onChange={(value) => setCreateForm({ ...createForm, manager_name: value })} />
+                <FormField testId="partner-create-manager-phone" label="담당자 연락처" value={createForm.manager_phone} onChange={(value) => setCreateForm({ ...createForm, manager_phone: value })} />
+                <CategorySelect
+                  testId="partner-create-category"
+                  label="대분류"
+                  categories={categories}
+                  value={createForm.partner_category_id}
+                  onChange={(value) => setCreateForm({ ...createForm, partner_category_id: value })}
+                />
+                <FormField testId="partner-create-phone" label="대표 연락처" value={createForm.phone} onChange={(value) => setCreateForm({ ...createForm, phone: value })} required />
+                <FormField label="로그인 연락처" value={createForm.login_phone} onChange={(value) => setCreateForm({ ...createForm, login_phone: value })} placeholder="비워두면 대표 연락처 사용" />
+                <FormField label="초기 비밀번호" value={createForm.login_password} onChange={(value) => setCreateForm({ ...createForm, login_password: value })} type="password" placeholder="비워두면 자동 생성 · 직접 입력 시 10자 이상" />
+                <FormField label="권역" value={createForm.service_areas} onChange={(value) => setCreateForm({ ...createForm, service_areas: value })} />
+                <div style={{ gridColumn: '1 / -1', display: 'flex', justifyContent: 'flex-end' }}>
+                  <button data-testid="partner-create-submit" className="btn btn--primary btn--sm" disabled={isCreating}>
+                    <Icon name="plus" size={12} /> 등록
+                  </button>
+                </div>
+              </form>
+            </section>
           </div>
         </div>
 
@@ -927,7 +937,7 @@ export function PartnersPage() {
                 <div>채널: 카카오 알림톡</div>
                 <div>고객: {notifyTarget.customer_name}</div>
                 <div>방문일: {formatDate(notifyTarget.scheduled_date)}</div>
-                <div>주소: {notifyTarget.address_short}</div>
+                <div>주소: {settlementFullAddress(notifyTarget) || notifyTarget.address_short}</div>
                 <div>미수금: {formatWon(notifyTarget.consumer_price)}</div>
                 <div style={{ marginTop: 8, color: 'var(--warn-fg)' }}>
                   연락처는 백엔드 템플릿에서 마지막 4자리만 남기고 마스킹합니다.
@@ -1305,12 +1315,23 @@ function optionalText(value) {
 }
 
 function partnerErrorMessage(error, fallback) {
+  const code = error?.detail || error?.message;
   const messages = {
     partner_not_found: '협력사를 찾을 수 없습니다.',
     partner_in_use: '이미 배정 이력이 있는 협력사는 삭제할 수 없습니다. 비활성화를 사용해주세요.',
     partner_category_not_found: '협력사 대분류를 찾을 수 없습니다.',
+    login_phone_already_in_use: '이미 다른 계정이 사용 중인 로그인 연락처입니다. 다른 번호를 입력하세요.',
+    partner_inactive: '비활성화된 협력사입니다. 먼저 활성화해주세요.',
   };
-  return messages[error?.message] || fallback;
+  if (messages[code]) {
+    return messages[code];
+  }
+  // 알 수 없는 오류(검증 실패 등)는 실제 사유를 그대로 노출해 등록 실패 원인을 알 수 있게 한다.
+  const raw = typeof error?.message === 'string' ? error.message.trim() : '';
+  if (raw && raw !== '[object Object]') {
+    return `${fallback} (${raw})`;
+  }
+  return fallback;
 }
 
 function SettlementPill({ paid, settledAt }) {
@@ -1340,6 +1361,10 @@ function defaultSettlementDateRange() {
 function formatWon(value) {
   const amount = Number(value || 0);
   return `₩${Math.round(amount).toLocaleString()}`;
+}
+
+function settlementFullAddress(job) {
+  return [job.address_short, job.address_detail].filter(Boolean).join(' ').trim();
 }
 
 function formatDate(value) {

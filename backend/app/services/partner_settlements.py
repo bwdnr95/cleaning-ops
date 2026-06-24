@@ -11,6 +11,8 @@ from app.domain.constants import OrderStatus, TimelineEventType
 from app.domain.order_pricing import order_consumer_total
 from app.domain.payment_status import PARTNER_SETTLEMENT_PENDING_STATUSES, PartnerPaymentStatus
 from app.models.order import Order
+from app.models.order_group import OrderGroup
+from app.repositories.order_groups import OrderGroupRepository
 from app.repositories.partners import PartnerRepository
 from app.schemas.partner import (
     PartnerSettlementActionResult,
@@ -27,9 +29,11 @@ def unpaid_partner_condition():
 
     - 운영자가 명시적으로 '미지급/지급대기'로 표시한 건은 주문 상태와 무관하게 포함.
     - '서비스완료'인데 정산상태 미입력(NULL)인 건도 미정산으로 포함.
+    - 취소건은 기록은 남기되 미정산 건수/금액 집계에서는 항상 제외한다.
     """
-    return Order.partner_payment_status.in_(PARTNER_SETTLEMENT_PENDING_STATUSES) | (
-        (Order.status == OrderStatus.COMPLETED) & Order.partner_payment_status.is_(None)
+    return (Order.status != OrderStatus.CANCELLED) & (
+        Order.partner_payment_status.in_(PARTNER_SETTLEMENT_PENDING_STATUSES)
+        | ((Order.status == OrderStatus.COMPLETED) & Order.partner_payment_status.is_(None))
     )
 
 
@@ -37,6 +41,7 @@ class PartnerSettlementService:
     def __init__(self, db: Session) -> None:
         self.db = db
         self.partners = PartnerRepository(db)
+        self.groups = OrderGroupRepository(db)
         self.timeline = TimelineService(db)
 
     def list_settlements(
@@ -54,20 +59,26 @@ class PartnerSettlementService:
             from_date=from_date,
             to_date=to_date,
         )
+        groups_by_id = self.groups.list_by_ids(order.group_id for order in orders)
+        # 취소건은 목록(items)에는 남겨 기록을 보존하되, 건수/금액 집계에선 제외한다.
+        countable = [order for order in orders if order.status != OrderStatus.CANCELLED]
         total_partner_price = sum(
-            (money_decimal(order.partner_payment_amount) for order in orders),
+            (money_decimal(order.partner_payment_amount) for order in countable),
             Decimal("0"),
         )
         total_consumer_price = sum(
-            (order_consumer_total(order) for order in orders),
+            (order_consumer_total(order) for order in countable),
             Decimal("0"),
         )
-        items = [to_settlement_item(order) for order in orders]
+        items = [
+            to_settlement_item(order, group=groups_by_id.get(order.group_id))
+            for order in orders
+        ]
         return PartnerSettlementListRead(
             items=items,
             total_partner_price=float(total_partner_price),
             total_consumer_price=float(total_consumer_price),
-            count=len(items),
+            count=len(countable),
         )
 
     def settle(
@@ -165,8 +176,9 @@ class PartnerSettlementService:
                 Order.partner_payment_status == PartnerPaymentStatus.PAID,
             )
         elif status == "all":
-            # 서비스완료 전체(기존) + 상태 무관 명시적 미지급(추가). 행은 추가만, 제거 없음.
-            stmt = stmt.where(Order.status.in_(SETTLEABLE_ORDER_STATUSES) | unpaid_partner_condition())
+            # '전체'는 이 협력사에 배정된 모든 작업(상태 무관, 취소 포함)을 보여준다.
+            # 운영자가 "배정 작업이 있는데 안 뜬다"고 한 문제(완료-미지급만 보이던 것) 해결.
+            pass
         else:
             raise ValueError("invalid_settlement_status")
         return list(self.db.scalars(stmt))
@@ -198,14 +210,20 @@ class PartnerSettlementService:
         return [by_id[order_id] for order_id in requested_ids]
 
 
-def to_settlement_item(order: Order) -> PartnerSettlementItemRead:
+def to_settlement_item(
+    order: Order, *, group: OrderGroup | None = None
+) -> PartnerSettlementItemRead:
+    # 정산 확인을 쉽게 하려고 기본주소 + 상세주소까지 모두 노출한다.
+    base_address = (group.customer_address if group else None) or order.customer_address or ""
+    address_detail = group.customer_address_detail if group else None
     return PartnerSettlementItemRead(
         order_id=order.id,
         status=order.status,
         scheduled_date=order.scheduled_date,
         service_name=order.service_name,
         customer_name=order.customer_name or "",
-        address_short=order.customer_address or "",
+        address_short=base_address,
+        address_detail=address_detail,
         consumer_price=float(order_consumer_total(order)),
         partner_price=float(order.partner_payment_amount or 0),
         partner_payment_status=order.partner_payment_status,

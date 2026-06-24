@@ -86,7 +86,7 @@ test('partner uploads job photos and customer sees auto-published photos except 
   await loginAsAdmin(adminPage);
   await adminPage.getByTestId('admin-nav-photos').click();
   await expect(adminPage.getByTestId('admin-photo-review-page')).toBeVisible();
-  await expect(adminPage.getByText(flow.orderId).first()).toBeVisible();
+  await expect(adminPage.getByTestId(`photo-review-item-${flow.orderId}`)).toBeVisible();
   await adminPage.getByTestId(`photo-review-item-${flow.orderId}`).click();
   await expect(adminPage.getByRole('img', { name: 'after-partner-r2.png' }).first()).toBeVisible();
   await expect(adminPage.getByTestId('photo-send-customer-link')).toBeEnabled();

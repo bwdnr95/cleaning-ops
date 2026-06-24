@@ -37,7 +37,8 @@ class DashboardService:
             photo_review_pending=self._count(Order.status == OrderStatus.PHOTO_REVIEW_PENDING),
             customer_delivery_needed=self._count(Order.status == OrderStatus.CUSTOMER_DELIVERY_NEEDED),
             payment_check_needed=self._count(
-                Order.payment_status.in_(PAYMENT_CHECK_STATUSES)
+                Order.payment_status.in_(PAYMENT_CHECK_STATUSES),
+                Order.status != OrderStatus.CANCELLED,
             ),
             monthly_completed=self._count(Order.status == OrderStatus.COMPLETED, *month_filter),
             monthly_revenue=self._sum(

@@ -13,6 +13,9 @@ export default defineConfig({
   },
   fullyParallel: false,
   workers: 1,
+  // 단일 워커로 전 스펙을 길게 순차 실행하면 누적 부하로 간헐 타임아웃(플레이크)이 난다.
+  // 실패한 테스트만 재시도해 부하성 플레이크를 걸러낸다.
+  retries: 2,
   reporter: 'list',
   use: {
     baseURL: frontendUrl,

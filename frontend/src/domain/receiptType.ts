@@ -4,6 +4,7 @@
 export const RECEIPT_TYPES = [
   { value: 'cash_receipt', label: '현금영수증' },
   { value: 'tax_invoice', label: '세금계산서' },
+  { value: 'card_payment', label: '카드결제' },
   { value: 'none', label: '발급X' },
 ];
 

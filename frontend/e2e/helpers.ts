@@ -14,6 +14,22 @@ const PARTNER_PASSWORD = 'PartnerPass123!';
 const SEED_PARTNER_ID = 'seed-partner-01';
 const SEED_SERVICE_ITEM_ID = 'seed-service-item-move-in';
 
+// 날짜 하드코딩은 시간이 지나면 정산 30일창/기본 목록 범위 밖으로 밀려 테스트가 깨진다.
+// 헬퍼 주문은 항상 '오늘 기준 상대 날짜'(로컬=KST 기준)로 만들어 시점에 무관하게 유지한다.
+// toISOString(UTC) 대신 로컬 연·월·일을 써서 백엔드 business_today(KST)와 어긋나지 않게 한다.
+function isoDaysFromToday(offsetDays: number): string {
+  const date = new Date();
+  date.setDate(date.getDate() + offsetDays);
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+const HELPER_RECEIVED_DATE = isoDaysFromToday(-7);
+// 방문일을 '오늘'로 둬서 (1) 정산 30일창 안에 들고 (2) 방문일 정렬상 그룹0(오늘·미래)으로
+// 목록 1페이지에 올라와, 다른 테스트가 만든 미래일 주문 누적에도 밀리지 않는다.
+const HELPER_SCHEDULED_DATE = isoDaysFromToday(0);
+
 type AuthSession = {
   access_token: string;
 };
@@ -91,8 +107,8 @@ export async function createAssignedOrder(
       lines: [
         {
           status: options.status ?? '일정확정',
-          received_date: '2026-05-05',
-          scheduled_date: '2026-05-14',
+          received_date: HELPER_RECEIVED_DATE,
+          scheduled_date: HELPER_SCHEDULED_DATE,
           requested_time: '09:30',
           partner_id: SEED_PARTNER_ID,
           team_name: 'R6 Photo Review E2E Team',
@@ -143,8 +159,8 @@ export async function createMultiLineOrder(
       notes: options.notes ?? null,
       lines: lines.map((line) => ({
         status: '일정확정',
-        received_date: '2026-05-05',
-        scheduled_date: line.scheduled_date ?? '2026-05-14',
+        received_date: HELPER_RECEIVED_DATE,
+        scheduled_date: line.scheduled_date ?? HELPER_SCHEDULED_DATE,
         requested_time: line.requested_time ?? '09:30',
         partner_id: line.partner_id ?? null,
         team_name: line.partner_id ? 'R7 Multi-line E2E Team' : null,
