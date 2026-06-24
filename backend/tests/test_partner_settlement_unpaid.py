@@ -1,7 +1,7 @@
-"""미정산 정의 확장 테스트.
+"""미정산 정의 테스트.
 
-정책: 명시적 미지급/지급대기(unpaid/ready)는 주문 상태와 무관하게 미정산으로 본다.
-서비스완료 + 정산상태 미입력(NULL)도 미정산. 그 외(완료 전 + NULL)는 미정산 아님.
+정책: '서비스완료'된 작업 중 아직 지급완료가 아닌 건만 미정산으로 본다(완료 전 건은 제외).
+미정산 목록/합계와 '정산 실행 가능' 집합을 일치시켜, 미정산으로 보이는데 정산이 안 되는 모순을 없앤다.
 """
 
 from __future__ import annotations
@@ -79,7 +79,7 @@ def _add_line(db: Session, partner_id: str, *, status, pps, amount) -> str:
     return OrderGroupRepository(db).list_lines(group.id)[0].id
 
 
-def test_unpaid_list_includes_explicit_unpaid_before_completion(db_session: Session) -> None:
+def test_unpaid_only_includes_completed_unpaid(db_session: Session) -> None:
     pid = _make_partner(db_session)
     confirming_unpaid = _add_line(db_session, pid, status=OrderStatus.PARTNER_CONFIRMING, pps="unpaid", amount=100000)
     completed_null = _add_line(db_session, pid, status=OrderStatus.COMPLETED, pps=None, amount=200000)
@@ -89,25 +89,25 @@ def test_unpaid_list_includes_explicit_unpaid_before_completion(db_session: Sess
     result = PartnerSettlementService(db_session).list_settlements(partner_id=pid, status="unpaid")
     ids = {item.order_id for item in result.items}
 
-    assert confirming_unpaid in ids  # 완료 전이라도 명시적 미지급은 포함
-    assert completed_null in ids      # 완료 + NULL 포함
-    assert completed_paid not in ids  # 지급완료 제외
-    assert inprogress_null not in ids  # 완료 전 + NULL 은 제외
+    assert completed_null in ids          # 서비스완료 + 미지급(NULL) 포함
+    assert confirming_unpaid not in ids   # 완료 전은 명시적 미지급이어도 제외(정책: 완료건만)
+    assert inprogress_null not in ids     # 완료 전 제외
+    assert completed_paid not in ids      # 지급완료 제외
 
 
 def test_unpaid_summary_amount_and_count(db_session: Session) -> None:
     pid = _make_partner(db_session)
-    _add_line(db_session, pid, status=OrderStatus.PARTNER_CONFIRMING, pps="unpaid", amount=100000)
+    _add_line(db_session, pid, status=OrderStatus.PARTNER_CONFIRMING, pps="unpaid", amount=100000)  # 완료 전 → 제외
     _add_line(db_session, pid, status=OrderStatus.COMPLETED, pps=None, amount=200000)
-    _add_line(db_session, pid, status=OrderStatus.COMPLETED, pps="paid", amount=300000)  # 제외
+    _add_line(db_session, pid, status=OrderStatus.COMPLETED, pps="paid", amount=300000)  # 지급완료 → 제외
 
     detail = PartnerService(db_session).get_detail(pid)
-    assert detail.unpaid_partner_order_count == 2
-    assert detail.unpaid_partner_amount_total == 300000  # 100000 + 200000
+    assert detail.unpaid_partner_order_count == 1  # 완료건만(서비스완료 + 미지급)
+    assert detail.unpaid_partner_amount_total == 200000
 
 
 def test_settle_rejected_before_completion(db_session: Session) -> None:
-    # 완료 전 주문은 미정산으로 '보이지만' 지급완료 처리는 거부한다.
+    # 완료 전 주문은 정산 대상이 아니며 지급완료 처리도 거부한다.
     import pytest
 
     pid = _make_partner(db_session)

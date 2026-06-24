@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.domain.constants import OrderStatus
 from app.domain.order_metrics import REVENUE_STATUSES
+from app.domain.order_pricing import order_consumer_total
 from app.domain.payment_status import PARTNER_SETTLEMENT_PENDING_STATUSES
 from app.models.order import Order
 from app.models.partner import Partner
@@ -63,7 +64,8 @@ class ReportService:
             if order.scheduled_date is None:
                 continue
             key = _period_key(order.scheduled_date, granularity)
-            buckets.setdefault(key, []).append(Decimal(str(order.total_amount or 0)))
+            # 매출 = 기본가 + 현장추가비
+            buckets.setdefault(key, []).append(order_consumer_total(order))
 
         bucket_rows = [
             RevenueBucket(
@@ -158,7 +160,7 @@ class ReportService:
         total_revenue = Decimal("0")
         partials: list[tuple[tuple[str | None, str], list[Order], Decimal]] = []
         for key, orders in by_key.items():
-            revenue = sum((Decimal(str(order.total_amount or 0)) for order in orders), Decimal("0"))
+            revenue = sum((order_consumer_total(order) for order in orders), Decimal("0"))
             total_revenue += revenue
             partials.append((key, orders, revenue))
 

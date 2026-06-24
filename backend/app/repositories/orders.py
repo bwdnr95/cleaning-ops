@@ -4,6 +4,7 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from app.core.time import business_today
+from app.domain.constants import OrderStatus
 from app.domain.payment_status import PaymentStatus
 from app.models.order import Order
 from app.repositories.base import Repository
@@ -61,10 +62,12 @@ class OrderRepository(Repository[Order]):
         *,
         partner_id: str | None = None,
     ) -> list[Order]:
+        # 달력에는 취소건을 기본 숨김(카운트 정의와 일치). 기록은 주문목록 '취소' 탭에서 확인.
         stmt = (
             select(Order)
             .where(
                 Order.deleted_at.is_(None),
+                Order.status != OrderStatus.CANCELLED,
                 Order.scheduled_date >= start_date,
                 Order.scheduled_date <= end_date,
             )
@@ -75,9 +78,14 @@ class OrderRepository(Repository[Order]):
         return list(self.db.scalars(stmt))
 
     def list_for_partner(self, partner_id: str) -> list[Order]:
+        # 협력사 작업목록에도 취소건은 기본 숨김.
         stmt = (
             select(Order)
-            .where(Order.deleted_at.is_(None), Order.partner_id == partner_id)
+            .where(
+                Order.deleted_at.is_(None),
+                Order.partner_id == partner_id,
+                Order.status != OrderStatus.CANCELLED,
+            )
             .order_by(Order.scheduled_date.asc())
         )
         return list(self.db.scalars(stmt))

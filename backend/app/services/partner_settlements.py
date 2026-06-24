@@ -28,13 +28,13 @@ from app.services.timeline import TimelineService
 def unpaid_partner_condition():
     """미정산 SQL 조건(전 화면 공통).
 
-    - 운영자가 명시적으로 '미지급/지급대기'로 표시한 건은 주문 상태와 무관하게 포함.
-    - '서비스완료'인데 정산상태 미입력(NULL)인 건도 미정산으로 포함.
-    - 취소건은 기록은 남기되 미정산 건수/금액 집계에서는 항상 제외한다.
+    정책: '서비스완료'된 작업 중 아직 지급완료가 아닌 건만 미정산으로 본다.
+    (완료 전 건은 미정산으로 세지 않는다 → 미정산 목록/합계와 '정산 실행 가능' 집합을 일치시켜
+     "미정산인데 정산 버튼 비활성/총액이 안 줄어듦" 문제를 없앤다. 취소건은 COMPLETED 가 아니라 자연 제외.)
     """
-    return (Order.status != OrderStatus.CANCELLED) & (
-        Order.partner_payment_status.in_(PARTNER_SETTLEMENT_PENDING_STATUSES)
-        | ((Order.status == OrderStatus.COMPLETED) & Order.partner_payment_status.is_(None))
+    return (Order.status == OrderStatus.COMPLETED) & (
+        Order.partner_payment_status.is_(None)
+        | Order.partner_payment_status.in_(PARTNER_SETTLEMENT_PENDING_STATUSES)
     )
 
 

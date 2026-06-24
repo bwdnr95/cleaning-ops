@@ -42,8 +42,9 @@ class DashboardService:
                 Order.status != OrderStatus.CANCELLED,
             ),
             monthly_completed=self._count(Order.status == OrderStatus.COMPLETED, *month_filter),
+            # 매출 = 기본가 + 현장추가비(주문목록 '총금액'·리포트 매출과 동일 정의)
             monthly_revenue=self._sum(
-                Order.total_amount,
+                func.coalesce(Order.total_amount, 0) + func.coalesce(Order.onsite_extra_amount, 0),
                 Order.status.in_(REVENUE_STATUSES),
                 *month_filter,
             ),
