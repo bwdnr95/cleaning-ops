@@ -139,8 +139,9 @@ export function Dashboard({ onOpenOrder, onNav, onCreateOrder, userName = undefi
           </div>
         </div>
 
-        {/* 2-column: today/tomorrow + photos/sends */}
-        <div style={{ display: 'grid', gridTemplateColumns: '1.55fr 1fr', gap: 12 }}>
+        {/* 2-column: today/tomorrow + photos/sends.
+            화면이 좁아지면 2단을 유지한 채 칸을 뭉개지 않고 1단으로 자동 접힌다(담당/상태가 product를 0으로 밀던 문제 해결). */}
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(420px, 1fr))', gap: 12 }}>
           {/* Today + tomorrow */}
           <div className="card" style={{ overflow: 'hidden' }}>
             <DashList
@@ -288,7 +289,7 @@ function DashList({ title, subtitle, jobs, onOpen, onQueue, accent, muted = fals
               <span style={{ fontWeight: 500 }}>{j.product}</span>
               <span style={{ color: 'var(--text-tertiary)', marginLeft: 8, fontSize: 11.5 }}>{j.addr}</span>
             </span>
-            <span style={{ fontSize: 11.5, color: 'var(--text-secondary)' }}>{j.team}</span>
+            <span style={{ fontSize: 11.5, color: 'var(--text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{j.team}</span>
             <StatusBadge status={j.status}/>
           </button>
         ))}
