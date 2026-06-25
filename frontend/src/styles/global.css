@@ -372,6 +372,8 @@ body.orders-column-resizing {
 .orders-table tbody td {
   height: 48px;
   padding: 0 6px;
+  /* 고정 레이아웃에서 칸보다 긴 내용(상태 라벨 등)이 옆 칸으로 넘쳐 글자가 겹치는 것을 차단 */
+  overflow: hidden;
 }
 .orders-table tbody tr td:first-child {
   padding-left: 6px;

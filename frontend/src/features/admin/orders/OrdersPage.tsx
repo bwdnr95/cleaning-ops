@@ -210,23 +210,23 @@ const BULK_MESSAGE_OPTIONS = [
   { value: 'customer_photo_ready', label: '고객 사진 확인 안내', recipient: 'customer' },
   { value: 'customer_balance_due', label: '고객 잔금 안내', recipient: 'customer' },
 ];
-// v2: 담당을 방문/접수~상품 사이로 이동 + 주소 칸 확대. 키를 올려 기존 저장폭을 새 기본값으로 리셋.
-// 폭 재배분 원칙: 내용이 잘리는(말줄임) 상품/고객 칸에서 폭을 빼 주소로 옮기고,
-// 버튼/날짜정렬/금액 등 고정폭이 필요한 칸은 기존 값을 유지해 가로 넘침을 막는다.
-const ORDER_TABLE_COLUMN_STORAGE_KEY = 'cleaning.ops.orders.columnWidths.v2';
+// v3: 상태 칸(한글 라벨 '일정 및 협력사 확인중' 등)이 좁아 옆 칸으로 글자가 겹치던 문제 해결.
+// 상태 폭을 키우고 주소를 약간 줄여 재배분. 키를 올려 저장된(또는 드래그로 깨진) 폭을 새 기본값으로 리셋한다.
+// (어떤 폭에서도 겹침이 없도록 셀은 .orders-table tbody td { overflow:hidden } 으로 클립)
+const ORDER_TABLE_COLUMN_STORAGE_KEY = 'cleaning.ops.orders.columnWidths.v3';
 const ORDER_TABLE_COLUMNS = [
-  { key: 'select', width: 2.4, min: 2 },
-  { key: 'status', width: 8, min: 5.5 },
+  { key: 'select', width: 2.2, min: 2 },
+  { key: 'status', width: 11, min: 8 },
   { key: 'date', width: 9, min: 7 },
-  { key: 'team', width: 9, min: 6 },
-  { key: 'service', width: 9, min: 6 },
-  { key: 'address', width: 23, min: 12 },
-  { key: 'customer', width: 8, min: 6 },
+  { key: 'team', width: 8.5, min: 6 },
+  { key: 'service', width: 9.5, min: 6.5 },
+  { key: 'address', width: 18.5, min: 11 },
+  { key: 'customer', width: 8.5, min: 6.5 },
   { key: 'amount', width: 11, min: 8 },
-  { key: 'payment', width: 6, min: 4 },
-  { key: 'evidence', width: 8, min: 5 },
-  { key: 'progress', width: 6, min: 4.5 },
-  { key: 'actions', width: 8.6, min: 6 },
+  { key: 'payment', width: 5.5, min: 4 },
+  { key: 'evidence', width: 8.5, min: 5.5 },
+  { key: 'progress', width: 5.5, min: 4 },
+  { key: 'actions', width: 8.5, min: 6 },
 ];
 const ORDER_TABLE_DEFAULT_WIDTHS = ORDER_TABLE_COLUMNS.reduce((widths, column) => {
   widths[column.key] = column.width;
@@ -911,14 +911,16 @@ export function OrdersPage({ onOpenOrder, onCreateOrder, onEditOrder, initialTab
         />
       )}
 
-      {/* Table — airy, no inner borders, hover float */}
-      <div ref={tableScrollRef} data-testid="orders-table-scroll" className="scroll" style={{ flex: 1, overflowY: 'auto', overflowX: 'hidden', padding: '4px 4px 20px' }}>
+      {/* Table — airy, no inner borders, hover float.
+          넓은 화면에선 칸이 화면폭에 맞춰 늘어나고(유동), 화면이 좁아지면 칸을 뭉개지 않고
+          최소너비(min-width)를 유지한 채 가로 스크롤이 생긴다 → 글자 겹침/뭉개짐 없이 항상 가독. */}
+      <div ref={tableScrollRef} data-testid="orders-table-scroll" className="scroll" style={{ flex: 1, overflowY: 'auto', overflowX: 'auto', padding: '4px 4px 20px' }}>
         {actionError && <ListNotice text={actionError} tone="danger" />}
         {actionNotice && <ListNotice testId="orders-bulk-notice" text={actionNotice.text} tone={actionNotice.tone} />}
         {ordersResource.isLoading && <ListNotice text="주문 목록을 불러오는 중입니다." />}
         {!ordersResource.isLoading && ordersResource.error && <ListNotice text="주문 목록을 불러오지 못했습니다." tone="danger" />}
         {!ordersResource.isLoading && !ordersResource.error && items.length === 0 && <ListNotice text="표시할 주문이 없습니다." />}
-        <table className="table-modern orders-table" style={{ width: 'calc(100% - 12px)', tableLayout: 'fixed' }}>
+        <table className="table-modern orders-table" style={{ width: 'calc(100% - 12px)', minWidth: 1120, tableLayout: 'fixed' }}>
           <colgroup>
             {ORDER_TABLE_COLUMNS.map((column) => (
               <col key={column.key} style={{ width: `${columnWidths[column.key]}%` }} />

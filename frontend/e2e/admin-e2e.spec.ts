@@ -256,6 +256,9 @@ test('admin order list fits the desktop viewport and exposes received-date sorti
   await expect(page.getByTestId('admin-orders-page')).toBeVisible();
   await expect(page.getByRole('button', { name: '접수 내림차순' })).toBeVisible();
 
+  // 데스크탑 폭에서는 표가 가로 스크롤 없이 화면폭에 맞게 늘어난다.
+  await page.setViewportSize({ width: 1600, height: 900 });
+
   const width = await page.evaluate(() => ({
     scrollWidth: document.documentElement.scrollWidth,
     clientWidth: document.documentElement.clientWidth,
@@ -296,6 +299,15 @@ test('admin order list fits the desktop viewport and exposes received-date sorti
     return element.getBoundingClientRect().left - page.getBoundingClientRect().left;
   });
   expect(contentInset).toBeLessThanOrEqual(6);
+
+  // 화면이 좁아지면 칸을 뭉개지 않고 최소너비를 유지한 채 가로 스크롤이 생긴다(반응형).
+  await page.setViewportSize({ width: 1000, height: 900 });
+  const narrow = await page.getByTestId('orders-table-scroll').evaluate((element) => ({
+    scrollWidth: element.scrollWidth,
+    clientWidth: element.clientWidth,
+  }));
+  expect(narrow.scrollWidth).toBeGreaterThan(narrow.clientWidth);
+  await page.setViewportSize({ width: 1600, height: 900 });
 
   await page.getByRole('button', { name: '접수 내림차순' }).click();
   await expect(page.getByRole('button', { name: '접수 내림차순' })).toBeVisible();
