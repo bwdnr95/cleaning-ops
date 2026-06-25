@@ -23,7 +23,7 @@ from app.domain.order_list import (
     order_workflow_status,
     status_tab_value,
 )
-from app.domain.order_metrics import REVENUE_STATUSES
+from app.domain.order_metrics import REVENUE_STATUSES, SCHEDULED_WORKFLOW_STATUSES
 from app.domain.payment_status import PAYMENT_CHECK_STATUSES
 from app.models.order import Order
 from app.models.order_group import OrderGroup
@@ -162,6 +162,10 @@ class OrderPageService:
 
         # 6) 상태 탭 필터 적용 → 최종 집합 (표준 탭 + 대시보드 진입용 특수 탭)
         rows = [order for order in rows if self._matches_status_tab(order, status)]
+        # '전체'(기본) 보기에선 취소건을 건수/금액 집계에서 뺀다(기록은 '취소' 탭에 보존).
+        # 단, 검색 중엔 취소건도 찾을 수 있도록 포함한다.
+        if (not status or status == "all") and not has_search:
+            rows = [order for order in rows if order.status != OrderStatus.CANCELLED]
 
         total = len(rows)
         summary = self._summarize(rows)
@@ -346,10 +350,8 @@ class OrderPageService:
     # 그래야 KPI 숫자와 클릭 후 목록 행 수가 정확히 일치한다(예: '고객 전달 필요' KPI=목록).
     # today/tomorrow_notice/monthly_* 의 날짜 조건은 방문일 필터(visit_preset)가 함께 처리한다.
     _RAW_STATUS_TAB = {
-        "tomorrow_notice": (
-            OrderStatus.SCHEDULE_CONFIRMED,
-            OrderStatus.DAY_BEFORE_NOTICE_NEEDED,
-        ),
+        # 내일 안내 대상 = 내일 '일정 및 작업 확정'(작업예정 워크플로) 전체와 동일 집합.
+        "tomorrow_notice": SCHEDULED_WORKFLOW_STATUSES,
         "photo_review": (OrderStatus.PHOTO_REVIEW_PENDING,),
         "deliver": (OrderStatus.CUSTOMER_DELIVERY_NEEDED,),
         "partner_pending": (OrderStatus.PARTNER_CONFIRMING,),
@@ -385,7 +387,10 @@ class OrderPageService:
 
     @staticmethod
     def _status_counts(rows: list[Order]) -> dict[str, int]:
-        counts: dict[str, int] = {"all": len(rows)}
+        # '전체' 카운트는 취소 제외(취소는 '취소' 탭 카운트에만 반영).
+        counts: dict[str, int] = {
+            "all": sum(1 for order in rows if order.status != OrderStatus.CANCELLED),
+        }
         for key, _ in ORDER_STATUS_TAB_OPTIONS:
             counts[key] = 0
         for order in rows:

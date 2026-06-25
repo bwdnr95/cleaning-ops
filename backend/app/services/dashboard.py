@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 
 from app.core.time import business_today
 from app.domain.constants import OrderStatus
-from app.domain.order_metrics import REVENUE_STATUSES
+from app.domain.order_metrics import REVENUE_STATUSES, SCHEDULED_WORKFLOW_STATUSES
 from app.domain.payment_status import PAYMENT_CHECK_STATUSES
 from app.models.message import MessageLog
 from app.models.order import Order
@@ -30,9 +30,10 @@ class DashboardService:
                 Order.scheduled_date == current,
                 Order.status != OrderStatus.CANCELLED,
             ),
+            # 내일 방문 예정 '일정 및 작업 확정'(작업예정 워크플로) 전체 — 주문목록 같은 탭/카운트와 일치.
             tomorrow_notice_targets=self._count(
                 Order.scheduled_date == tomorrow,
-                Order.status.in_([OrderStatus.SCHEDULE_CONFIRMED, OrderStatus.DAY_BEFORE_NOTICE_NEEDED]),
+                Order.status.in_(SCHEDULED_WORKFLOW_STATUSES),
             ),
             partner_pending=self._count(Order.status == OrderStatus.PARTNER_CONFIRMING),
             photo_review_pending=self._count(Order.status == OrderStatus.PHOTO_REVIEW_PENDING),

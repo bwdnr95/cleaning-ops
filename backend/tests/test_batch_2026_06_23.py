@@ -120,7 +120,7 @@ def test_tomorrow_notice_kpi_matches_drilldown(db_session: Session) -> None:
     tomorrow = business_today() + timedelta(days=1)
     _add(db_session, status=OrderStatus.SCHEDULE_CONFIRMED, scheduled_date=tomorrow)
     _add(db_session, status=OrderStatus.DAY_BEFORE_NOTICE_NEEDED, scheduled_date=tomorrow)
-    _add(db_session, status=OrderStatus.DAY_BEFORE_NOTICE_DONE, scheduled_date=tomorrow)  # 안내 완료 → 제외
+    _add(db_session, status=OrderStatus.DAY_BEFORE_NOTICE_DONE, scheduled_date=tomorrow)  # 작업예정 워크플로 → 포함
     _add(db_session, status=OrderStatus.SCHEDULE_CONFIRMED, scheduled_date=business_today())  # 오늘 → 제외
     db_session.flush()
 
@@ -129,7 +129,8 @@ def test_tomorrow_notice_kpi_matches_drilldown(db_session: Session) -> None:
         status="tomorrow_notice", visit_preset="tomorrow", page_size=200
     )
 
-    assert summary.tomorrow_notice_targets == 2
+    # 내일 안내 대상 = 내일 '일정 및 작업 확정'(작업예정 워크플로) 전체 → 3건. KPI == 드릴다운.
+    assert summary.tomorrow_notice_targets == 3
     assert page.total == summary.tomorrow_notice_targets
 
 
@@ -211,6 +212,60 @@ def test_settlement_item_exposes_full_detail_address(db_session: Session) -> Non
     item = result.items[0]
     assert item.address_short == "서울특별시 강남구 테스트로 1"
     assert item.address_detail == "3층 301호"
+
+
+# --------------------------------------------------------------------------
+# 미배정(방문일 미정) 주문에 방문일 지정 시 자동 일정확정
+# --------------------------------------------------------------------------
+
+
+def test_assigning_date_auto_confirms_unscheduled_order(db_session: Session) -> None:
+    from datetime import date
+
+    from app.schemas.order import OrderUpdate
+    from app.services.orders import OrderService
+
+    oid = _add(db_session, status=OrderStatus.CONSULTING, scheduled_date=None)
+    db_session.flush()
+
+    OrderService(db_session).update(oid, OrderUpdate(scheduled_date=date(2026, 7, 1)))
+
+    order = db_session.get(Order, oid)
+    assert order.status == OrderStatus.SCHEDULE_CONFIRMED  # 방문일 지정 → 자동 일정확정
+
+
+def test_changing_existing_date_keeps_status(db_session: Session) -> None:
+    from datetime import date
+
+    from app.schemas.order import OrderUpdate
+    from app.services.orders import OrderService
+
+    # 이미 방문일이 있는(진행 중) 주문은 날짜를 바꿔도 상태가 자동으로 바뀌지 않는다.
+    oid = _add(db_session, status=OrderStatus.IN_PROGRESS, scheduled_date=date(2026, 7, 1))
+    db_session.flush()
+
+    OrderService(db_session).update(oid, OrderUpdate(scheduled_date=date(2026, 7, 2)))
+
+    order = db_session.get(Order, oid)
+    assert order.status == OrderStatus.IN_PROGRESS
+
+
+def test_explicit_status_overrides_auto_confirm(db_session: Session) -> None:
+    from datetime import date
+
+    from app.schemas.order import OrderUpdate
+    from app.services.orders import OrderService
+
+    # 같은 요청에서 상태를 직접 지정하면 자동 일정확정이 끼어들지 않는다.
+    oid = _add(db_session, status=OrderStatus.CONSULTING, scheduled_date=None)
+    db_session.flush()
+
+    OrderService(db_session).update(
+        oid, OrderUpdate(scheduled_date=date(2026, 7, 1), status=OrderStatus.PARTNER_CONFIRMING)
+    )
+
+    order = db_session.get(Order, oid)
+    assert order.status == OrderStatus.PARTNER_CONFIRMING
 
 
 # --------------------------------------------------------------------------

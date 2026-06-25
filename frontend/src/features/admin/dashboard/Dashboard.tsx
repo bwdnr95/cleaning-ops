@@ -357,9 +357,9 @@ function toDashJobs(orders, target) {
     .filter((order) => isSameDateValue(order.scheduled_date, wanted))
     .filter((order) => (
       target === 'tomorrow'
-        // '내일 안내 대상' KPI 와 동일 정의(일정확정·전날안내필요)
-        ? ['일정확정', '전날안내필요'].includes(order.status)
-        // '오늘 작업 예정' KPI 와 동일 정의(오늘 방문 전체, 취소 제외) — 일부 상태만 보이던 불일치 해소
+        // '내일 안내 대상' KPI = 내일 '일정 및 작업 확정'(작업예정 워크플로) 전체와 동일 정의
+        ? ['일정확정', '전날안내필요', '전날안내완료', '작업예정', '작업진행'].includes(order.status)
+        // '오늘 작업 예정' KPI 와 동일 정의(오늘 방문 전체, 취소 제외)
         : order.status !== '취소'
     ))
     .slice(0, 5)

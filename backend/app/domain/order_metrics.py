@@ -16,6 +16,16 @@ REVENUE_STATUSES: tuple[OrderStatus, ...] = (
     OrderStatus.COMPLETED,
 )
 
+# 워크플로 '작업예정'(= 주문목록 '일정 및 작업 확정' 탭)에 묶이는 원본 상태들.
+# 대시보드 '내일 안내 대상' KPI 와 주문목록 '일정 및 작업 확정' 탭/카운트가 동일 집합을 보도록 공유한다.
+SCHEDULED_WORKFLOW_STATUSES: tuple[OrderStatus, ...] = (
+    OrderStatus.SCHEDULE_CONFIRMED,
+    OrderStatus.DAY_BEFORE_NOTICE_NEEDED,
+    OrderStatus.DAY_BEFORE_NOTICE_DONE,
+    OrderStatus.SCHEDULED,
+    OrderStatus.IN_PROGRESS,
+)
+
 # 협력사 '진행 중' 작업으로 세는 상태(취소·완료 제외).
 ACTIVE_JOB_STATUSES: tuple[OrderStatus, ...] = (
     OrderStatus.PARTNER_CONFIRMING,

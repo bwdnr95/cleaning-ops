@@ -228,12 +228,13 @@ def test_page_default_returns_upcoming_universe() -> None:
 
     body = _get_page(client, headers, visit_preset="upcoming", page=1, page_size=50)
 
-    # 기본(오늘부터) 화면은 과거 완납을 제외한다.
-    assert body["total"] == UPCOMING_ORDERS
-    assert len(body["items"]) == UPCOMING_ORDERS
-    assert body["status_counts"]["all"] == UPCOMING_ORDERS
+    # 기본(오늘부터) 화면은 과거 완납을 제외하고, '전체' 보기라 취소도 건수에서 뺀다.
+    assert body["total"] == UPCOMING_ORDERS - 1
+    assert len(body["items"]) == UPCOMING_ORDERS - 1
+    assert body["status_counts"]["all"] == UPCOMING_ORDERS - 1
     ids = {item["id"] for item in body["items"]}
     assert "ord-past-paid" not in ids
+    assert "ord-cancelled" not in ids  # 취소는 '전체'에서 제외(기록은 '취소' 탭).
     assert "ord-past-unpaid" in ids  # 과거 잔금 미완납은 노출.
 
 
@@ -245,16 +246,16 @@ def test_pagination_slices_pages() -> None:
     page2 = _get_page(client, headers, visit_preset="all", page=2, page_size=4)
     page3 = _get_page(client, headers, visit_preset="all", page=3, page_size=4)
 
-    assert page1["total"] == TOTAL_ORDERS
+    assert page1["total"] == TOTAL_ORDERS - 1  # '전체'는 취소 제외
     assert len(page1["items"]) == 4
     assert len(page2["items"]) == 4
-    assert len(page3["items"]) == 2  # 10 = 4 + 4 + 2
+    assert len(page3["items"]) == 1  # 9 = 4 + 4 + 1
 
     ids1 = [item["id"] for item in page1["items"]]
     ids2 = [item["id"] for item in page2["items"]]
     ids3 = [item["id"] for item in page3["items"]]
     # 페이지 간 중복 없음.
-    assert len(set(ids1 + ids2 + ids3)) == TOTAL_ORDERS
+    assert len(set(ids1 + ids2 + ids3)) == TOTAL_ORDERS - 1
 
 
 def test_status_tab_counts_match_universe() -> None:
@@ -264,7 +265,7 @@ def test_status_tab_counts_match_universe() -> None:
     body = _get_page(client, headers, visit_preset="all", page=1, page_size=50)
     counts = body["status_counts"]
 
-    assert counts["all"] == TOTAL_ORDERS
+    assert counts["all"] == TOTAL_ORDERS - 1  # '전체' 카운트는 취소 제외(취소는 cancel 탭)
     assert counts["consulting_unassigned"] == 1
     assert counts["schedule_partner_checking"] == 1
     # 작업예정: future-scheduled, today-scheduled, past-unpaid(SCHEDULED) = 3

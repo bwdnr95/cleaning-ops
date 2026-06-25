@@ -50,6 +50,13 @@ PARTNER_JOB_STARTABLE_STATUSES = {
     OrderStatus.SCHEDULED.value,
 }
 
+# 방문일이 없던(미배정) 주문에 방문일을 새로 지정하면 자동으로 '일정확정'으로 올릴 수 있는 상태들.
+AUTO_CONFIRM_ON_SCHEDULE_STATUSES = (
+    OrderStatus.NEW,
+    OrderStatus.CONSULTING,
+    OrderStatus.PARTNER_CONFIRMING,
+)
+
 PARTNER_JOB_COMPLETABLE_STATUSES = {
     OrderStatus.IN_PROGRESS.value,
 }
@@ -217,12 +224,32 @@ class OrderService:
         self._apply_service_catalog(changes)
         _normalize_receipt_fields(changes)
         old_status = order.status
+        old_scheduled_date = order.scheduled_date
         payment_changes = collect_payment_changes(order, changes)
         schedule_changes = collect_schedule_changes(order, changes)
         for key, value in changes.items():
             if key == "customer_phone" and value is not None:
                 value = normalize_phone(value)
             setattr(order, key, value)
+
+        # 방문일 미배정(미정) 주문에 방문일을 새로 지정하면 자동으로 '일정확정'으로 전환한다.
+        # (운영자가 같은 요청에서 상태를 직접 지정했으면 그 값을 존중하여 건드리지 않음)
+        if (
+            "scheduled_date" in changes
+            and order.scheduled_date is not None
+            and old_scheduled_date is None
+            and "status" not in changes
+            and order.status in AUTO_CONFIRM_ON_SCHEDULE_STATUSES
+        ):
+            order.status = OrderStatus.SCHEDULE_CONFIRMED
+            self.timeline.record(
+                order_id=order.id,
+                actor_user_id=actor_user_id,
+                event_type=TimelineEventType.STATUS_CHANGED,
+                title="상태 변경",
+                description="방문일 지정으로 자동 일정확정 처리되었습니다.",
+                metadata={"from": old_status, "to": OrderStatus.SCHEDULE_CONFIRMED.value, "auto": True},
+            )
 
         if "status" in changes and changes["status"] != old_status:
             self.timeline.record(
