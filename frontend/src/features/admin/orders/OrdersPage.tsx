@@ -36,6 +36,7 @@ const STATUS_DOT = {
   '사진검수대기': '#f59e0b',
   '고객전달필요': '#f59e0b',
   '고객전달완료': '#10b981',
+  '고객확인필요': '#ef4444',
   '서비스완료':   '#10b981',
   '취소':         '#cbd5e1',
 };
@@ -199,6 +200,7 @@ const ORDER_STATUS_TAB_OPTIONS = [
   { key: 'schedule_partner_checking', status: '협력사확인중', label: '일정 및 협력사 확인중' },
   { key: 'schedule_work_confirmed', status: '작업예정', label: '일정 및 작업 확정' },
   { key: 'work_done', status: '고객전달필요', label: '작업완료' },
+  { key: 'customer_check_needed', status: '고객확인필요', label: '고객확인필요' },
   { key: 'final_payment_complete', status: '서비스완료', label: '최종결제완료' },
   { key: 'cancel', status: '취소', label: '취소' },
 ];
@@ -736,9 +738,12 @@ export function OrdersPage({ onOpenOrder, onCreateOrder, onEditOrder, initialTab
         {[
           ['all', '전체'],
           ['today', '오늘'],
+          ['yesterday', '어제'],
           ['tomorrow', '내일'],
           ['week', '이번주'],
+          ['lastweek', '지난주'],
           ['month', '이번달'],
+          ['last14', '지난 14일'],
         ].map(([key, label]) => (
           <button
             key={key}
@@ -784,9 +789,12 @@ export function OrdersPage({ onOpenOrder, onCreateOrder, onEditOrder, initialTab
           ['upcoming', '오늘부터'],
           ['all', '전체'],
           ['today', '오늘'],
+          ['yesterday', '어제'],
           ['tomorrow', '내일'],
           ['week', '이번주'],
+          ['lastweek', '지난주'],
           ['month', '이번달'],
+          ['last14', '지난 14일'],
         ].map(([key, label]) => (
           <button
             key={key}
@@ -1500,6 +1508,26 @@ function createDateFilter(preset) {
       preset,
       start: formatDateValue(firstDay),
       end: formatDateValue(lastDay),
+    };
+  }
+  if (preset === 'yesterday') {
+    const value = formatDateValue(addDays(today, -1));
+    return { preset, start: value, end: value };
+  }
+  if (preset === 'lastweek') {
+    const lastMonday = addDays(startOfWeek(today), -7);
+    return {
+      preset,
+      start: formatDateValue(lastMonday),
+      end: formatDateValue(addDays(lastMonday, 6)),
+    };
+  }
+  if (preset === 'last14') {
+    // 지난 14일(오늘 포함 최근 2주)
+    return {
+      preset,
+      start: formatDateValue(addDays(today, -13)),
+      end: formatDateValue(today),
     };
   }
   return { preset: 'all', start: '', end: '' };

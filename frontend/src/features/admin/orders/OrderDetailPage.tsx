@@ -138,18 +138,18 @@ export function OrderDetailPage({ orderId, onBack, onEdit, onDuplicate, onNav, o
   );
 
   const handleStatusChange = async () => {
+    // 작업완료(고객전달필요)로 '처음' 진입하는지 — 진입 시 잔금 안내 미리보기를 자동으로 띄운다.
+    const enteredWorkDone = selectedStatus === WORK_DONE_STATUS && order.status !== WORK_DONE_STATUS;
     await runAction(async () => {
-      // 잔금 안내는 더 이상 상태 변경 시 자동 발송하지 않는다(미리보기-확인 발송으로 전환).
-      // '고객전달필요'로 처음 진입하면 아래 '잔금 안내' 버튼으로 보내도록 안내만 한다.
-      const enteredWorkDone = selectedStatus === WORK_DONE_STATUS && order.status !== WORK_DONE_STATUS;
       const selectedStatusLabel = orderStatusLabel(selectedStatus);
       await updateAdminOrder(order.id, { status: selectedStatus });
-      setNotice(
-        enteredWorkDone
-          ? `${selectedStatusLabel} 상태로 변경했습니다. 잔금 안내가 필요하면 '잔금 안내' 버튼으로 미리보기 후 발송하세요.`
-          : `${selectedStatusLabel} 상태 변경을 타임라인에 기록했습니다.`,
-      );
       orderResource.reload();
+      if (enteredWorkDone) {
+        // 잔금 안내 미리보기를 자동 표시 → 운영자가 확인 후 발송(미발송 누락 방지 + 오발송 방지).
+        await openMessagePreview(MESSAGE_ACTIONS.customerBalanceDue);
+      } else {
+        setNotice(`${selectedStatusLabel} 상태 변경을 타임라인에 기록했습니다.`);
+      }
     });
   };
 

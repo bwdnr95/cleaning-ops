@@ -28,6 +28,7 @@ SIMPLIFIED_ORDER_STATUS: dict[str, str] = {
     "사진검수대기": "고객전달필요",
     "고객전달필요": "고객전달필요",
     "고객전달완료": "고객전달필요",
+    "고객확인필요": "고객확인필요",
     "서비스완료": "서비스완료",
     "취소": "취소",
 }
@@ -64,6 +65,7 @@ ORDER_STATUS_TAB_OPTIONS: list[tuple[str, str]] = [
     ("schedule_partner_checking", "협력사확인중"),
     ("schedule_work_confirmed", "작업예정"),
     ("work_done", "고객전달필요"),
+    ("customer_check_needed", "고객확인필요"),
     ("final_payment_complete", "서비스완료"),
     ("cancel", "취소"),
 ]

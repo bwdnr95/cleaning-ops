@@ -10,6 +10,7 @@ export const LEGACY_ORDER_STATUSES = [
   '사진검수대기',
   '고객전달필요',
   '고객전달완료',
+  '고객확인필요',
   '서비스완료',
   '취소',
 ];
@@ -19,6 +20,7 @@ export const ORDER_STATUS_OPTIONS = [
   { value: '협력사확인중', label: '일정 및 협력사 확인중' },
   { value: '작업예정', label: '일정 및 작업 확정' },
   { value: '고객전달필요', label: '작업완료' },
+  { value: '고객확인필요', label: '고객확인필요' },
   { value: '서비스완료', label: '최종결제완료' },
   { value: '취소', label: '취소' },
 ];
@@ -37,6 +39,7 @@ const ORDER_STATUS_LABELS: Record<string, string> = {
   사진검수대기: '작업완료',
   고객전달필요: '작업완료',
   고객전달완료: '작업완료',
+  고객확인필요: '고객확인필요',
   서비스완료: '최종결제완료',
   취소: '취소',
 };
@@ -53,6 +56,7 @@ const ORDER_STATUS_TONES: Record<string, string> = {
   사진검수대기: 'warn',
   고객전달필요: 'warn',
   고객전달완료: 'warn',
+  고객확인필요: 'danger',
   서비스완료: 'success',
   취소: 'danger',
 };
@@ -69,6 +73,7 @@ const SIMPLIFIED_ORDER_STATUS_VALUES: Record<string, string> = {
   사진검수대기: '고객전달필요',
   고객전달필요: '고객전달필요',
   고객전달완료: '고객전달필요',
+  고객확인필요: '고객확인필요',
   서비스완료: '서비스완료',
   취소: '취소',
 };

@@ -18,6 +18,8 @@ class OrderStatus(StrEnum):
     PHOTO_REVIEW_PENDING = "사진검수대기"
     CUSTOMER_DELIVERY_NEEDED = "고객전달필요"
     CUSTOMER_DELIVERY_DONE = "고객전달완료"
+    # 컴플레인/이슈로 최종결제(미수금)가 막힌 건을 따로 관리하는 상태. 최종결제완료 직전 단계.
+    CUSTOMER_CHECK_NEEDED = "고객확인필요"
     COMPLETED = "서비스완료"
     CANCELLED = "취소"
 

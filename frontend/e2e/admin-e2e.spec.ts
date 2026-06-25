@@ -92,6 +92,7 @@ test('admin order status tabs use the simplified workflow states only', async ({
     ['orders-tab-schedule_partner_checking', '일정 및 협력사 확인중'],
     ['orders-tab-schedule_work_confirmed', '일정 및 작업 확정'],
     ['orders-tab-work_done', '작업완료'],
+    ['orders-tab-customer_check_needed', '고객확인필요'],
     ['orders-tab-final_payment_complete', '최종결제완료'],
     ['orders-tab-cancel', '취소'],
   ];
@@ -410,8 +411,8 @@ test('admin can adjust schedule from order detail and jump to related ops pages'
 
   await page.getByTestId('detail-status-select').selectOption('고객전달필요');
   await page.getByTestId('detail-status-save').click();
-  // 상태 변경만으로는 잔금 안내가 자동 발송되지 않는다(자동발송 제거).
-  await expect(page.getByTestId('admin-action-notice')).toContainText('잔금 안내가 필요하면');
+  // 작업완료(고객전달필요) 진입 시 잔금 안내 미리보기가 자동으로 뜬다(확인 후 발송 — 자동발송 아님).
+  await expect(page.getByTestId('message-preview-modal')).toBeVisible();
   await expect.poll(async () => {
     const [detail] = await getOrderDetails(request, [order]);
     return {
@@ -420,12 +421,10 @@ test('admin can adjust schedule from order detail and jump to related ops pages'
     };
   }).toEqual({
     status: '고객전달필요',
-    balanceSent: false,
+    balanceSent: false,  // 미리보기만 떴고 아직 발송 전
   });
 
-  // 잔금 안내는 버튼 → 미리보기 → 확인 후에만 발송된다.
-  await page.getByTestId('send-customer-balance-due').click();
-  await expect(page.getByTestId('message-preview-modal')).toBeVisible();
+  // 자동으로 뜬 미리보기에서 확인 후 발송.
   await page.getByTestId('message-preview-send').click();
   await expect.poll(async () => {
     const [detail] = await getOrderDetails(request, [order]);
