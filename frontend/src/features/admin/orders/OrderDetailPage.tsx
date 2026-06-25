@@ -146,7 +146,13 @@ export function OrderDetailPage({ orderId, onBack, onEdit, onDuplicate, onNav, o
       orderResource.reload();
       if (enteredWorkDone) {
         // 잔금 안내 미리보기를 자동 표시 → 운영자가 확인 후 발송(미발송 누락 방지 + 오발송 방지).
-        await openMessagePreview(MESSAGE_ACTIONS.customerBalanceDue);
+        // 미리보기 로드가 실패해도 상태 저장은 이미 끝났으므로, '상태 저장 실패'로 오해하지 않게 분리 안내한다.
+        const previewOpened = await openMessagePreview(MESSAGE_ACTIONS.customerBalanceDue);
+        if (!previewOpened) {
+          setError(
+            `${selectedStatusLabel} 상태는 저장됐습니다. 잔금 안내 미리보기만 불러오지 못했으니 '잔금 안내' 버튼으로 다시 시도하세요.`,
+          );
+        }
       } else {
         setNotice(`${selectedStatusLabel} 상태 변경을 타임라인에 기록했습니다.`);
       }
@@ -216,7 +222,9 @@ export function OrderDetailPage({ orderId, onBack, onEdit, onDuplicate, onNav, o
     }
   };
 
-  const openMessagePreview = async (draft) => {
+  // 미리보기 로드 성공 여부를 boolean 으로 돌려준다. (직접 버튼 호출은 반환값을 무시해도 되고,
+  // 상태변경 자동 오픈처럼 후속 분기가 필요한 호출은 성공/실패를 구분할 수 있다.)
+  const openMessagePreview = async (draft): Promise<boolean> => {
     setError(null);
     setNotice(null);
     setMessageDraft(draft);
@@ -225,9 +233,11 @@ export function OrderDetailPage({ orderId, onBack, onEdit, onDuplicate, onNav, o
     setMessagePreviewError(null);
     try {
       await fetchMessagePreview(draft, 'sms');
+      return true;
     } catch (requestError) {
       setMessageDraft(null);
       setError(toActionErrorMessage(requestError));
+      return false;
     }
   };
 

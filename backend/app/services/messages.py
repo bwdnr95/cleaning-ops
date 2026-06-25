@@ -1426,6 +1426,8 @@ STATUS_ORDER: dict[OrderStatus, int] = {
     OrderStatus.PHOTO_REVIEW_PENDING: 90,
     OrderStatus.CUSTOMER_DELIVERY_NEEDED: 100,
     OrderStatus.CUSTOMER_DELIVERY_DONE: 110,
+    # 컴플레인/미수금으로 막힌 보류 상태. 최종결제완료(120) 직전이지만 자동 전진 대상은 아니다.
+    OrderStatus.CUSTOMER_CHECK_NEEDED: 115,
     OrderStatus.COMPLETED: 120,
     OrderStatus.CANCELLED: 999,
 }
@@ -1434,7 +1436,13 @@ STATUS_ORDER: dict[OrderStatus, int] = {
 def should_advance_status(current: OrderStatus, next_status: OrderStatus) -> bool:
     if current == next_status or current == OrderStatus.CANCELLED:
         return False
-    return STATUS_ORDER[current] < STATUS_ORDER[next_status]
+    # 신규 상태가 STATUS_ORDER 에 누락돼도 KeyError 로 발송 후처리가 깨지지 않도록 방어한다.
+    # (순위를 모르는 상태에서는 자동 전진을 하지 않는다 = 안전한 기본값.)
+    current_rank = STATUS_ORDER.get(current)
+    next_rank = STATUS_ORDER.get(next_status)
+    if current_rank is None or next_rank is None:
+        return False
+    return current_rank < next_rank
 
 
 def format_service_name(order: Order) -> str:

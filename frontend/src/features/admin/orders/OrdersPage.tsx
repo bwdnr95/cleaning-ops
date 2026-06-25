@@ -447,13 +447,22 @@ export function OrdersPage({ onOpenOrder, onCreateOrder, onEditOrder, initialTab
         : `${successCount}건 ${successLabel}`,
     });
     setIsSavingAction(false);
+    return { successCount, failures };
   };
 
   const handleBulkStatusChange = async () => {
-    await runSelectedOrdersAction({
+    const result = await runSelectedOrdersAction({
       successLabel: `${orderStatusLabel(bulkStatus)} 상태로 변경했습니다.`,
       execute: (orderId) => updateAdminOrder(orderId, { status: bulkStatus }),
     });
+    // 일괄 '작업완료(고객전달필요)' 처리는 상세화면과 달리 잔금 미리보기가 자동으로 뜨지 않는다.
+    // 잔금 안내 발송 누락을 막기 위해, 전건 성공 시 후속 안내를 띄운다.
+    if (result && result.failures.length === 0 && bulkStatus === '고객전달필요') {
+      setActionNotice({
+        tone: 'warn',
+        text: `${result.successCount}건을 '작업완료'로 변경했습니다. 일괄 변경은 잔금 안내 미리보기가 자동으로 뜨지 않으니, 각 주문 상세에서 잔금 안내를 확인 후 발송하세요.`,
+      });
+    }
   };
 
   const handleBulkPartnerAssign = async () => {

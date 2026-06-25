@@ -90,7 +90,7 @@ Partner upload → `is_customer_visible=true` (자동 공개). **상태는 변�
 `services/messages.py` exposes a `MessageProvider` interface. `MockMessageProvider` and an SOL-API provider both exist; provider is selected via `core/config.py` settings. SOL credentials/template IDs are not yet wired — Mock is the default. Webhook receiver is at `api/routes/webhooks.py`. Both success and failure must land in `message_logs`. Templates and required variables live in `domain/message_templates.py`. The four message types are `customer_schedule_confirmed`, `customer_day_before`, `partner_assignment`, `customer_photo_ready`.
 
 ### Domain constants — one place
-`backend/app/domain/constants.py` is the central definition for the 13 order statuses, photo types (`before` / `after` / `etc`), message types, and timeline event types. Do not introduce parallel string literals.
+`backend/app/domain/constants.py` is the central definition for the 14 order statuses, photo types (`before` / `after` / `etc`), message types, and timeline event types. Do not introduce parallel string literals.
 
 ### Frontend wiring
 - `src/api/client.ts` — `apiRequest` wrapper. Attaches `Authorization`, generates `X-Request-ID`, retries once on 401 via the refresh-token flow, normalizes FastAPI validation errors. Never call `fetch` directly from features.

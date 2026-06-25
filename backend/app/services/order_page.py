@@ -71,7 +71,14 @@ _PAYMENT_CHECK_STATUSES = PAYMENT_CHECK_STATUSES
 # 기본 진입 탭인 'all'은 '오늘부터'의 의미(미래 중심)를 지키도록 과거 완납을 숨기고,
 # 과거 완납은 검색 또는 '전체' 방문일 프리셋으로 조회한다.
 _PAST_PAID_VISIBLE_TABS = frozenset(
-    {"work_done", "final_payment_complete", "done", "monthly_done", "monthly_revenue"}
+    {
+        "work_done",
+        "customer_check_needed",
+        "final_payment_complete",
+        "done",
+        "monthly_done",
+        "monthly_revenue",
+    }
 )
 
 
