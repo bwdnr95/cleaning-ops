@@ -423,6 +423,11 @@ class PartnerService:
                 is_active=partner.is_active,
             )
             self.db.add(user)
+            # 신규 user 를 먼저 영속화한다. SQLAlchemy UOW 는 relationship 이 없으면
+            # FK 만으로 같은 flush 안의 INSERT 순서를 보장하지 않아, 직후의
+            # audit_logs(user_id FK) 가 users 보다 먼저 INSERT 되어 Postgres FK 위반이
+            # 발생할 수 있다(SQLite 는 FK 미강제라 테스트에서 안 잡힘). 참조 전에 flush.
+            self.db.flush()
         else:
             user.name = partner.manager_name or partner.name
             user.phone = normalized_phone
