@@ -126,6 +126,25 @@ class OrderRepository(Repository[Order]):
             if o.scheduled_date is not None and o.scheduled_date.strftime("%Y-%m") == billing_month
         ]
 
+    def list_recurring_billing_orders(
+        self, *, month: str, contract_id: str | None = None
+    ) -> list[Order]:
+        """월 청구·정산 집계 대상 정기 주문. scheduled_date의 월 기준, 취소/삭제 제외.
+
+        month: "YYYY-MM". contract_id=None이면 전 계약.
+        """
+        stmt = select(Order).where(
+            Order.recurring_contract_id.is_not(None),
+            Order.deleted_at.is_(None),
+            Order.status != OrderStatus.CANCELLED,
+            Order.scheduled_date.is_not(None),
+        )
+        if contract_id is not None:
+            stmt = stmt.where(Order.recurring_contract_id == contract_id)
+        rows = list(self.db.scalars(stmt.order_by(Order.scheduled_date.asc(), Order.id.asc())))
+        # scheduled_date 월 필터는 dialect 무관하게 Python으로(.claude/rules + AGENTS 집계 규칙)
+        return [o for o in rows if o.scheduled_date.strftime("%Y-%m") == month]
+
 
 OVERDUE_UNPAID_PAYMENT_STATUSES: tuple[str, ...] = (
     PaymentStatus.UNPAID,
