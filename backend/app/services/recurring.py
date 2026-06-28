@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from datetime import date, timedelta
 from uuid import uuid4
 
@@ -12,6 +13,7 @@ from app.domain.constants import (
     RecurringContractStatus,
     RecurringOccurrenceStatus,
 )
+from app.domain.phone import normalize_phone
 from app.domain.recurrence import (
     HORIZON_DAYS,
     OVERDUE_GRACE_DAYS,
@@ -39,6 +41,8 @@ from app.schemas.recurring import (
     SkipOccurrencesResult,
 )
 from app.services.orders import OrderService
+
+logger = logging.getLogger(__name__)
 
 # 그룹에 보관되는 고객 필드(계약 수정 시 그룹으로 라우팅)
 _GROUP_FIELDS = {
@@ -101,11 +105,19 @@ class RecurringService:
             raise ValueError("recurring_contract_not_found")
         changes = payload.model_dump(exclude_unset=True)
 
+        # 생성 경로와 동일하게 default_partner_id 존재를 검증한다(잘못된 FK PATCH로
+        # Postgres IntegrityError가 나기 전에 막는다 — SQLite 테스트는 FK 미강제).
+        if changes.get("default_partner_id") is not None:
+            if PartnerRepository(self.db).get(changes["default_partner_id"]) is None:
+                raise ValueError("partner_not_found")
+
         group = self.groups.get(contract.order_group_id)
         for field in list(changes.keys()):
             if field in _GROUP_FIELDS:
                 value = changes.pop(field)
                 if group is not None and value is not None:
+                    if field == "customer_phone":
+                        value = normalize_phone(value)
                     setattr(group, field, value)
         for key, value in changes.items():
             setattr(contract, key, value)
@@ -177,7 +189,11 @@ class RecurringService:
                         )
                     )
                     created += 1
-            except Exception:
+            except ValueError as exc:
+                # 잘못 저장된 스케줄(짝 필드 누락 등)로 iter_due_dates가 ValueError를
+                # 던지면 그 계약만 건너뛰고 경고를 남긴다. DB 오류 등 다른 예외는
+                # 삼키지 않고 전파한다 — 운영자가 알 수 있어야 한다.
+                logger.warning("recurring_sync_skipped_contract %s: %s", contract.id, exc)
                 continue
         if created:
             self.db.commit()

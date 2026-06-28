@@ -228,3 +228,31 @@ def test_skip_marks_occurrence_skipped(db_session):
     db_session.refresh(occ)
     assert occ.status == RecurringOccurrenceStatus.SKIPPED
     assert occ.skipped_reason == "고객 휴무"
+
+
+def test_update_contract_unknown_partner_raises(db_session):
+    svc = RecurringService(db_session)
+    c = svc.create_contract(_make_payload(), actor_user_id=None)
+    with pytest.raises(ValueError, match="partner_not_found"):
+        svc.update_contract(
+            c.id, RecurringContractUpdate(default_partner_id="nonexistent"), actor_user_id=None
+        )
+
+
+def test_update_contract_valid_partner_ok(db_session):
+    svc = RecurringService(db_session)
+    c = svc.create_contract(_make_payload(), actor_user_id=None)
+    svc.update_contract(
+        c.id, RecurringContractUpdate(default_partner_id=DEV_PARTNER_ID), actor_user_id=None
+    )
+    assert svc.get_contract(c.id).default_partner_id == DEV_PARTNER_ID
+
+
+def test_update_contract_normalizes_customer_phone(db_session):
+    svc = RecurringService(db_session)
+    c = svc.create_contract(_make_payload(), actor_user_id=None)
+    svc.update_contract(
+        c.id, RecurringContractUpdate(customer_phone="010-1111-3333"), actor_user_id=None
+    )
+    group = OrderGroupRepository(db_session).get(c.order_group_id)
+    assert group.customer_phone == "01011113333"
