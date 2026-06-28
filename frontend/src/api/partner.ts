@@ -19,3 +19,14 @@ export function completePartnerJob(orderId) {
     method: 'POST',
   });
 }
+
+export function addPartnerJobMemo(orderId, text) {
+  return apiRequest(`/partner/jobs/${encodeURIComponent(orderId)}/memo`, {
+    method: 'POST',
+    body: { text },
+  });
+}
+
+export function getPartnerJobMessages(orderId) {
+  return apiRequest(`/partner/jobs/${encodeURIComponent(orderId)}/messages`);
+}

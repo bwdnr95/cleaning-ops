@@ -1,12 +1,24 @@
 import React from 'react';
 import { Avatar, Badge, Icon } from '../../components/common/ui';
-import { completePartnerJob, getPartnerJob, listPartnerJobs, startPartnerJob } from '../../api/partner';
+import {
+  addPartnerJobMemo,
+  completePartnerJob,
+  getPartnerJob,
+  getPartnerJobMessages,
+  listPartnerJobs,
+  startPartnerJob,
+} from '../../api/partner';
 import { uploadPartnerJobPhoto } from '../../api/photos';
 import { ApiError, toApiAssetUrl } from '../../api/client';
 import { useApiResource } from '../../api/useApiResource';
 import { formatQuantity } from '../../domain/format';
 import { digitsOnly, formatPhone } from '../../domain/phone';
 import { parseDateValue } from '../../domain/time';
+
+const PARTNER_MESSAGE_TYPE_LABELS = {
+  partner_assignment: '작업 배정 안내',
+  partner_customer_info: '고객 정보 안내',
+};
 
 const PHOTO_UPLOAD_ERROR_MESSAGES = {
   unsupported_photo_type: 'JPG/PNG/WebP만 업로드 가능합니다.',
@@ -21,7 +33,7 @@ const COMPLETABLE_JOB_STATUSES = ['작업진행'];
 // 활성 작업 구간(시작 가능 상태 + 작업진행)에서만 업로드 버튼을 활성화한다.
 const PHOTO_UPLOADABLE_JOB_STATUSES = [...STARTABLE_JOB_STATUSES, ...COMPLETABLE_JOB_STATUSES];
 
-export function PartnerJobDetail() {
+export function PartnerJobDetail({ onDetailOpenChange = undefined } = {}) {
   const [selectedJobId, setSelectedJobId] = React.useState(null);
   const [uploadError, setUploadError] = React.useState(null);
   const [uploadNotice, setUploadNotice] = React.useState(null);
@@ -30,9 +42,17 @@ export function PartnerJobDetail() {
   const [statusError, setStatusError] = React.useState(null);
   const [isUploading, setIsUploading] = React.useState(false);
   const [isSavingStatus, setIsSavingStatus] = React.useState(false);
+  const [memoDraft, setMemoDraft] = React.useState('');
+  const [memoError, setMemoError] = React.useState(null);
+  const [memoNotice, setMemoNotice] = React.useState(null);
+  const [isSavingMemo, setIsSavingMemo] = React.useState(false);
   const beforeInputRef = React.useRef<HTMLInputElement | null>(null);
   const afterInputRef = React.useRef<HTMLInputElement | null>(null);
   const etcInputRef = React.useRef<HTMLInputElement | null>(null);
+
+  React.useEffect(() => {
+    onDetailOpenChange?.(Boolean(selectedJobId));
+  }, [selectedJobId, onDetailOpenChange]);
 
   const jobs = useApiResource(listPartnerJobs);
   const detailLoader = React.useCallback(() => {
@@ -52,11 +72,38 @@ export function PartnerJobDetail() {
     setUploadingPhotoType(null);
     setUploadingCount(0);
     setStatusError(null);
+    setMemoDraft('');
+    setMemoError(null);
+    setMemoNotice(null);
   }, [selectedJobId]);
 
   const refreshFlow = () => {
     jobs.reload();
     detail.reload();
+  };
+
+  const handleMemoSave = async () => {
+    if (!job) {
+      return;
+    }
+    const text = memoDraft.trim();
+    if (!text) {
+      return;
+    }
+
+    setMemoError(null);
+    setMemoNotice(null);
+    setIsSavingMemo(true);
+    try {
+      await addPartnerJobMemo(job.id, text);
+      refreshFlow();
+      setMemoDraft('');
+      setMemoNotice('메모가 저장되었습니다.');
+    } catch {
+      setMemoError('메모를 저장하지 못했습니다.');
+    } finally {
+      setIsSavingMemo(false);
+    }
   };
 
   const handlePhotoSelected = async (photoType, event) => {
@@ -158,7 +205,24 @@ export function PartnerJobDetail() {
   }
 
   if (detail.error || !job) {
-    return <PartnerState text="작업 상세를 불러오지 못했습니다." tone="danger" />;
+    // 현장(지하·약전계)에서 상세 로드가 실패해도 협력사가 갇히지 않도록
+    // 다시 시도 + 목록으로 탈출 경로를 항상 제공한다. (상세가 열려 있으면 하단 네비는 숨겨짐)
+    return (
+      <PartnerState
+        text="작업 상세를 불러오지 못했습니다."
+        tone="danger"
+        actions={(
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button type="button" data-testid="partner-detail-retry" onClick={() => detail.reload()} style={partnerStateButtonStyle('brand')}>
+              다시 시도
+            </button>
+            <button type="button" data-testid="partner-detail-back" onClick={() => setSelectedJobId(null)} style={partnerStateButtonStyle('neutral')}>
+              목록으로
+            </button>
+          </div>
+        )}
+      />
+    );
   }
 
   const canStart = STARTABLE_JOB_STATUSES.includes(job.status);
@@ -176,6 +240,7 @@ export function PartnerJobDetail() {
             <Icon name="chevronLeft" size={20}/>
           </button>
           <PartnerStatusBadge status={job.status}/>
+          {job.is_recurring && <span data-testid="partner-recurring-badge"><Badge tone="brand">정기</Badge></span>}
         </div>
         <h2 style={{ margin: 0, fontSize: 17, fontWeight: 700 }}>{job.service_name}</h2>
         <div style={{ fontSize: 12, color: 'var(--text-tertiary)', marginTop: 2 }}>{formatQuantity(job.size_or_quantity) || job.service_detail || '상세 수량 미입력'}</div>
@@ -218,6 +283,46 @@ export function PartnerJobDetail() {
             {job.special_request || '별도 요청 사항이 없습니다.'}
           </div>
         </Panel>
+
+        <Panel>
+          <SectionLabel>작업 메모</SectionLabel>
+          <div style={{ display: 'grid', gap: 6, marginBottom: 10 }}>
+            {(job.memos || []).length === 0 ? (
+              <div style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>작성된 메모가 없습니다.</div>
+            ) : (
+              (job.memos || []).map((memo, index) => (
+                <div key={memo.id || index} data-testid="partner-memo-item" style={{ padding: 10, background: 'var(--bg-subtle)', border: '1px solid var(--border)', borderRadius: 8 }}>
+                  <div className="multiline-text" style={{ fontSize: 12.5, lineHeight: 1.5, color: 'var(--text)' }}>{memo.text}</div>
+                  <div style={{ fontSize: 10.5, color: 'var(--text-tertiary)', marginTop: 6 }}>{formatKoreanDateTime(memo.created_at)}</div>
+                </div>
+              ))
+            )}
+          </div>
+          <textarea
+            className="input"
+            data-testid="partner-memo-input"
+            rows={3}
+            maxLength={1000}
+            placeholder="현장 메모를 남겨주세요."
+            value={memoDraft}
+            disabled={isSavingMemo}
+            onChange={(event) => setMemoDraft(event.target.value)}
+            style={{ width: '100%', height: 'auto', padding: 10, lineHeight: 1.5, resize: 'vertical', fontFamily: 'inherit' }}
+          />
+          {memoError && <div style={{ fontSize: 11.5, color: 'var(--danger-fg)', marginTop: 6 }}>{memoError}</div>}
+          {memoNotice && <div style={{ fontSize: 11.5, color: 'var(--success-fg)', fontWeight: 700, marginTop: 6 }}>{memoNotice}</div>}
+          <button
+            type="button"
+            data-testid="partner-memo-save"
+            disabled={isSavingMemo || !memoDraft.trim()}
+            onClick={() => void handleMemoSave()}
+            style={memoSaveButtonStyle(isSavingMemo || !memoDraft.trim())}
+          >
+            {isSavingMemo ? '저장 중' : '메모 저장'}
+          </button>
+        </Panel>
+
+        <PartnerMessagesPanel jobId={job.id} />
 
         {!canUploadPhotos && (
           <div data-testid="partner-photo-upload-locked" style={{ margin: '0 2px 10px', padding: '8px 10px', border: '1px solid var(--border)', borderRadius: 8, background: 'var(--bg-subtle)', color: 'var(--text-secondary)', fontSize: 11.5, lineHeight: 1.45 }}>
@@ -317,6 +422,7 @@ function PartnerJobList({ jobs, onSelect }) {
           <button key={job.id} data-testid={`partner-job-row-${job.id}`} onClick={() => onSelect(job.id)} style={{ textAlign: 'left', background: '#fff', border: '1px solid var(--border)', borderRadius: 10, padding: 14, cursor: 'pointer' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
               <PartnerStatusBadge status={job.status}/>
+              {job.is_recurring && <span data-testid="partner-recurring-badge"><Badge tone="brand">정기</Badge></span>}
               <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--text-tertiary)' }}>{formatKoreanDate(job.scheduled_date)}</span>
             </div>
             <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 4 }}>{job.service_name}</div>
@@ -362,6 +468,48 @@ function PhotoPanel({ title, tone, photos, onAdd, disabled }) {
         </button>
       </div>
     </Panel>
+  );
+}
+
+function PartnerMessagesPanel({ jobId }) {
+  const loader = React.useCallback(() => {
+    if (!jobId) {
+      return Promise.resolve([]);
+    }
+    return getPartnerJobMessages(jobId);
+  }, [jobId]);
+  const messages = useApiResource(loader, jobId || 'none');
+  const items = messages.data || [];
+
+  let body;
+  if (messages.isLoading) {
+    body = <div style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>불러오는 중</div>;
+  } else if (messages.error) {
+    body = <div style={{ fontSize: 12, color: 'var(--danger-fg)' }}>안내 내역을 불러오지 못했습니다.</div>;
+  } else if (items.length === 0) {
+    body = <div style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>받은 안내가 없습니다.</div>;
+  } else {
+    body = (
+      <div style={{ display: 'grid', gap: 8 }}>
+        {items.map((message, index) => (
+          <div key={message.id || index} style={{ padding: 10, background: 'var(--bg-subtle)', border: '1px solid var(--border)', borderRadius: 8 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+              <span style={{ fontSize: 12, fontWeight: 700 }}>{partnerMessageTypeLabel(message.message_type)}</span>
+              <span style={{ marginLeft: 'auto' }}><Badge tone={messageStatusTone(message.status)}>{messageStatusLabel(message.status)}</Badge></span>
+            </div>
+            <div className="multiline-text" style={{ fontSize: 12.5, lineHeight: 1.5, color: 'var(--text)' }}>{message.content}</div>
+            <div style={{ fontSize: 10.5, color: 'var(--text-tertiary)', marginTop: 6 }}>{formatKoreanDateTime(message.sent_at || message.created_at)}</div>
+          </div>
+        ))}
+      </div>
+    );
+  }
+
+  return (
+    <div data-testid="partner-messages-panel" style={{ background: '#fff', borderRadius: 10, padding: 14, marginBottom: 10, border: '1px solid var(--border)' }}>
+      <SectionLabel>운영팀 안내</SectionLabel>
+      {body}
+    </div>
   );
 }
 
@@ -420,12 +568,28 @@ function PartnerStatusBadge({ status }) {
   return <Badge tone={tone} dot>{label}</Badge>;
 }
 
-function PartnerState({ text, tone = 'muted' }) {
+function PartnerState({ text, tone = 'muted', actions = null }) {
   return (
-    <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24, background: '#f4f6f8', color: tone === 'danger' ? 'var(--danger-fg)' : 'var(--text-tertiary)', fontSize: 13, textAlign: 'center' }}>
-      {text}
+    <div style={{ height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 14, padding: 24, background: '#f4f6f8', color: tone === 'danger' ? 'var(--danger-fg)' : 'var(--text-tertiary)', fontSize: 13, textAlign: 'center' }}>
+      <div>{text}</div>
+      {actions}
     </div>
   );
+}
+
+function partnerStateButtonStyle(variant) {
+  const isBrand = variant === 'brand';
+  return {
+    height: 40,
+    padding: '0 16px',
+    borderRadius: 10,
+    border: isBrand ? 'none' : '1px solid var(--border)',
+    background: isBrand ? 'var(--brand)' : '#fff',
+    color: isBrand ? '#fff' : 'var(--text)',
+    fontSize: 13,
+    fontWeight: 700,
+    cursor: 'pointer',
+  };
 }
 
 function groupJobPhotos(photos) {
@@ -499,6 +663,61 @@ function formatKoreanDate(value) {
   }
   const weekday = ['일', '월', '화', '수', '목', '금', '토'][date.getDay()];
   return `${date.getMonth() + 1}월 ${date.getDate()}일 ${weekday}요일`;
+}
+
+function formatKoreanDateTime(value) {
+  if (!value) {
+    return '';
+  }
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return String(value);
+  }
+  const hours = String(date.getHours()).padStart(2, '0');
+  const minutes = String(date.getMinutes()).padStart(2, '0');
+  return `${date.getMonth() + 1}월 ${date.getDate()}일 ${hours}:${minutes}`;
+}
+
+function partnerMessageTypeLabel(type) {
+  return PARTNER_MESSAGE_TYPE_LABELS[type] || type || '안내';
+}
+
+function messageStatusLabel(status) {
+  if (status === 'sent' || status === 'success') {
+    return '발송 완료';
+  }
+  if (status === 'failed' || status === 'error') {
+    return '발송 실패';
+  }
+  if (status === 'pending' || status === 'queued') {
+    return '발송 대기';
+  }
+  return status || '-';
+}
+
+function messageStatusTone(status) {
+  if (status === 'sent' || status === 'success') {
+    return 'success';
+  }
+  if (status === 'failed' || status === 'error') {
+    return 'danger';
+  }
+  return 'neutral';
+}
+
+function memoSaveButtonStyle(disabled) {
+  return {
+    width: '100%',
+    height: 44,
+    marginTop: 8,
+    background: disabled ? 'var(--bg-subtle)' : 'var(--brand)',
+    color: disabled ? 'var(--text-tertiary)' : '#fff',
+    border: disabled ? '1px solid var(--border)' : 'none',
+    borderRadius: 10,
+    fontSize: 14,
+    fontWeight: 700,
+    cursor: disabled ? 'default' : 'pointer',
+  };
 }
 
 function partnerStatusLabel(status) {

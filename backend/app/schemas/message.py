@@ -40,6 +40,16 @@ class MessageLogRead(ApiModel):
     created_at: datetime | None = None
 
 
+class PartnerMessageRead(ApiModel):
+    id: str
+    message_type: MessageType
+    channel: MessageChannel
+    content: str
+    status: MessageStatus
+    sent_at: datetime | None = None
+    created_at: datetime | None = None
+
+
 class MessagePreviewRead(ApiModel):
     order_id: str
     message_type: MessageType

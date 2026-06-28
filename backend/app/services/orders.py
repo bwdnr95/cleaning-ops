@@ -13,6 +13,7 @@ from app.domain.phone import normalize_phone
 from app.models.order import Order
 from app.models.order_group import OrderGroup
 from app.models.photo import OrderPhoto
+from app.models.timeline import OrderTimeline
 from app.repositories.order_groups import OrderGroupRepository
 from app.repositories.orders import OrderRepository
 from app.repositories.photos import PhotoRepository
@@ -32,6 +33,7 @@ from app.schemas.order import (
     OrderLineCreate,
     OrderUpdate,
     PartnerJobRead,
+    PartnerMemoRead,
 )
 from app.schemas.photo import PartnerPhotoRead, PhotoRead
 from app.services.service_catalog import ServiceCatalogService
@@ -474,6 +476,28 @@ class OrderService:
         self.db.refresh(order)
         return order
 
+    def add_partner_memo(
+        self,
+        order_id: str,
+        *,
+        text: str,
+        actor_user_id: str,
+        partner_id: str,
+    ) -> Order:
+        """협력사 현장 메모 추가. 본인 배정 주문만 허용하고 memo_added 타임라인을 남긴다."""
+        order = self.get_for_partner(order_id, partner_id=partner_id)
+        self.timeline.record(
+            order_id=order.id,
+            actor_user_id=actor_user_id,
+            event_type=TimelineEventType.MEMO_ADDED,
+            title="협력사 메모",
+            description=text,
+            metadata={"author_role": "partner", "author_partner_id": partner_id},
+        )
+        self.db.commit()
+        self.db.refresh(order)
+        return order
+
     def delete_order(self, *, order_id: str, actor_user_id: str) -> None:
         """주문 1건 soft-delete. 마지막 살아있는 line이면 그룹도 soft-delete한다."""
         order = self.db.execute(
@@ -664,11 +688,28 @@ def to_admin_photo_dto(photo: OrderPhoto) -> PhotoRead:
     )
 
 
+def partner_memo_events(events: list[OrderTimeline], partner_id: str) -> list[OrderTimeline]:
+    """이 협력사가 직접 작성한 메모만 추린다.
+
+    - author_role 으로 관리자 결제/일정 변경의 memo_added 를 제외(민감정보 보호).
+    - author_partner_id 로 작성자를 한정해 재배정(A→B) 시 B 가 이전 협력사 A 의
+      현장 메모를 보지 못하게 한다. author_partner_id 가 없는 과거 메모는 노출하지 않는다.
+    """
+    return [
+        event
+        for event in events
+        if event.event_type == TimelineEventType.MEMO_ADDED
+        and (event.event_metadata or {}).get("author_role") == "partner"
+        and (event.event_metadata or {}).get("author_partner_id") == partner_id
+    ]
+
+
 def to_partner_job_dto(
     order: Order,
     *,
     group: OrderGroup | None = None,
     photos: list[OrderPhoto] | None = None,
+    memos: list[OrderTimeline] | None = None,
 ) -> PartnerJobRead:
     customer_name = group.customer_name if group else order.customer_name
     customer_phone = group.customer_phone if group else order.customer_phone
@@ -687,7 +728,12 @@ def to_partner_job_dto(
         customer_phone=customer_phone or "",
         customer_address=customer_address or "",
         customer_address_detail=customer_address_detail,
+        is_recurring=order.recurring_contract_id is not None,
         photos=[to_partner_photo_dto(photo) for photo in photos or []],
+        memos=[
+            PartnerMemoRead(id=m.id, text=m.description or "", created_at=m.created_at)
+            for m in memos or []
+        ],
     )
 
 
