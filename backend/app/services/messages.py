@@ -776,6 +776,8 @@ class MessageService:
 
         recipient_type, recipient_name, recipient_phone = self._resolve_recipient(order, payload)
         partner = self.partners.get(order.partner_id) if order.partner_id else None
+        # 협력사 수신 메시지는 발송 시점의 배정 협력사를 식별자로 박아둔다(전화번호 비의존).
+        recipient_partner_id = order.partner_id if recipient_type == RecipientType.PARTNER else None
 
         # FIX 1: 수신자 전화번호가 비어 있으면 IntegrityError(500) 대신
         # FAILED 로그 + timeline 을 남기고 깨끗한 실패 결과를 반환한다.
@@ -785,6 +787,7 @@ class MessageService:
                 recipient_type=recipient_type,
                 recipient_name=recipient_name,
                 recipient_phone=recipient_phone,
+                recipient_partner_id=recipient_partner_id,
                 error_code="recipient_phone_missing",
                 error_message="수신자 전화번호가 없어 메시지를 발송할 수 없습니다.",
                 actor_user_id=actor_user_id,
@@ -801,6 +804,7 @@ class MessageService:
                 recipient_type=recipient_type,
                 recipient_name=recipient_name,
                 recipient_phone=recipient_phone,
+                recipient_partner_id=recipient_partner_id,
                 error_code="customer_token_missing",
                 error_message="고객 링크 토큰이 없어 메시지를 발송할 수 없습니다.",
                 actor_user_id=actor_user_id,
@@ -841,6 +845,7 @@ class MessageService:
             recipient_type=recipient_type,
             recipient_name=recipient_name,
             recipient_phone=recipient_phone,
+            recipient_partner_id=recipient_partner_id,
             message_type=payload.message_type,
             channel=payload.channel,
             content=content,
@@ -903,6 +908,7 @@ class MessageService:
         recipient_type: RecipientType,
         recipient_name: str | None,
         recipient_phone: str | None,
+        recipient_partner_id: str | None,
         error_code: str,
         error_message: str,
         actor_user_id: str | None,
@@ -923,6 +929,7 @@ class MessageService:
             recipient_type=recipient_type,
             recipient_name=recipient_name or "미상",
             recipient_phone=recipient_phone or "",
+            recipient_partner_id=recipient_partner_id,
             message_type=payload.message_type,
             channel=payload.channel,
             content="",

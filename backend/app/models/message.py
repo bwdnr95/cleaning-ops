@@ -15,6 +15,9 @@ class MessageLog(CreatedAtMixin, Base):
     recipient_type: Mapped[RecipientType] = mapped_column(String(20), index=True)
     recipient_name: Mapped[str] = mapped_column(String(80))
     recipient_phone: Mapped[str] = mapped_column(String(30))
+    # 협력사 수신 메시지의 '받는 협력사' 식별자(발송 시점 order.partner_id).
+    # 전화번호 대신 이 값으로 스코프해 공유 전화번호/재배정 시 협력사 간 누출을 막는다.
+    recipient_partner_id: Mapped[str | None] = mapped_column(String(36), index=True)
     message_type: Mapped[MessageType] = mapped_column(String(80), index=True)
     channel: Mapped[MessageChannel] = mapped_column(String(20))
     content: Mapped[str] = mapped_column(Text)

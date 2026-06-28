@@ -468,3 +468,80 @@ def test_partner_memos_exclude_previous_partner_after_reassignment() -> None:
     )
     detail2 = client.get("/api/partner/jobs/seed-order-2450", headers=b_headers).json()
     assert [memo["text"] for memo in detail2["memos"]] == ["B의 메모"]
+
+
+def test_partner_messages_isolated_when_partners_share_phone() -> None:
+    """전화번호가 같아도 recipient_partner_id로 협력사 간 메시지가 격리된다.
+
+    (전화번호 기반 스코프였다면 A에게 간 메시지가 B에게 샜을 시나리오 — Codex 재리뷰 지적.)
+    """
+    shared_phone = "01088880000"
+
+    def seed_shared(db) -> None:
+        seed_a = db.get(Partner, "seed-partner-01")
+        if seed_a is not None:
+            seed_a.phone = shared_phone  # A 대표번호를 공유번호로 바꾼다
+        db.add(
+            Partner(
+                id="shared-partner-b",
+                name="Shared Phone B",
+                manager_name="Shared Manager",
+                phone=shared_phone,  # B도 같은 대표번호(Partner.phone엔 유니크 제약 없음)
+                service_areas="Seoul",
+                available_services="Cleaning",
+                memo=None,
+                is_active=True,
+            )
+        )
+        db.add(
+            User(
+                id="shared-user-b",
+                role=UserRole.PARTNER,
+                name="Shared User B",
+                email=None,
+                phone="01066660000",  # 로그인 번호(users.phone)는 유니크라 별도값
+                password_hash=hash_password("SharedB123!"),
+                partner_id="shared-partner-b",
+                is_active=True,
+            )
+        )
+
+    client = make_test_client(seed_shared)
+    admin_headers = _admin_headers(client)
+
+    # 현재 배정 협력사 A(공유번호)에게 배정 안내 발송 → recipient_partner_id=A
+    assert (
+        client.post(
+            "/api/admin/messages/send",
+            headers=admin_headers,
+            json={
+                "order_id": "seed-order-2450",
+                "message_type": "partner_assignment",
+                "recipient_type": "partner",
+                "channel": "sms",
+            },
+        ).status_code
+        == 200
+    )
+
+    # B로 재배정 (B는 A와 동일한 대표 전화번호)
+    assert (
+        client.patch(
+            "/api/admin/orders/seed-order-2450",
+            headers=admin_headers,
+            json={"partner_id": "shared-partner-b"},
+        ).status_code
+        == 200
+    )
+
+    b_token = create_access_token(
+        user_id="shared-user-b",
+        role=UserRole.PARTNER,
+        partner_id="shared-partner-b",
+    )
+    b_headers = {"Authorization": f"Bearer {b_token}"}
+
+    # 전화번호가 같아도 A의 메시지(recipient_partner_id=A)는 B에게 보이면 안 된다.
+    messages = client.get("/api/partner/jobs/seed-order-2450/messages", headers=b_headers)
+    assert messages.status_code == 200
+    assert messages.json() == []

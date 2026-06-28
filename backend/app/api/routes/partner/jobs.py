@@ -4,11 +4,9 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.api.deps import CurrentUser, ensure_partner_scope, get_session, require_partner
 from app.domain.constants import PhotoType, RecipientType
-from app.domain.phone import normalize_phone
 from app.repositories.messages import MessageRepository
 from app.repositories.order_groups import OrderGroupRepository
 from app.repositories.orders import OrderRepository
-from app.repositories.partners import PartnerRepository
 from app.repositories.photos import PhotoRepository
 from app.repositories.timeline import TimelineRepository
 from app.schemas.message import PartnerMessageRead
@@ -186,17 +184,10 @@ def list_job_messages(
         order = OrderService(db).get_for_partner(order_id, partner_id=partner_id)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail="order_not_found") from exc
-    # 협력사 수신 메시지는 '현재 배정 협력사'에게 간 것만 노출한다.
-    # recipient_type만으로 거르면 재배정(A→B) 시 B가 이전 협력사 A에게 간
-    # 메시지(내용에 협력사명/담당자 포함)를 보게 되어 타 협력사 정보가 샌다.
-    # message_logs에는 협력사 식별자가 없어 발송 시점의 수신 전화번호로 스코프한다.
-    # (PARTNER_CUSTOMER_INFO는 담당자 연락처로 발송될 수 있어 두 번호 모두 허용)
-    partner = PartnerRepository(db).get(partner_id)
-    partner_phones = {
-        normalize_phone(raw)
-        for raw in ((partner.phone, partner.manager_phone) if partner else ())
-        if raw and normalize_phone(raw)
-    }
+    # 협력사 수신 메시지는 '발송 시점 배정 협력사' 식별자(recipient_partner_id)로만 노출한다.
+    # 전화번호가 아니라 식별자로 스코프하므로, 두 협력사가 같은 전화번호를 쓰거나
+    # 재배정(A→B)이 일어나도 타 협력사 메시지(내용에 협력사명/담당자 포함)가 새지 않는다.
+    # 식별자가 없는 과거(컬럼 도입 전) 로그는 노출하지 않는다(fail-closed).
     logs = MessageRepository(db).list_for_order(order.id)
     return [
         PartnerMessageRead(
@@ -210,5 +201,5 @@ def list_job_messages(
         )
         for log in logs
         if log.recipient_type == RecipientType.PARTNER
-        and normalize_phone(log.recipient_phone) in partner_phones
+        and log.recipient_partner_id == partner_id
     ]
