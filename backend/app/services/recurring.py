@@ -1,13 +1,22 @@
 from __future__ import annotations
 
+from datetime import date, timedelta
 from uuid import uuid4
 
 from sqlalchemy.orm import Session
 
 from app.core.time import business_today, utc_now
-from app.domain.constants import RecurringContractStatus
+from app.domain.constants import RecurringContractStatus, RecurringOccurrenceStatus
+from app.domain.recurrence import (
+    HORIZON_DAYS,
+    OVERDUE_GRACE_DAYS,
+    ScheduleSpec,
+    billing_month_of,
+    iter_due_dates,
+)
 from app.models.order_group import OrderGroup
 from app.models.recurring_contract import RecurringContract
+from app.models.recurring_occurrence import RecurringOccurrence
 from app.repositories.order_groups import OrderGroupRepository
 from app.repositories.recurring import RecurringContractRepository, RecurringOccurrenceRepository
 from app.schemas.order import OrderGroupCreate, OrderLineCreate
@@ -97,3 +106,45 @@ class RecurringService:
             raise ValueError("recurring_contract_not_found")
         contract.deleted_at = utc_now()
         self.db.commit()
+
+    # --- 회차 sync / 조회 ---
+    def _spec(self, contract: RecurringContract) -> ScheduleSpec:
+        return ScheduleSpec(
+            mode=contract.recurrence_mode,
+            start_date=contract.start_date,
+            day_of_month=contract.day_of_month,
+            interval_weeks=contract.interval_weeks,
+            weekday=contract.weekday,
+            end_date=contract.end_date,
+            max_occurrences=contract.max_occurrences,
+        )
+
+    def sync_due_occurrences(self, *, today: date | None = None) -> int:
+        """ACTIVE 계약의 도래분을 PENDING으로 upsert. 생성 건수 반환. 멱등."""
+        today = today or business_today()
+        horizon = today + timedelta(days=HORIZON_DAYS)
+        floor = today - timedelta(days=OVERDUE_GRACE_DAYS)
+        created = 0
+        for contract in self.contracts.list_active():
+            for seq, due in iter_due_dates(self._spec(contract), until=horizon):
+                if due < floor:
+                    continue
+                if self.occurrences.get_by_contract_and_due(contract.id, due) is not None:
+                    continue
+                self.occurrences.add(
+                    RecurringOccurrence(
+                        id=str(uuid4()),
+                        contract_id=contract.id,
+                        sequence_no=seq,
+                        due_date=due,
+                        billing_month=billing_month_of(due),
+                        status=RecurringOccurrenceStatus.PENDING,
+                    )
+                )
+                created += 1
+        if created:
+            self.db.commit()
+        return created
+
+    def list_pending(self) -> list[RecurringOccurrence]:
+        return self.occurrences.list_pending()
