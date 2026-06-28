@@ -41,6 +41,10 @@ def iter_due_dates(spec: ScheduleSpec, *, until: date) -> Iterator[tuple[int, da
     """start_date부터 until(포함)까지의 (sequence_no, due_date)를 오름차순 산출.
 
     sequence_no는 계약 내 회차 순번(1부터). end_date/max_occurrences는 종료 조건.
+
+    WEEKLY는 `start_date`를 요일 앵커로 사용한다(모든 회차가 start_date.weekday()).
+    `spec.weekday`는 표시/검증용 메타이며 계산에 쓰이지 않으므로, 폼에서 start_date와
+    동기화되어 있어야 한다(설계 §10.1).
     """
     seq = 0
     if spec.mode == RecurrenceMode.MONTHLY:

@@ -13,8 +13,8 @@ class RecurringContractRepository(Repository[RecurringContract]):
     def __init__(self, db: Session) -> None:
         super().__init__(db, RecurringContract)
 
-    def get(self, id_: str, *, include_deleted: bool = False) -> RecurringContract | None:
-        obj = self.db.get(RecurringContract, id_)
+    def get(self, contract_id: str, *, include_deleted: bool = False) -> RecurringContract | None:
+        obj = self.db.get(RecurringContract, contract_id)
         if obj is None:
             return None
         if obj.deleted_at is not None and not include_deleted:
@@ -41,8 +41,8 @@ class RecurringOccurrenceRepository(Repository[RecurringOccurrence]):
     def __init__(self, db: Session) -> None:
         super().__init__(db, RecurringOccurrence)
 
-    def get(self, id_: str) -> RecurringOccurrence | None:
-        return self.db.get(RecurringOccurrence, id_)
+    def get(self, occurrence_id: str) -> RecurringOccurrence | None:
+        return self.db.get(RecurringOccurrence, occurrence_id)
 
     def get_by_contract_and_due(self, contract_id: str, due_date: date) -> RecurringOccurrence | None:
         stmt = select(RecurringOccurrence).where(
