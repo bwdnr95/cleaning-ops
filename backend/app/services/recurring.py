@@ -19,7 +19,6 @@ from app.domain.recurrence import (
     billing_month_of,
     iter_due_dates,
 )
-from app.models.order_group import OrderGroup
 from app.models.recurring_contract import RecurringContract
 from app.models.recurring_occurrence import RecurringOccurrence
 from app.repositories.order_groups import OrderGroupRepository
