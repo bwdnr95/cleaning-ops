@@ -9,6 +9,7 @@ import {
   type RecurringContractSummary,
 } from '../../../api/recurring';
 import { CONTRACT_STATUS_LABEL, CONTRACT_STATUS_TONE, formatAmount } from '../../../domain/recurrence';
+import { RecurringBillingView } from './RecurringBillingView';
 import { RecurringContractDetail } from './RecurringContractDetail';
 import { RecurringContractForm } from './RecurringContractForm';
 
@@ -53,6 +54,8 @@ export function RecurringContractsPage({
   const [selected, setSelected] = React.useState<Set<string>>(new Set());
   const [error, setError] = React.useState<string | null>(null);
   const [busy, setBusy] = React.useState(false);
+  // 정기청소 영역 상단 탭: 계약 관리(기존) / 월 합산 청구·정산.
+  const [tab, setTab] = React.useState<'contracts' | 'billing'>('contracts');
 
   const load = React.useCallback(async () => {
     setError(null);
@@ -131,6 +134,31 @@ export function RecurringContractsPage({
   return (
     <div data-testid="admin-recurring-page" style={{ flex: 1, minHeight: 0, overflow: 'auto', background: 'var(--bg)' }}>
       <div className="page-shell" style={{ padding: 20, display: 'flex', flexDirection: 'column', gap: 16, paddingBottom: 80 }}>
+        {/* 계약 관리 / 월 정산 전환 탭 (목록 모드에서만 노출 — create/detail은 위에서 early return) */}
+        <div style={{ display: 'flex', gap: 4, borderBottom: '1px solid var(--border)' }}>
+          <button
+            type="button"
+            className="btn btn--ghost btn--sm"
+            data-testid="recurring-tab-contracts"
+            style={{ fontWeight: tab === 'contracts' ? 700 : 400 }}
+            onClick={() => setTab('contracts')}
+          >
+            계약
+          </button>
+          <button
+            type="button"
+            className="btn btn--ghost btn--sm"
+            data-testid="recurring-tab-billing"
+            style={{ fontWeight: tab === 'billing' ? 700 : 400 }}
+            onClick={() => setTab('billing')}
+          >
+            월 정산
+          </button>
+        </div>
+
+        {tab === 'billing' && <RecurringBillingView />}
+        {tab === 'contracts' && (
+          <>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <span style={{ fontSize: 12.5, color: 'var(--text-tertiary)' }}>
             정기계약을 등록하면 주기에 맞춰 도래한 회차를 승인해 주문을 생성합니다.
@@ -292,6 +320,8 @@ export function RecurringContractsPage({
             </div>
           )}
         </section>
+          </>
+        )}
       </div>
     </div>
   );
