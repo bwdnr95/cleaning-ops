@@ -1,4 +1,8 @@
-import type { RecurringContract, RecurringContractStatus } from '../api/recurring';
+import type {
+  RecurringContract,
+  RecurringContractStatus,
+  RecurringOccurrenceStatus,
+} from '../api/recurring';
 
 export const CONTRACT_STATUS_LABEL: Record<RecurringContractStatus, string> = {
   active: '진행중',
@@ -11,6 +15,19 @@ export const CONTRACT_STATUS_TONE: Record<RecurringContractStatus, string> = {
   active: 'var(--success-bg, #e6f7ed)',
   paused: 'var(--warn-bg, #fff4e5)',
   ended: 'var(--neutral-bg, #eef0f3)',
+};
+
+// 회차 원장 상태 라벨/배지색.
+export const OCCURRENCE_STATUS_LABEL: Record<RecurringOccurrenceStatus, string> = {
+  pending: '대기',
+  generated: '생성',
+  skipped: '건너뜀',
+};
+
+export const OCCURRENCE_STATUS_TONE: Record<RecurringOccurrenceStatus, string> = {
+  pending: 'var(--warn-bg, #fff4e5)',
+  generated: 'var(--success-bg, #e6f7ed)',
+  skipped: 'var(--neutral-bg, #eef0f3)',
 };
 
 // weekday는 월=0 ... 일=6 (Python date.weekday() 규약).

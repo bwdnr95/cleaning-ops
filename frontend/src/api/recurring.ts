@@ -53,6 +53,22 @@ export interface RecurringContract extends RecurringContractInput {
   customer_token: string;
   status: RecurringContractStatus;
   next_due_date: string | null;
+  this_month_count: number;
+  this_month_amount: number;
+}
+
+export type RecurringOccurrenceStatus = 'pending' | 'generated' | 'skipped';
+
+export interface RecurringOccurrence {
+  id: string;
+  contract_id: string;
+  sequence_no: number;
+  due_date: string;
+  billing_month: string;
+  status: RecurringOccurrenceStatus;
+  generated_order_id: string | null;
+  generated_at: string | null;
+  skipped_reason: string | null;
 }
 
 export interface PendingOccurrence {
@@ -96,6 +112,12 @@ export function listRecurringContracts(): Promise<RecurringContractSummary[]> {
 
 export function getRecurringContract(id: string): Promise<RecurringContract> {
   return apiRequest(`/admin/recurring/contracts/${encodeURIComponent(id)}`) as Promise<RecurringContract>;
+}
+
+export function listContractOccurrences(id: string): Promise<RecurringOccurrence[]> {
+  return apiRequest(
+    `/admin/recurring/contracts/${encodeURIComponent(id)}/occurrences`,
+  ) as Promise<RecurringOccurrence[]>;
 }
 
 export function createRecurringContract(input: RecurringContractInput): Promise<RecurringContract> {
