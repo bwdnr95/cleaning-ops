@@ -12,6 +12,7 @@ from app.schemas.recurring import (
     RecurringContractRead,
     RecurringContractSummaryRead,
     RecurringContractUpdate,
+    RecurringOccurrenceRead,
     SkipOccurrencesRequest,
     SkipOccurrencesResult,
 )
@@ -51,6 +52,16 @@ def get_contract(contract_id: str, db: Session = Depends(get_session), _: Curren
     if contract is None:
         raise HTTPException(status_code=404, detail="recurring_contract_not_found")
     return svc.to_contract_read(contract)
+
+
+@router.get("/contracts/{contract_id}/occurrences", response_model=list[RecurringOccurrenceRead])
+def list_contract_occurrences(
+    contract_id: str, db: Session = Depends(get_session), _: CurrentUser = Depends(require_admin)
+):
+    try:
+        return RecurringService(db).list_contract_occurrences(contract_id)
+    except ValueError as exc:
+        raise _err(exc) from exc
 
 
 @router.patch("/contracts/{contract_id}", response_model=RecurringContractRead)

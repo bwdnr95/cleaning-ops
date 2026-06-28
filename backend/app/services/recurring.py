@@ -37,6 +37,7 @@ from app.schemas.recurring import (
     RecurringContractRead,
     RecurringContractSummaryRead,
     RecurringContractUpdate,
+    RecurringOccurrenceRead,
     SkipItem,
     SkipOccurrencesResult,
 )
@@ -304,6 +305,10 @@ class RecurringService:
 
     def to_contract_read(self, contract: RecurringContract) -> RecurringContractRead:
         group = self.groups.get(contract.order_group_id)
+        # 이번 달 요약 — list_contract_summaries와 동일한 집계(방문월=이번 청구월).
+        this_month = OrderRepository(self.db).list_recurring_orders_in_month(
+            contract.id, billing_month_of(business_today())
+        )
         data = {
             **{c.name: getattr(contract, c.name) for c in contract.__table__.columns},
             "customer_name": group.customer_name if group else "",
@@ -314,8 +319,20 @@ class RecurringService:
             "notes": group.notes if group else None,
             "customer_token": group.customer_token if group else "",
             "next_due_date": self._next_due(contract),
+            "this_month_count": len(this_month),
+            "this_month_amount": float(sum((o.total_amount or 0) for o in this_month)),
         }
         return RecurringContractRead.model_validate(data)
+
+    def list_contract_occurrences(self, contract_id: str) -> list[RecurringOccurrenceRead]:
+        """계약의 회차 원장(전체 회차)을 방문일 오름차순으로 반환. 계약 없으면 ValueError."""
+        contract = self.contracts.get(contract_id)
+        if contract is None:
+            raise ValueError("recurring_contract_not_found")
+        return [
+            RecurringOccurrenceRead.model_validate(occ)
+            for occ in self.occurrences.list_by_contract(contract_id)
+        ]
 
     def list_contract_summaries(self) -> list[RecurringContractSummaryRead]:
         pend_by_contract: dict[str, int] = {}

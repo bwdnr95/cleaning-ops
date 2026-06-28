@@ -87,6 +87,9 @@ class RecurringContractRead(RecurringContractBase):
     customer_token: str
     status: RecurringContractStatus
     next_due_date: date | None = None
+    # 이번 달 요약(목록 요약 DTO와 동일 정의: 방문월이 이번 청구월인 생성 주문 집계)
+    this_month_count: int = 0
+    this_month_amount: float = 0
     created_at: datetime | None = None
     updated_at: datetime | None = None
 
