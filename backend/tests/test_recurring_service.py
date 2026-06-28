@@ -1,8 +1,15 @@
 from datetime import date
 
-from app.domain.constants import RecurrenceMode, RecurringContractStatus
+from app.db.seed import DEV_PARTNER_ID
+from app.domain.constants import (
+    OrderStatus,
+    RecurrenceMode,
+    RecurringContractStatus,
+    RecurringOccurrenceStatus,
+)
 from app.repositories.order_groups import OrderGroupRepository
-from app.schemas.recurring import RecurringContractCreate, RecurringContractUpdate
+from app.repositories.orders import OrderRepository
+from app.schemas.recurring import ApproveItem, RecurringContractCreate, RecurringContractUpdate, SkipItem
 from app.services.recurring import RecurringService
 
 
@@ -77,3 +84,56 @@ def test_sync_excludes_overdue_beyond_grace(db_session):
     svc.sync_due_occurrences(today=date(2026, 6, 20))
     dues = [o.due_date for o in svc.occurrences.list_by_contract(c.id)]
     assert dues == [date(2026, 6, 10)]
+
+
+def test_approve_generates_confirmed_order_when_partner_present(db_session):
+    svc = RecurringService(db_session)
+    c = svc.create_contract(
+        _make_payload(start_date=date(2026, 6, 10), default_partner_id=DEV_PARTNER_ID), actor_user_id=None
+    )
+    svc.sync_due_occurrences(today=date(2026, 6, 20))
+    occ = svc.occurrences.list_by_contract(c.id)[0]
+    result = svc.approve_occurrences([ApproveItem(occurrence_id=occ.id)], actor_user_id=None)
+
+    assert len(result.generated_order_ids) == 1
+    order = OrderRepository(db_session).get(result.generated_order_ids[0])
+    assert order.status == OrderStatus.SCHEDULE_CONFIRMED
+    assert order.partner_id == DEV_PARTNER_ID
+    assert order.scheduled_date == occ.due_date
+    assert order.recurring_contract_id == c.id
+    db_session.refresh(occ)
+    assert occ.status == RecurringOccurrenceStatus.GENERATED
+    assert occ.generated_order_id == order.id
+
+
+def test_approve_generates_new_order_when_no_partner(db_session):
+    svc = RecurringService(db_session)
+    c = svc.create_contract(_make_payload(start_date=date(2026, 6, 10)), actor_user_id=None)
+    svc.sync_due_occurrences(today=date(2026, 6, 20))
+    occ = svc.occurrences.list_by_contract(c.id)[0]
+    result = svc.approve_occurrences([ApproveItem(occurrence_id=occ.id)], actor_user_id=None)
+    order = OrderRepository(db_session).get(result.generated_order_ids[0])
+    assert order.status == OrderStatus.NEW
+    assert order.partner_id is None
+
+
+def test_approve_skips_non_pending(db_session):
+    svc = RecurringService(db_session)
+    c = svc.create_contract(_make_payload(start_date=date(2026, 6, 10)), actor_user_id=None)
+    svc.sync_due_occurrences(today=date(2026, 6, 20))
+    occ = svc.occurrences.list_by_contract(c.id)[0]
+    svc.approve_occurrences([ApproveItem(occurrence_id=occ.id)], actor_user_id=None)
+    again = svc.approve_occurrences([ApproveItem(occurrence_id=occ.id)], actor_user_id=None)
+    assert again.generated_order_ids == []
+    assert occ.id in again.skipped_occurrence_ids
+
+
+def test_skip_marks_occurrence_skipped(db_session):
+    svc = RecurringService(db_session)
+    c = svc.create_contract(_make_payload(start_date=date(2026, 6, 10)), actor_user_id=None)
+    svc.sync_due_occurrences(today=date(2026, 6, 20))
+    occ = svc.occurrences.list_by_contract(c.id)[0]
+    svc.skip_occurrences([SkipItem(occurrence_id=occ.id, reason="고객 휴무")], actor_user_id=None)
+    db_session.refresh(occ)
+    assert occ.status == RecurringOccurrenceStatus.SKIPPED
+    assert occ.skipped_reason == "고객 휴무"

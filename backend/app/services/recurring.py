@@ -6,7 +6,7 @@ from uuid import uuid4
 from sqlalchemy.orm import Session
 
 from app.core.time import business_today, utc_now
-from app.domain.constants import RecurringContractStatus, RecurringOccurrenceStatus
+from app.domain.constants import OrderStatus, RecurringContractStatus, RecurringOccurrenceStatus
 from app.domain.recurrence import (
     HORIZON_DAYS,
     OVERDUE_GRACE_DAYS,
@@ -20,7 +20,14 @@ from app.models.recurring_occurrence import RecurringOccurrence
 from app.repositories.order_groups import OrderGroupRepository
 from app.repositories.recurring import RecurringContractRepository, RecurringOccurrenceRepository
 from app.schemas.order import OrderGroupCreate, OrderLineCreate
-from app.schemas.recurring import RecurringContractCreate, RecurringContractUpdate
+from app.schemas.recurring import (
+    ApproveItem,
+    ApproveOccurrencesResult,
+    RecurringContractCreate,
+    RecurringContractUpdate,
+    SkipItem,
+    SkipOccurrencesResult,
+)
 from app.services.orders import OrderService
 
 # 그룹에 보관되는 고객 필드(계약 수정 시 그룹으로 라우팅)
@@ -148,3 +155,79 @@ class RecurringService:
 
     def list_pending(self) -> list[RecurringOccurrence]:
         return self.occurrences.list_pending()
+
+    # --- 승인 / 건너뛰기 ---
+    def approve_occurrences(
+        self, items: list[ApproveItem], *, actor_user_id: str | None
+    ) -> ApproveOccurrencesResult:
+        generated: list[str] = []
+        skipped: list[str] = []
+        for item in items:
+            occ = self.occurrences.get(item.occurrence_id)
+            if occ is None or occ.status != RecurringOccurrenceStatus.PENDING:
+                if occ is not None:
+                    skipped.append(occ.id)
+                continue
+            contract = self.contracts.get(occ.contract_id)
+            if contract is None:
+                skipped.append(occ.id)
+                continue
+            group = self.groups.get(contract.order_group_id)
+            if group is None:
+                skipped.append(occ.id)
+                continue
+
+            partner_id = item.partner_id or contract.default_partner_id
+            status = OrderStatus.SCHEDULE_CONFIRMED if partner_id else OrderStatus.NEW
+            scheduled = item.scheduled_date or occ.due_date
+            total = item.total_amount if item.total_amount is not None else (
+                float(contract.total_amount) if contract.total_amount is not None else None
+            )
+
+            line = OrderLineCreate(
+                status=status,
+                received_date=business_today(),
+                scheduled_date=scheduled,
+                requested_time=contract.requested_time,
+                partner_id=partner_id,
+                team_name=contract.team_name,
+                service_category_id=contract.service_category_id,
+                service_item_id=contract.service_item_id,
+                service_name=contract.service_name,
+                size_or_quantity=contract.size_or_quantity,
+                service_detail=contract.service_detail,
+                special_request=contract.special_request,
+                total_amount=total,
+                discount_amount=float(contract.discount_amount or 0),
+                deposit_amount=float(contract.deposit_amount) if contract.deposit_amount is not None else None,
+                balance_amount=float(contract.balance_amount) if contract.balance_amount is not None else None,
+                vat_type=contract.vat_type,
+                partner_payment_amount=(
+                    float(contract.partner_payment_amount)
+                    if contract.partner_payment_amount is not None else None
+                ),
+            )
+            order = self.orders.add_recurring_line(
+                group, line, recurring_contract_id=contract.id, actor_user_id=actor_user_id
+            )
+            self.db.flush()  # order.id 확보
+            occ.status = RecurringOccurrenceStatus.GENERATED
+            occ.generated_order_id = order.id
+            occ.generated_at = utc_now()
+            generated.append(order.id)
+        self.db.commit()
+        return ApproveOccurrencesResult(generated_order_ids=generated, skipped_occurrence_ids=skipped)
+
+    def skip_occurrences(
+        self, items: list[SkipItem], *, actor_user_id: str | None
+    ) -> SkipOccurrencesResult:
+        skipped: list[str] = []
+        for item in items:
+            occ = self.occurrences.get(item.occurrence_id)
+            if occ is None or occ.status != RecurringOccurrenceStatus.PENDING:
+                continue
+            occ.status = RecurringOccurrenceStatus.SKIPPED
+            occ.skipped_reason = item.reason
+            skipped.append(occ.id)
+        self.db.commit()
+        return SkipOccurrencesResult(skipped_occurrence_ids=skipped)
