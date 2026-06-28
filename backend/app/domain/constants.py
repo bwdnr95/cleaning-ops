@@ -35,6 +35,23 @@ class VatType(StrEnum):
     EXCLUDED = "excluded"
 
 
+class RecurrenceMode(StrEnum):
+    MONTHLY = "monthly"   # 매월 지정일
+    WEEKLY = "weekly"     # N주 간격, start_date 요일 기준
+
+
+class RecurringContractStatus(StrEnum):
+    ACTIVE = "active"
+    PAUSED = "paused"
+    ENDED = "ended"
+
+
+class RecurringOccurrenceStatus(StrEnum):
+    PENDING = "pending"       # 도래했으나 미생성 (승인 대기)
+    GENERATED = "generated"   # 승인되어 주문 라인 생성됨
+    SKIPPED = "skipped"       # 운영자가 건너뜀
+
+
 class ReceiptType(StrEnum):
     """증빙자료 유형(1차 선택)."""
 
