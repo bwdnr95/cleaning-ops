@@ -492,7 +492,7 @@ class OrderService:
             event_type=TimelineEventType.MEMO_ADDED,
             title="협력사 메모",
             description=text,
-            metadata={"author_role": "partner"},
+            metadata={"author_role": "partner", "author_partner_id": partner_id},
         )
         self.db.commit()
         self.db.refresh(order)
@@ -688,13 +688,19 @@ def to_admin_photo_dto(photo: OrderPhoto) -> PhotoRead:
     )
 
 
-def partner_memo_events(events: list[OrderTimeline]) -> list[OrderTimeline]:
-    """협력사가 직접 작성한 메모만 추린다. 관리자 결제/일정 변경의 memo_added는 제외(민감정보 보호)."""
+def partner_memo_events(events: list[OrderTimeline], partner_id: str) -> list[OrderTimeline]:
+    """이 협력사가 직접 작성한 메모만 추린다.
+
+    - author_role 으로 관리자 결제/일정 변경의 memo_added 를 제외(민감정보 보호).
+    - author_partner_id 로 작성자를 한정해 재배정(A→B) 시 B 가 이전 협력사 A 의
+      현장 메모를 보지 못하게 한다. author_partner_id 가 없는 과거 메모는 노출하지 않는다.
+    """
     return [
         event
         for event in events
         if event.event_type == TimelineEventType.MEMO_ADDED
         and (event.event_metadata or {}).get("author_role") == "partner"
+        and (event.event_metadata or {}).get("author_partner_id") == partner_id
     ]
 
 

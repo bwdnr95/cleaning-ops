@@ -30,6 +30,48 @@ def _admin_headers(client) -> dict:
     return {"Authorization": f"Bearer {session['access_token']}"}
 
 
+_PARTNER_B_ID = "reassign-partner-b"
+_PARTNER_B_USER_ID = "reassign-user-b"
+_PARTNER_B_PHONE = "01055554444"
+
+
+def _seed_partner_b(db) -> None:
+    """재배정 격리 테스트용 협력사 B(+ 로그인 계정)."""
+    db.add(
+        Partner(
+            id=_PARTNER_B_ID,
+            name="Reassign Partner B",
+            manager_name="B Manager",
+            phone=_PARTNER_B_PHONE,
+            service_areas="Seoul",
+            available_services="Cleaning",
+            memo=None,
+            is_active=True,
+        )
+    )
+    db.add(
+        User(
+            id=_PARTNER_B_USER_ID,
+            role=UserRole.PARTNER,
+            name="Reassign User B",
+            email=None,
+            phone=_PARTNER_B_PHONE,
+            password_hash=hash_password("PartnerB123!"),
+            partner_id=_PARTNER_B_ID,
+            is_active=True,
+        )
+    )
+
+
+def _partner_b_headers() -> dict:
+    token = create_access_token(
+        user_id=_PARTNER_B_USER_ID,
+        role=UserRole.PARTNER,
+        partner_id=_PARTNER_B_ID,
+    )
+    return {"Authorization": f"Bearer {token}"}
+
+
 def test_partner_can_add_memo_and_read_it_back() -> None:
     client = make_test_client()
     headers = _partner_headers(client)
@@ -263,3 +305,166 @@ def test_partner_messages_endpoint_blocks_other_partner() -> None:
 
     assert response.status_code == 404
     assert response.json()["detail"] == "order_not_found"
+
+
+def test_partner_memo_rejects_whitespace_only_text() -> None:
+    client = make_test_client()
+    headers = _partner_headers(client)
+
+    response = client.post(
+        "/api/partner/jobs/seed-order-2450/memo",
+        headers=headers,
+        json={"text": "   "},
+    )
+
+    assert response.status_code == 422
+
+
+def test_partner_memo_and_messages_blocked_on_soft_deleted_order() -> None:
+    """soft-delete된 주문에는 신규 메모/메시지 엔드포인트도 접근 불가(404)."""
+    client = make_test_client()
+    partner_headers = _partner_headers(client)
+    admin_headers = _admin_headers(client)
+
+    delete_response = client.delete("/api/admin/orders/seed-order-2450", headers=admin_headers)
+    assert delete_response.status_code == 204, delete_response.text
+
+    memo_response = client.post(
+        "/api/partner/jobs/seed-order-2450/memo",
+        headers=partner_headers,
+        json={"text": "삭제된 주문 메모"},
+    )
+    assert memo_response.status_code == 404
+    messages_response = client.get("/api/partner/jobs/seed-order-2450/messages", headers=partner_headers)
+    assert messages_response.status_code == 404
+
+
+def test_admin_schedule_memo_added_excluded_from_partner_detail() -> None:
+    """관리자 일정/결제 변경의 memo_added는 협력사 상세 memos에 절대 보이지 않는다."""
+    client = make_test_client()
+    partner_headers = _partner_headers(client)
+    admin_headers = _admin_headers(client)
+
+    own_memo = "협력사 본인 현장 메모"
+    assert (
+        client.post(
+            "/api/partner/jobs/seed-order-2450/memo",
+            headers=partner_headers,
+            json={"text": own_memo},
+        ).status_code
+        == 200
+    )
+
+    # 관리자가 방문일을 변경 → memo_added('방문 일정 변경') 이벤트 기록
+    patch_response = client.patch(
+        "/api/admin/orders/seed-order-2450",
+        headers=admin_headers,
+        json={"scheduled_date": "2026-07-15"},
+    )
+    assert patch_response.status_code == 200, patch_response.text
+
+    # 관리자 타임라인엔 일정변경 memo_added가 실제로 기록되어 있어야(테스트 의미 확보)
+    admin_detail = client.get("/api/admin/orders/seed-order-2450", headers=admin_headers).json()
+    schedule_memos = [
+        event
+        for event in admin_detail["timeline"]
+        if event["event_type"] == "memo_added" and event["title"] == "방문 일정 변경"
+    ]
+    assert len(schedule_memos) >= 1
+
+    # 그러나 협력사 상세 memos에는 본인 메모만 보인다.
+    partner_detail = client.get("/api/partner/jobs/seed-order-2450", headers=partner_headers).json()
+    assert [memo["text"] for memo in partner_detail["memos"]] == [own_memo]
+
+
+def test_partner_messages_exclude_previous_partner_after_reassignment() -> None:
+    """재배정(A→B) 시 B는 이전 협력사 A에게 간 메시지를 보면 안 된다."""
+    client = make_test_client(_seed_partner_b)
+    admin_headers = _admin_headers(client)
+
+    # 현재 배정 협력사 A(시드)에게 배정 안내 발송
+    assert (
+        client.post(
+            "/api/admin/messages/send",
+            headers=admin_headers,
+            json={
+                "order_id": "seed-order-2450",
+                "message_type": "partner_assignment",
+                "recipient_type": "partner",
+                "channel": "sms",
+            },
+        ).status_code
+        == 200
+    )
+
+    # B로 재배정
+    reassign = client.patch(
+        "/api/admin/orders/seed-order-2450",
+        headers=admin_headers,
+        json={"partner_id": _PARTNER_B_ID},
+    )
+    assert reassign.status_code == 200, reassign.text
+
+    b_headers = _partner_b_headers()
+    # A에게 갔던 메시지(내용에 A 협력사명 포함)는 B에게 노출되면 안 된다.
+    before = client.get("/api/partner/jobs/seed-order-2450/messages", headers=b_headers)
+    assert before.status_code == 200
+    assert before.json() == []
+
+    # 재배정 후 B에게 발송하면 그제서야 B 본인 메시지만 보인다(과도필터가 아님을 확인).
+    assert (
+        client.post(
+            "/api/admin/messages/send",
+            headers=admin_headers,
+            json={
+                "order_id": "seed-order-2450",
+                "message_type": "partner_assignment",
+                "recipient_type": "partner",
+                "channel": "sms",
+            },
+        ).status_code
+        == 200
+    )
+    after = client.get("/api/partner/jobs/seed-order-2450/messages", headers=b_headers).json()
+    assert len(after) == 1
+    assert after[0]["message_type"] == "partner_assignment"
+
+
+def test_partner_memos_exclude_previous_partner_after_reassignment() -> None:
+    """재배정(A→B) 시 B는 이전 협력사 A가 남긴 현장 메모를 보면 안 된다."""
+    client = make_test_client(_seed_partner_b)
+    a_headers = _partner_headers(client)  # 시드 협력사 A
+    admin_headers = _admin_headers(client)
+
+    assert (
+        client.post(
+            "/api/partner/jobs/seed-order-2450/memo",
+            headers=a_headers,
+            json={"text": "A의 출입 비번 메모"},
+        ).status_code
+        == 200
+    )
+
+    reassign = client.patch(
+        "/api/admin/orders/seed-order-2450",
+        headers=admin_headers,
+        json={"partner_id": _PARTNER_B_ID},
+    )
+    assert reassign.status_code == 200, reassign.text
+
+    b_headers = _partner_b_headers()
+    detail = client.get("/api/partner/jobs/seed-order-2450", headers=b_headers)
+    assert detail.status_code == 200
+    assert detail.json()["memos"] == []
+
+    # B 자신의 메모는 정상적으로 보인다.
+    assert (
+        client.post(
+            "/api/partner/jobs/seed-order-2450/memo",
+            headers=b_headers,
+            json={"text": "B의 메모"},
+        ).status_code
+        == 200
+    )
+    detail2 = client.get("/api/partner/jobs/seed-order-2450", headers=b_headers).json()
+    assert [memo["text"] for memo in detail2["memos"]] == ["B의 메모"]

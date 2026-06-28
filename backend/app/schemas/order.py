@@ -1,6 +1,6 @@
 from datetime import date, datetime
 
-from pydantic import Field
+from pydantic import Field, field_validator
 
 from app.domain.constants import OrderStatus, PhotoType, ReceiptStatus, ReceiptType, VatType
 from app.schemas.common import ApiModel, TimelineEventRead
@@ -191,6 +191,15 @@ class AdminCalendarOrderRead(ApiModel):
 
 class PartnerMemoCreate(ApiModel):
     text: str = Field(min_length=1, max_length=1000)
+
+    @field_validator("text")
+    @classmethod
+    def _strip_text(cls, value: str) -> str:
+        # 공백만 입력한 메모는 거부한다(min_length=1은 공백 문자열을 통과시킨다).
+        stripped = value.strip()
+        if not stripped:
+            raise ValueError("memo_text_required")
+        return stripped
 
 
 class PartnerMemoRead(ApiModel):

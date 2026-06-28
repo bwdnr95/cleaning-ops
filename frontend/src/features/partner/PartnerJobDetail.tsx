@@ -205,7 +205,24 @@ export function PartnerJobDetail({ onDetailOpenChange = undefined } = {}) {
   }
 
   if (detail.error || !job) {
-    return <PartnerState text="작업 상세를 불러오지 못했습니다." tone="danger" />;
+    // 현장(지하·약전계)에서 상세 로드가 실패해도 협력사가 갇히지 않도록
+    // 다시 시도 + 목록으로 탈출 경로를 항상 제공한다. (상세가 열려 있으면 하단 네비는 숨겨짐)
+    return (
+      <PartnerState
+        text="작업 상세를 불러오지 못했습니다."
+        tone="danger"
+        actions={(
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button type="button" data-testid="partner-detail-retry" onClick={() => detail.reload()} style={partnerStateButtonStyle('brand')}>
+              다시 시도
+            </button>
+            <button type="button" data-testid="partner-detail-back" onClick={() => setSelectedJobId(null)} style={partnerStateButtonStyle('neutral')}>
+              목록으로
+            </button>
+          </div>
+        )}
+      />
+    );
   }
 
   const canStart = STARTABLE_JOB_STATUSES.includes(job.status);
@@ -285,6 +302,7 @@ export function PartnerJobDetail({ onDetailOpenChange = undefined } = {}) {
             className="input"
             data-testid="partner-memo-input"
             rows={3}
+            maxLength={1000}
             placeholder="현장 메모를 남겨주세요."
             value={memoDraft}
             disabled={isSavingMemo}
@@ -550,12 +568,28 @@ function PartnerStatusBadge({ status }) {
   return <Badge tone={tone} dot>{label}</Badge>;
 }
 
-function PartnerState({ text, tone = 'muted' }) {
+function PartnerState({ text, tone = 'muted', actions = null }) {
   return (
-    <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24, background: '#f4f6f8', color: tone === 'danger' ? 'var(--danger-fg)' : 'var(--text-tertiary)', fontSize: 13, textAlign: 'center' }}>
-      {text}
+    <div style={{ height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 14, padding: 24, background: '#f4f6f8', color: tone === 'danger' ? 'var(--danger-fg)' : 'var(--text-tertiary)', fontSize: 13, textAlign: 'center' }}>
+      <div>{text}</div>
+      {actions}
     </div>
   );
+}
+
+function partnerStateButtonStyle(variant) {
+  const isBrand = variant === 'brand';
+  return {
+    height: 40,
+    padding: '0 16px',
+    borderRadius: 10,
+    border: isBrand ? 'none' : '1px solid var(--border)',
+    background: isBrand ? 'var(--brand)' : '#fff',
+    color: isBrand ? '#fff' : 'var(--text)',
+    fontSize: 13,
+    fontWeight: 700,
+    cursor: 'pointer',
+  };
 }
 
 function groupJobPhotos(photos) {

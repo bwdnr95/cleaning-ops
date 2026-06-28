@@ -121,6 +121,12 @@ function toChangePasswordMessage(error) {
     if (error.status === 401 || error.detail === 'invalid_current_password') {
       return '현재 비밀번호가 올바르지 않습니다.';
     }
+    if (error.detail === 'weak_password') {
+      return '새 비밀번호는 10자 이상으로 입력해주세요.';
+    }
+    if (error.detail === 'password_reuse') {
+      return '현재 비밀번호와 다른 새 비밀번호를 입력해주세요.';
+    }
     if (error.issues?.[0]?.message) {
       return error.issues[0].message;
     }

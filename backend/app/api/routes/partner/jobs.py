@@ -4,9 +4,11 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.api.deps import CurrentUser, ensure_partner_scope, get_session, require_partner
 from app.domain.constants import PhotoType, RecipientType
+from app.domain.phone import normalize_phone
 from app.repositories.messages import MessageRepository
 from app.repositories.order_groups import OrderGroupRepository
 from app.repositories.orders import OrderRepository
+from app.repositories.partners import PartnerRepository
 from app.repositories.photos import PhotoRepository
 from app.repositories.timeline import TimelineRepository
 from app.schemas.message import PartnerMessageRead
@@ -50,7 +52,7 @@ def get_my_job(
         raise HTTPException(status_code=404, detail="order_not_found") from exc
     photos = PhotoRepository(db).list_for_order(order.id)
     group = OrderGroupRepository(db).get(order.group_id)
-    memos = partner_memo_events(TimelineRepository(db).list_for_order(order.id))
+    memos = partner_memo_events(TimelineRepository(db).list_for_order(order.id), partner_id)
     return to_partner_job_dto(order, group=group, photos=photos, memos=memos)
 
 
@@ -169,7 +171,7 @@ def add_job_memo(
         raise HTTPException(status_code=404, detail="order_not_found") from exc
     photos = PhotoRepository(db).list_for_order(order.id)
     group = OrderGroupRepository(db).get(order.group_id)
-    memos = partner_memo_events(TimelineRepository(db).list_for_order(order.id))
+    memos = partner_memo_events(TimelineRepository(db).list_for_order(order.id), partner_id)
     return to_partner_job_dto(order, group=group, photos=photos, memos=memos)
 
 
@@ -184,6 +186,17 @@ def list_job_messages(
         order = OrderService(db).get_for_partner(order_id, partner_id=partner_id)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail="order_not_found") from exc
+    # 협력사 수신 메시지는 '현재 배정 협력사'에게 간 것만 노출한다.
+    # recipient_type만으로 거르면 재배정(A→B) 시 B가 이전 협력사 A에게 간
+    # 메시지(내용에 협력사명/담당자 포함)를 보게 되어 타 협력사 정보가 샌다.
+    # message_logs에는 협력사 식별자가 없어 발송 시점의 수신 전화번호로 스코프한다.
+    # (PARTNER_CUSTOMER_INFO는 담당자 연락처로 발송될 수 있어 두 번호 모두 허용)
+    partner = PartnerRepository(db).get(partner_id)
+    partner_phones = {
+        normalize_phone(raw)
+        for raw in ((partner.phone, partner.manager_phone) if partner else ())
+        if raw and normalize_phone(raw)
+    }
     logs = MessageRepository(db).list_for_order(order.id)
     return [
         PartnerMessageRead(
@@ -197,4 +210,5 @@ def list_job_messages(
         )
         for log in logs
         if log.recipient_type == RecipientType.PARTNER
+        and normalize_phone(log.recipient_phone) in partner_phones
     ]
