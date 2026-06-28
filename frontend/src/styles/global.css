@@ -438,6 +438,9 @@ body.orders-column-resizing {
     padding: 0;
     box-shadow: var(--shadow-lg);
   }
+
+  .input { font-size: 16px; } /* iOS 자동 줌 방지 */
+  textarea.input { font-size: 16px; }
 }
 
 /* Striped placeholder for imagery */

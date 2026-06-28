@@ -3,13 +3,16 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.api.deps import CurrentUser, ensure_partner_scope, get_session, require_partner
-from app.domain.constants import PhotoType
+from app.domain.constants import PhotoType, RecipientType
+from app.repositories.messages import MessageRepository
 from app.repositories.order_groups import OrderGroupRepository
 from app.repositories.orders import OrderRepository
 from app.repositories.photos import PhotoRepository
-from app.schemas.order import PartnerJobRead
+from app.repositories.timeline import TimelineRepository
+from app.schemas.message import PartnerMessageRead
+from app.schemas.order import PartnerJobRead, PartnerMemoCreate
 from app.schemas.photo import PartnerPhotoRead
-from app.services.orders import OrderService, to_partner_job_dto
+from app.services.orders import OrderService, partner_memo_events, to_partner_job_dto
 from app.services.photos import PhotoService, normalize_uploaded_photo_content_type
 from app.services.storage import get_storage_provider
 
@@ -47,7 +50,8 @@ def get_my_job(
         raise HTTPException(status_code=404, detail="order_not_found") from exc
     photos = PhotoRepository(db).list_for_order(order.id)
     group = OrderGroupRepository(db).get(order.group_id)
-    return to_partner_job_dto(order, group=group, photos=photos)
+    memos = partner_memo_events(TimelineRepository(db).list_for_order(order.id))
+    return to_partner_job_dto(order, group=group, photos=photos, memos=memos)
 
 
 @router.post("/{order_id}/start", response_model=PartnerJobRead)
@@ -144,3 +148,53 @@ async def upload_photo(
         db.rollback()
         storage.delete(stored_file.storage_key)
         raise
+
+
+@router.post("/{order_id}/memo", response_model=PartnerJobRead)
+def add_job_memo(
+    order_id: str,
+    payload: PartnerMemoCreate,
+    db: Session = Depends(get_session),
+    user: CurrentUser = Depends(require_partner),
+) -> PartnerJobRead:
+    partner_id = ensure_partner_scope(user)
+    try:
+        order = OrderService(db).add_partner_memo(
+            order_id,
+            text=payload.text,
+            actor_user_id=user.id,
+            partner_id=partner_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail="order_not_found") from exc
+    photos = PhotoRepository(db).list_for_order(order.id)
+    group = OrderGroupRepository(db).get(order.group_id)
+    memos = partner_memo_events(TimelineRepository(db).list_for_order(order.id))
+    return to_partner_job_dto(order, group=group, photos=photos, memos=memos)
+
+
+@router.get("/{order_id}/messages", response_model=list[PartnerMessageRead])
+def list_job_messages(
+    order_id: str,
+    db: Session = Depends(get_session),
+    user: CurrentUser = Depends(require_partner),
+) -> list[PartnerMessageRead]:
+    partner_id = ensure_partner_scope(user)
+    try:
+        order = OrderService(db).get_for_partner(order_id, partner_id=partner_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail="order_not_found") from exc
+    logs = MessageRepository(db).list_for_order(order.id)
+    return [
+        PartnerMessageRead(
+            id=log.id,
+            message_type=log.message_type,
+            channel=log.channel,
+            content=log.content,
+            status=log.status,
+            sent_at=log.sent_at,
+            created_at=log.created_at,
+        )
+        for log in logs
+        if log.recipient_type == RecipientType.PARTNER
+    ]

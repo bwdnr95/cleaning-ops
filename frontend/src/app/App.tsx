@@ -16,7 +16,7 @@ import { ProductsPage } from '../features/admin/products/ProductsPage';
 import { RecurringContractsPage } from '../features/admin/recurring/RecurringContractsPage';
 import { ReportsPage } from '../features/admin/reports/ReportsPage';
 import { CustomerReservation } from '../features/customer/CustomerReservation';
-import { PartnerJobDetail } from '../features/partner/PartnerJobDetail';
+import { PartnerApp } from '../features/partner/PartnerApp';
 import { useAuth } from '../store/authStore';
 
 const ADMIN_PAGE_META = {
@@ -277,7 +277,7 @@ export function App() {
         )}
 
         {mode === 'partner' && (
-          <>{isSwitchingRole ? <RouteState text="화면을 전환하는 중입니다." /> : partnerSession.user?.role === 'partner' ? <PartnerJobDetail /> : <PartnerLoginPage />}</>
+          <>{isSwitchingRole ? <RouteState text="화면을 전환하는 중입니다." /> : partnerSession.user?.role === 'partner' ? <PartnerApp /> : <PartnerLoginPage />}</>
         )}
     </main>
   );

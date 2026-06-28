@@ -189,6 +189,16 @@ class AdminCalendarOrderRead(ApiModel):
     customer_address_detail: str | None = None
 
 
+class PartnerMemoCreate(ApiModel):
+    text: str = Field(min_length=1, max_length=1000)
+
+
+class PartnerMemoRead(ApiModel):
+    id: str
+    text: str
+    created_at: datetime | None = None
+
+
 class PartnerJobRead(ApiModel):
     id: str
     status: OrderStatus
@@ -202,7 +212,9 @@ class PartnerJobRead(ApiModel):
     customer_phone: str
     customer_address: str
     customer_address_detail: str | None = None
+    is_recurring: bool = False
     photos: list[PartnerPhotoRead] = Field(default_factory=list)
+    memos: list[PartnerMemoRead] = Field(default_factory=list)
 
 
 class CustomerPhotoRead(ApiModel):
