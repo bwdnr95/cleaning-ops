@@ -37,7 +37,10 @@ def create_contract(
     user: CurrentUser = Depends(require_admin),
 ):
     svc = RecurringService(db)
-    contract = svc.create_contract(payload, actor_user_id=user.id)
+    try:
+        contract = svc.create_contract(payload, actor_user_id=user.id)
+    except ValueError as exc:
+        raise _err(exc) from exc
     return svc.to_contract_read(contract)
 
 

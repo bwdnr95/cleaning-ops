@@ -1,4 +1,8 @@
 from datetime import date
+from uuid import uuid4
+
+import pytest
+from sqlalchemy import func, select
 
 from app.db.seed import DEV_PARTNER_ID
 from app.domain.constants import (
@@ -6,7 +10,10 @@ from app.domain.constants import (
     RecurrenceMode,
     RecurringContractStatus,
     RecurringOccurrenceStatus,
+    VatType,
 )
+from app.models import OrderGroup
+from app.models.recurring_contract import RecurringContract
 from app.repositories.order_groups import OrderGroupRepository
 from app.repositories.orders import OrderRepository
 from app.schemas.recurring import ApproveItem, RecurringContractCreate, RecurringContractUpdate, SkipItem
@@ -36,6 +43,33 @@ def test_update_contract_changes_future_template(db_session):
     c = svc.create_contract(_make_payload(), actor_user_id=None)
     svc.update_contract(c.id, RecurringContractUpdate(total_amount=200000), actor_user_id=None)
     assert svc.get_contract(c.id).total_amount == 200000
+
+
+def test_update_contract_rejects_invalid_mode_switch(db_session):
+    svc = RecurringService(db_session)
+    c = svc.create_contract(_make_payload(), actor_user_id=None)  # monthly, day_of_month=10
+    # weekly로 전환하는데 interval_weeks를 주지 않으면 거부되어야 한다.
+    with pytest.raises(ValueError, match="invalid_recurrence_fields"):
+        svc.update_contract(
+            c.id, RecurringContractUpdate(recurrence_mode=RecurrenceMode.WEEKLY), actor_user_id=None
+        )
+    # 잘못된 전환이 저장되지 않았는지(롤백) 확인
+    again = svc.get_contract(c.id)
+    assert again.recurrence_mode == RecurrenceMode.MONTHLY
+    assert again.day_of_month == 10
+
+
+def test_update_contract_allows_valid_mode_switch(db_session):
+    svc = RecurringService(db_session)
+    c = svc.create_contract(_make_payload(), actor_user_id=None)
+    svc.update_contract(
+        c.id,
+        RecurringContractUpdate(recurrence_mode=RecurrenceMode.WEEKLY, interval_weeks=2),
+        actor_user_id=None,
+    )
+    again = svc.get_contract(c.id)
+    assert again.recurrence_mode == RecurrenceMode.WEEKLY
+    assert again.interval_weeks == 2
 
 
 def test_pause_and_resume_and_end(db_session):
@@ -69,6 +103,28 @@ def test_sync_creates_pending_occurrences_idempotently(db_session):
     assert n1 == 1 and n2 == 0
 
 
+def test_sync_isolates_bad_contract(db_session):
+    svc = RecurringService(db_session)
+    good = svc.create_contract(_make_payload(start_date=date(2026, 6, 10)), actor_user_id=None)
+    # 검증을 우회해 직접 불량 계약(monthly인데 day_of_month 없음)을 주입한다.
+    bad = RecurringContract(
+        id=str(uuid4()),
+        label="불량계약",
+        order_group_id=good.order_group_id,
+        recurrence_mode=RecurrenceMode.MONTHLY,
+        day_of_month=None,
+        start_date=date(2026, 6, 10),
+        status=RecurringContractStatus.ACTIVE,
+        service_name="불량",
+    )
+    db_session.add(bad)
+    db_session.commit()
+    # 불량 계약이 있어도 예외 없이 정상 계약은 처리되어야 한다(격리).
+    svc.sync_due_occurrences(today=date(2026, 6, 20))
+    assert svc.occurrences.list_by_contract(good.id)  # 정상 계약은 도래분 생성됨
+    assert svc.occurrences.list_by_contract(bad.id) == []  # 불량 계약은 건너뜀
+
+
 def test_sync_skips_paused_contract(db_session):
     svc = RecurringService(db_session)
     c = svc.create_contract(_make_payload(start_date=date(2026, 6, 10)), actor_user_id=None)
@@ -84,6 +140,41 @@ def test_sync_excludes_overdue_beyond_grace(db_session):
     svc.sync_due_occurrences(today=date(2026, 6, 20))
     dues = [o.due_date for o in svc.occurrences.list_by_contract(c.id)]
     assert dues == [date(2026, 6, 10)]
+
+
+def test_create_contract_unknown_partner_no_orphan_group(db_session):
+    svc = RecurringService(db_session)
+    before = db_session.scalar(select(func.count()).select_from(OrderGroup))
+    with pytest.raises(ValueError, match="partner_not_found"):
+        svc.create_contract(_make_payload(default_partner_id="no-such-partner"), actor_user_id=None)
+    db_session.rollback()
+    after = db_session.scalar(select(func.count()).select_from(OrderGroup))
+    assert after == before  # 고아 그룹이 생성되지 않아야 한다
+
+
+def test_approve_keeps_default_vat_type_when_contract_vat_none(db_session):
+    svc = RecurringService(db_session)
+    # _make_payload는 vat_type을 설정하지 않으므로 contract.vat_type은 None.
+    c = svc.create_contract(_make_payload(start_date=date(2026, 6, 10)), actor_user_id=None)
+    assert c.vat_type is None
+    svc.sync_due_occurrences(today=date(2026, 6, 20))
+    occ = svc.occurrences.list_by_contract(c.id)[0]
+    result = svc.approve_occurrences([ApproveItem(occurrence_id=occ.id)], actor_user_id=None)
+    order = OrderRepository(db_session).get(result.generated_order_ids[0])
+    # 계약 vat_type이 None이면 OrderLineCreate 기본값(INCLUDED)을 유지해야 한다.
+    assert order.vat_type == VatType.INCLUDED
+
+
+def test_approve_uses_contract_vat_type_when_set(db_session):
+    svc = RecurringService(db_session)
+    c = svc.create_contract(
+        _make_payload(start_date=date(2026, 6, 10), vat_type="excluded"), actor_user_id=None
+    )
+    svc.sync_due_occurrences(today=date(2026, 6, 20))
+    occ = svc.occurrences.list_by_contract(c.id)[0]
+    result = svc.approve_occurrences([ApproveItem(occurrence_id=occ.id)], actor_user_id=None)
+    order = OrderRepository(db_session).get(result.generated_order_ids[0])
+    assert order.vat_type == VatType.EXCLUDED
 
 
 def test_approve_generates_confirmed_order_when_partner_present(db_session):

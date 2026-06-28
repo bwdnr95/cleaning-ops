@@ -24,6 +24,22 @@ class ScheduleSpec:
     max_occurrences: int | None = None
 
 
+def validate_recurrence_fields(
+    mode: str, day_of_month: int | None, interval_weeks: int | None
+) -> None:
+    """스케줄 모드와 짝 필드의 정합성 검증. 불일치 시 ValueError.
+
+    MONTHLY는 day_of_month, WEEKLY는 interval_weeks가 반드시 있어야 한다.
+    잘못된 짝(예: weekly↔monthly 전환 시 짝 필드 누락)이 저장되면 이후
+    iter_due_dates가 ValueError를 던져 조회/sync 경로가 연쇄 고장하므로
+    유입 단계(스키마 검증/계약 수정)에서 막는다.
+    """
+    if mode == RecurrenceMode.MONTHLY and day_of_month is None:
+        raise ValueError("invalid_recurrence_fields")
+    if mode == RecurrenceMode.WEEKLY and interval_weeks is None:
+        raise ValueError("invalid_recurrence_fields")
+
+
 def billing_month_of(due: date) -> str:
     return f"{due.year:04d}-{due.month:02d}"
 

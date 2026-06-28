@@ -1,8 +1,9 @@
 from datetime import date, datetime
 
-from pydantic import Field
+from pydantic import Field, model_validator
 
-from app.domain.constants import RecurrenceMode, RecurringContractStatus
+from app.domain.constants import RecurrenceMode, RecurringContractStatus, VatType
+from app.domain.recurrence import validate_recurrence_fields
 from app.schemas.common import ApiModel
 
 
@@ -37,12 +38,15 @@ class RecurringContractBase(ApiModel):
     discount_amount: float = 0
     deposit_amount: float | None = None
     balance_amount: float | None = None
-    vat_type: str | None = None
+    vat_type: VatType | None = None
     partner_payment_amount: float | None = None
 
 
 class RecurringContractCreate(RecurringContractBase):
-    pass
+    @model_validator(mode="after")
+    def _check_recurrence_fields(self) -> "RecurringContractCreate":
+        validate_recurrence_fields(self.recurrence_mode, self.day_of_month, self.interval_weeks)
+        return self
 
 
 class RecurringContractUpdate(ApiModel):
@@ -73,7 +77,7 @@ class RecurringContractUpdate(ApiModel):
     discount_amount: float | None = None
     deposit_amount: float | None = None
     balance_amount: float | None = None
-    vat_type: str | None = None
+    vat_type: VatType | None = None
     partner_payment_amount: float | None = None
 
 

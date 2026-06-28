@@ -18,6 +18,7 @@ from app.domain.recurrence import (
     ScheduleSpec,
     billing_month_of,
     iter_due_dates,
+    validate_recurrence_fields,
 )
 from app.models.recurring_contract import RecurringContract
 from app.models.recurring_occurrence import RecurringOccurrence
@@ -56,6 +57,11 @@ class RecurringService:
 
     # --- 계약 CRUD ---
     def create_contract(self, payload: RecurringContractCreate, *, actor_user_id: str | None) -> RecurringContract:
+        # 그룹 생성(commit) 전에 FK 대상을 검증한다. 잘못된 partner_id면 그룹만 남는
+        # 고아 그룹이 발생하므로(create_empty_group이 즉시 commit) 미리 막는다.
+        if payload.default_partner_id is not None:
+            if PartnerRepository(self.db).get(payload.default_partner_id) is None:
+                raise ValueError("partner_not_found")
         group = self.orders.create_empty_group(
             OrderGroupCreate(
                 customer_name=payload.customer_name,
@@ -103,6 +109,15 @@ class RecurringService:
                     setattr(group, field, value)
         for key, value in changes.items():
             setattr(contract, key, value)
+        # 머지 결과(모드+짝 필드)를 commit 전에 재검증한다. weekly↔monthly 모드만
+        # 바꾸고 짝 필드를 빠뜨린 PATCH가 저장되면 이후 iter_due_dates가 연쇄 고장한다.
+        try:
+            validate_recurrence_fields(
+                contract.recurrence_mode, contract.day_of_month, contract.interval_weeks
+            )
+        except ValueError:
+            self.db.rollback()  # 잘못된 전환이 저장되지 않도록 변경을 되돌린다
+            raise
         self.db.commit()
         self.db.refresh(contract)
         return contract
@@ -142,22 +157,28 @@ class RecurringService:
         floor = today - timedelta(days=OVERDUE_GRACE_DAYS)
         created = 0
         for contract in self.contracts.list_active():
-            for seq, due in iter_due_dates(self._spec(contract), until=horizon):
-                if due < floor:
-                    continue
-                if self.occurrences.get_by_contract_and_due(contract.id, due) is not None:
-                    continue
-                self.occurrences.add(
-                    RecurringOccurrence(
-                        id=str(uuid4()),
-                        contract_id=contract.id,
-                        sequence_no=seq,
-                        due_date=due,
-                        billing_month=billing_month_of(due),
-                        status=RecurringOccurrenceStatus.PENDING,
+            # 한 계약의 불량 스케줄(예: 짝 필드 누락으로 iter_due_dates가 ValueError)이
+            # 전체 배치를 죽이지 않도록 계약별로 격리한다. 정상 유입은 검증으로 막지만,
+            # 기존에 저장된 잘못된 데이터를 방어한다.
+            try:
+                for seq, due in iter_due_dates(self._spec(contract), until=horizon):
+                    if due < floor:
+                        continue
+                    if self.occurrences.get_by_contract_and_due(contract.id, due) is not None:
+                        continue
+                    self.occurrences.add(
+                        RecurringOccurrence(
+                            id=str(uuid4()),
+                            contract_id=contract.id,
+                            sequence_no=seq,
+                            due_date=due,
+                            billing_month=billing_month_of(due),
+                            status=RecurringOccurrenceStatus.PENDING,
+                        )
                     )
-                )
-                created += 1
+                    created += 1
+            except Exception:
+                continue
         if created:
             self.db.commit()
         return created
@@ -193,7 +214,7 @@ class RecurringService:
                 float(contract.total_amount) if contract.total_amount is not None else None
             )
 
-            line = OrderLineCreate(
+            line_data = dict(
                 status=status,
                 received_date=business_today(),
                 scheduled_date=scheduled,
@@ -210,12 +231,16 @@ class RecurringService:
                 discount_amount=float(contract.discount_amount or 0),
                 deposit_amount=float(contract.deposit_amount) if contract.deposit_amount is not None else None,
                 balance_amount=float(contract.balance_amount) if contract.balance_amount is not None else None,
-                vat_type=contract.vat_type,
                 partner_payment_amount=(
                     float(contract.partner_payment_amount)
                     if contract.partner_payment_amount is not None else None
                 ),
             )
+            # 계약에 vat_type이 없으면 키를 생략해 OrderLineCreate 기본값을 유지한다.
+            # (None으로 덮어쓰면 정기 생성 주문만 vat_type이 달라진다.)
+            if contract.vat_type is not None:
+                line_data["vat_type"] = contract.vat_type
+            line = OrderLineCreate(**line_data)
             order = self.orders.add_recurring_line(
                 group, line, recurring_contract_id=contract.id, actor_user_id=actor_user_id
             )

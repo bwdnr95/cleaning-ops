@@ -31,6 +31,33 @@ def test_sync_and_approve_flow(client, seed_admin_token):
     assert pending.status_code == 200
 
 
+def test_create_contract_invalid_schedule_returns_422(client, seed_admin_token):
+    body = _contract_body()
+    body.pop("day_of_month")  # monthly인데 day_of_month 누락
+    r = client.post("/api/admin/recurring/contracts", json=body, headers=_auth(seed_admin_token))
+    assert r.status_code == 422, r.text
+
+
+def test_patch_contract_invalid_mode_switch_returns_400(client, seed_admin_token):
+    created = client.post(
+        "/api/admin/recurring/contracts", json=_contract_body(), headers=_auth(seed_admin_token)
+    )
+    cid = created.json()["id"]
+    # weekly 전환인데 interval_weeks 미동반 → 400
+    r = client.patch(
+        f"/api/admin/recurring/contracts/{cid}",
+        json={"recurrence_mode": "weekly"},
+        headers=_auth(seed_admin_token),
+    )
+    assert r.status_code == 400, r.text
+
+
+def test_create_contract_unknown_partner_returns_404(client, seed_admin_token):
+    body = _contract_body(default_partner_id="no-such-partner")
+    r = client.post("/api/admin/recurring/contracts", json=body, headers=_auth(seed_admin_token))
+    assert r.status_code == 404, r.text
+
+
 def test_requires_admin(client):
     r = client.get("/api/admin/recurring/contracts")
     assert r.status_code == 401

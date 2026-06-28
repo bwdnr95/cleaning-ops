@@ -20,3 +20,37 @@ def test_contract_create_requires_service_and_schedule():
 def test_approve_request_requires_at_least_one_item():
     with pytest.raises(ValidationError):
         ApproveOccurrencesRequest(items=[])
+
+
+def _create_kwargs(**over):
+    base = dict(
+        label="강남빌딩", customer_name="강남빌딩", customer_phone="01011112222",
+        customer_address="서울 강남구 1", recurrence_mode=RecurrenceMode.MONTHLY, day_of_month=10,
+        start_date=date(2026, 6, 10), service_name="사무실 정기청소", total_amount=150000,
+    )
+    base.update(over)
+    return base
+
+
+def test_contract_create_monthly_requires_day_of_month():
+    with pytest.raises(ValidationError):
+        RecurringContractCreate(**_create_kwargs(recurrence_mode=RecurrenceMode.MONTHLY, day_of_month=None))
+
+
+def test_contract_create_weekly_requires_interval_weeks():
+    with pytest.raises(ValidationError):
+        RecurringContractCreate(
+            **_create_kwargs(recurrence_mode=RecurrenceMode.WEEKLY, day_of_month=None, interval_weeks=None)
+        )
+
+
+def test_contract_create_weekly_with_interval_weeks_ok():
+    payload = RecurringContractCreate(
+        **_create_kwargs(recurrence_mode=RecurrenceMode.WEEKLY, day_of_month=None, interval_weeks=2)
+    )
+    assert payload.interval_weeks == 2
+
+
+def test_contract_create_rejects_invalid_vat_type():
+    with pytest.raises(ValidationError):
+        RecurringContractCreate(**_create_kwargs(vat_type="bogus"))
