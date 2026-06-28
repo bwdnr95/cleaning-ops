@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
 
 const ADMIN_EMAIL = 'admin@cleanops.kr';
 const ADMIN_PASSWORD = 'AdminPass123!';
@@ -66,7 +66,7 @@ test('정기계약 생성 → 승인 대기 회차 → 승인하면 정기 주�
   await expect(page.getByTestId('order-recurring-badge')).toBeVisible();
 });
 
-async function loginAsAdmin(page) {
+async function loginAsAdmin(page: Page) {
   await page.goto('/');
   await page.getByTestId('admin-login-identifier').fill(ADMIN_EMAIL);
   await page.getByTestId('admin-login-password').fill(ADMIN_PASSWORD);
