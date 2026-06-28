@@ -177,6 +177,42 @@ class OrderService:
         self.db.refresh(order)
         return order
 
+    def create_empty_group(
+        self,
+        payload: OrderGroupCreate,
+        *,
+        actor_user_id: str | None = None,
+    ) -> OrderGroup:
+        """라인 0개 그룹 생성(정기계약 전용). payload.lines는 무시한다."""
+        group = OrderGroup(
+            id=str(uuid4()),
+            customer_token=token_urlsafe(24),
+            customer_name=payload.customer_name,
+            customer_phone=normalize_phone(payload.customer_phone),
+            customer_address=payload.customer_address,
+            customer_address_detail=payload.customer_address_detail,
+            source_channel=payload.source_channel,
+            customer_visible_payment=payload.customer_visible_payment,
+            notes=payload.notes,
+        )
+        self.db.add(group)
+        self.db.commit()
+        self.db.refresh(group)
+        return group
+
+    def add_recurring_line(
+        self,
+        group: OrderGroup,
+        payload: OrderLineCreate,
+        *,
+        recurring_contract_id: str,
+        actor_user_id: str | None = None,
+    ) -> Order:
+        """정기 회차 라인 생성. commit하지 않는다 — caller(RecurringService)가 트랜잭션 소유."""
+        order = self._create_line_internal(group, payload, actor_user_id=actor_user_id)
+        order.recurring_contract_id = recurring_contract_id
+        return order
+
     def _create_line_internal(
         self,
         group: OrderGroup,
@@ -553,6 +589,7 @@ def to_admin_order_dto(
     return AdminOrderRead(
         id=order.id,
         group_id=order.group_id or "",
+        recurring_contract_id=order.recurring_contract_id,
         status=order.status,
         received_date=order.received_date,
         scheduled_date=order.scheduled_date,

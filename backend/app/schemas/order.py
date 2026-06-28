@@ -110,6 +110,7 @@ class OrderUpdate(ApiModel):
 class AdminOrderRead(OrderLineBase):
     id: str
     group_id: str
+    recurring_contract_id: str | None = None
     customer_name: str
     customer_phone: str
     customer_address: str
