@@ -82,6 +82,9 @@ export function App() {
   const isStandalonePartnerLink = isPartnerLinkRoute();
   const mode = isStandalonePartnerLink ? 'partner' : 'admin';
   const [adminRoute, setAdminRoute] = React.useState(() => readAdminRouteFromLocation());
+  // 주문 상세의 '정기' 배지에서 계약으로 역링크할 때 전달할 계약 id(데모 affordance: 해시 라우트와 별개).
+  const [openRecurringContractId, setOpenRecurringContractId] = React.useState<string | null>(null);
+  const consumeOpenRecurringContract = React.useCallback(() => setOpenRecurringContractId(null), []);
   const adminSession = auth.getSession('admin');
   const partnerSession = auth.getSession('partner');
   const adminSummaryLoader = React.useCallback(() => {
@@ -193,6 +196,10 @@ export function App() {
                           onEdit={() => navigateAdmin(toOrderEditRoute(detailOrderId, ordersView))}
                           onDuplicate={() => navigateAdmin(toOrderDuplicateRoute(detailOrderId, ordersView))}
                           onOpenOrder={(nextOrderId) => navigateAdmin(toOrderDetailRoute(nextOrderId, ordersView))}
+                          onOpenRecurringContract={(contractId) => {
+                            setOpenRecurringContractId(contractId);
+                            setPage('recurring');
+                          }}
                           onNav={(nextPage) => {
                             setPage(nextPage);
                           }}
@@ -244,7 +251,12 @@ export function App() {
                       )}
                       {page === 'products' && <ProductsPage />}
                       {page === 'partners' && <PartnersPage />}
-                      {page === 'recurring' && <RecurringContractsPage />}
+                      {page === 'recurring' && (
+                        <RecurringContractsPage
+                          initialContractId={openRecurringContractId}
+                          onInitialContractConsumed={consumeOpenRecurringContract}
+                        />
+                      )}
                       {page === 'reports' && <ReportsPage />}
                       {page === 'sends' && (
                         <MessagesPage

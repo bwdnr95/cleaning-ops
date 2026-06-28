@@ -62,7 +62,7 @@ const MESSAGE_ACTIONS = {
 
 const WORK_DONE_STATUS = '고객전달필요';
 
-export function OrderDetailPage({ orderId, onBack, onEdit, onDuplicate, onNav, onOpenOrder }) {
+export function OrderDetailPage({ orderId, onBack, onEdit, onDuplicate, onNav, onOpenOrder, onOpenRecurringContract }) {
   const loadOrder = React.useCallback(() => getAdminOrder(orderId), [orderId]);
   const orderResource = useApiResource(loadOrder, orderId);
   const partnersResource = useApiResource(listPartners);
@@ -363,17 +363,33 @@ export function OrderDetailPage({ orderId, onBack, onEdit, onDuplicate, onNav, o
         <h2 style={{ margin: 0, fontSize: 14, fontWeight: 600 }}>{formatService(order)}</h2>
         <StatusBadge status={orderWorkflowStatusValue(order.status, order.payment_status)}/>
         {order.recurring_contract_id && (
-          <span
-            data-testid="order-recurring-badge"
-            title="정기청소 계약에서 생성된 주문"
-            style={{
-              display: 'inline-flex', alignItems: 'center', gap: 4,
-              fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 10,
-              background: 'var(--brand-bg)', color: 'var(--brand)',
-            }}
-          >
-            <Icon name="refresh" size={11}/> 정기
-          </span>
+          onOpenRecurringContract ? (
+            <button
+              type="button"
+              data-testid="order-recurring-badge"
+              title="정기청소 계약 보기"
+              onClick={() => onOpenRecurringContract(order.recurring_contract_id)}
+              style={{
+                display: 'inline-flex', alignItems: 'center', gap: 4, cursor: 'pointer',
+                fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 10,
+                border: 'none', background: 'var(--brand-bg)', color: 'var(--brand)',
+              }}
+            >
+              <Icon name="refresh" size={11}/> 정기 계약 보기
+            </button>
+          ) : (
+            <span
+              data-testid="order-recurring-badge"
+              title="정기청소 계약에서 생성된 주문"
+              style={{
+                display: 'inline-flex', alignItems: 'center', gap: 4,
+                fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 10,
+                background: 'var(--brand-bg)', color: 'var(--brand)',
+              }}
+            >
+              <Icon name="refresh" size={11}/> 정기
+            </span>
+          )
         )}
         {hasUnsavedChanges && (
           <span data-testid="detail-unsaved-indicator" style={{

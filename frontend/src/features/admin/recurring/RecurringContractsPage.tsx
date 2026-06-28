@@ -27,8 +27,27 @@ const headStyle: React.CSSProperties = {
   fontWeight: 600,
 };
 
-export function RecurringContractsPage() {
-  const [view, setView] = React.useState<View>({ mode: 'list' });
+export function RecurringContractsPage({
+  initialContractId = null,
+  onInitialContractConsumed,
+}: {
+  // 주문 상세 '정기' 배지에서 역링크로 진입할 때 전달되는 계약 id.
+  initialContractId?: string | null;
+  onInitialContractConsumed?: () => void;
+} = {}) {
+  // 역링크 진입은 마운트 시점에 바로 상세로 들어간다(목록 깜빡임 없이).
+  const [view, setView] = React.useState<View>(
+    initialContractId ? { mode: 'detail', id: initialContractId } : { mode: 'list' },
+  );
+  // 전달받은 계약 id는 마운트 시 한 번만 소비해 부모 상태를 비운다.
+  // (이후 일반 내비게이션으로 재진입할 때 지난 id로 상세가 다시 열리지 않도록.)
+  const consumedRef = React.useRef(false);
+  React.useEffect(() => {
+    if (initialContractId && !consumedRef.current) {
+      consumedRef.current = true;
+      onInitialContractConsumed?.();
+    }
+  }, [initialContractId, onInitialContractConsumed]);
   const [contracts, setContracts] = React.useState<RecurringContractSummary[] | null>(null);
   const [pending, setPending] = React.useState<PendingOccurrence[]>([]);
   const [selected, setSelected] = React.useState<Set<string>>(new Set());

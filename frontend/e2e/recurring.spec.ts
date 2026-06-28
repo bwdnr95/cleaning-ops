@@ -61,9 +61,18 @@ test('정기계약 생성 → 승인 대기 회차 → 승인하면 정기 주�
 
   const orderRows = page.locator('[data-testid^="admin-order-row-"]');
   await expect(orderRows).toHaveCount(1);
+  // 목록 행에 '정기' 배지가 노출된다.
+  await expect(page.getByTestId('order-row-recurring-badge')).toBeVisible();
   await orderRows.click();
   await expect(page.getByTestId('admin-order-detail-page')).toBeVisible();
   await expect(page.getByTestId('order-recurring-badge')).toBeVisible();
+
+  // 6) '정기' 배지를 눌러 계약으로 역링크 → 계약 상세의 회차 원장에서 승인된 회차(생성)를 확인.
+  await page.getByTestId('order-recurring-badge').click();
+  await expect(page.getByTestId('rc-detail-label')).toHaveText(label);
+  const ledger = page.getByTestId('rc-occurrence-ledger');
+  await expect(ledger).toBeVisible();
+  await expect(ledger.getByText('생성', { exact: true })).toBeVisible();
 });
 
 async function loginAsAdmin(page: Page) {
