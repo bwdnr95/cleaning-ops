@@ -53,6 +53,12 @@ class Order(TimestampMixin, Base):
     # R7 deprecated: see OrderGroup. Drop in R7.5.
     customer_token: Mapped[str | None] = mapped_column(String(80), index=True, nullable=True)
     customer_visible_payment: Mapped[bool | None] = mapped_column(Boolean, default=False, nullable=True)
+    # 정기청소 계약에서 생성된 라인이면 계약 id가 스탬프된다. 일회성 주문은 NULL.
+    recurring_contract_id: Mapped[str | None] = mapped_column(
+        ForeignKey("recurring_contracts.id"),
+        index=True,
+        nullable=True,
+    )
     deleted_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True),
         nullable=True,
