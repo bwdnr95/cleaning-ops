@@ -81,7 +81,9 @@ class RecurringBillingService:
             ],
         )
 
-    def mark_month_paid(self, contract_id: str, month: str, *, actor_user_id: str) -> MarkPaidResult:
+    def mark_month_paid(
+        self, contract_id: str, month: str, *, actor_user_id: str
+    ) -> MarkPaidResult:
         orders = self.orders.list_recurring_billing_orders(month=month, contract_id=contract_id)
         updated: list[str] = []
         skipped = 0

@@ -17,6 +17,10 @@ def _is_settleable(order) -> bool:
     )
 
 
+def _sum_partner_amount(orders: Iterable) -> Decimal:
+    return sum((Decimal(str(o.partner_payment_amount or 0)) for o in orders), Decimal("0"))
+
+
 @dataclass(frozen=True)
 class PartnerSubtotal:
     partner_id: str | None
@@ -50,11 +54,9 @@ def aggregate_orders(orders: Iterable) -> BillingAggregate:
         key = str(o.payment_status) if o.payment_status is not None else "none"
         payment_breakdown[key] = payment_breakdown.get(key, 0) + 1
 
-    partner_total = sum((Decimal(str(o.partner_payment_amount or 0)) for o in orders), Decimal("0"))
+    partner_total = _sum_partner_amount(orders)
     settleable = [o for o in orders if _is_settleable(o)]
-    unpaid_partner_total = sum(
-        (Decimal(str(o.partner_payment_amount or 0)) for o in settleable), Decimal("0")
-    )
+    unpaid_partner_total = _sum_partner_amount(settleable)
 
     # 협력사별 소계
     by_partner: dict[str | None, list] = {}
@@ -66,10 +68,8 @@ def aggregate_orders(orders: Iterable) -> BillingAggregate:
         subtotals.append(
             PartnerSubtotal(
                 partner_id=partner_id,
-                partner_total=sum((Decimal(str(o.partner_payment_amount or 0)) for o in group), Decimal("0")),
-                unpaid_partner_total=sum(
-                    (Decimal(str(o.partner_payment_amount or 0)) for o in g_settleable), Decimal("0")
-                ),
+                partner_total=_sum_partner_amount(group),
+                unpaid_partner_total=_sum_partner_amount(g_settleable),
                 settleable_count=len(g_settleable),
             )
         )

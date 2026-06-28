@@ -33,8 +33,9 @@ def test_list_billing_orders_filters_month_contract_and_excludes_cancelled_delet
     keep = _order(db_session, contract_id="c1", scheduled=date(2026, 6, 10))
     _order(db_session, contract_id="c1", scheduled=date(2026, 7, 10))  # 다른 달
     _order(db_session, contract_id="c2", scheduled=date(2026, 6, 10))  # 다른 계약
-    _order(db_session, contract_id="c1", scheduled=date(2026, 6, 11), status=OrderStatus.CANCELLED)  # 취소
-    _order(db_session, contract_id="c1", scheduled=date(2026, 6, 12), deleted=True)  # 삭제
+    # 취소 / 삭제 — 제외 대상
+    _order(db_session, contract_id="c1", scheduled=date(2026, 6, 11), status=OrderStatus.CANCELLED)
+    _order(db_session, contract_id="c1", scheduled=date(2026, 6, 12), deleted=True)
 
     rows = repo.list_recurring_billing_orders(month="2026-06", contract_id="c1")
     assert [o.id for o in rows] == [keep.id]

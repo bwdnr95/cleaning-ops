@@ -9,7 +9,9 @@ from app.services.recurring import RecurringService
 from app.services.recurring_billing import RecurringBillingService
 
 
-def _contract_with_order(db, *, status, payment_status, partner_payment_status, partner_id=DEV_PARTNER_ID):
+def _contract_with_order(
+    db, *, status, payment_status, partner_payment_status, partner_id=DEV_PARTNER_ID
+):
     rsvc = RecurringService(db)
     c = rsvc.create_contract(
         RecurringContractCreate(
@@ -51,7 +53,8 @@ def test_mark_month_paid_sets_unpaid_orders_to_paid(db_session):
         db_session, status=OrderStatus.COMPLETED, payment_status=PaymentStatus.UNPAID,
         partner_payment_status=PartnerPaymentStatus.PAID,
     )
-    res = RecurringBillingService(db_session).mark_month_paid(c.id, "2026-06", actor_user_id="admin")
+    svc = RecurringBillingService(db_session)
+    res = svc.mark_month_paid(c.id, "2026-06", actor_user_id="admin")
     assert order.id in res.updated_order_ids
     db_session.refresh(order)
     assert order.payment_status == PaymentStatus.PAID
