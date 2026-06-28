@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, Response
 from sqlalchemy.orm import Session
 
 from app.api.deps import CurrentUser, get_session, require_admin
+from app.api.routes.admin.partner_settlements import settlement_http_error
 from app.schemas.recurring_billing import (
     MarkPaidRequest,
     MarkPaidResult,
@@ -28,9 +29,12 @@ def mark_paid(
     db: Session = Depends(get_session),
     user: CurrentUser = Depends(require_admin),
 ):
-    return RecurringBillingService(db).mark_month_paid(
-        payload.contract_id, payload.month, actor_user_id=user.id
-    )
+    try:
+        return RecurringBillingService(db).mark_month_paid(
+            payload.contract_id, payload.month, actor_user_id=user.id
+        )
+    except ValueError as exc:
+        raise settlement_http_error(exc) from exc
 
 
 @router.post("/settle", response_model=SettleMonthResult)
@@ -39,9 +43,12 @@ def settle(
     db: Session = Depends(get_session),
     user: CurrentUser = Depends(require_admin),
 ):
-    return RecurringBillingService(db).settle_month(
-        payload.contract_id, payload.month, partner_id=payload.partner_id, actor_user_id=user.id
-    )
+    try:
+        return RecurringBillingService(db).settle_month(
+            payload.contract_id, payload.month, partner_id=payload.partner_id, actor_user_id=user.id
+        )
+    except ValueError as exc:
+        raise settlement_http_error(exc) from exc
 
 
 @router.get("/export")
