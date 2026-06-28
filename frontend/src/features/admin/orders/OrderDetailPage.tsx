@@ -362,6 +362,19 @@ export function OrderDetailPage({ orderId, onBack, onEdit, onDuplicate, onNav, o
         <span style={{ width: 1, height: 16, background: 'var(--border)' }}/>
         <h2 style={{ margin: 0, fontSize: 14, fontWeight: 600 }}>{formatService(order)}</h2>
         <StatusBadge status={orderWorkflowStatusValue(order.status, order.payment_status)}/>
+        {order.recurring_contract_id && (
+          <span
+            data-testid="order-recurring-badge"
+            title="정기청소 계약에서 생성된 주문"
+            style={{
+              display: 'inline-flex', alignItems: 'center', gap: 4,
+              fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 10,
+              background: 'var(--brand-bg)', color: 'var(--brand)',
+            }}
+          >
+            <Icon name="refresh" size={11}/> 정기
+          </span>
+        )}
         {hasUnsavedChanges && (
           <span data-testid="detail-unsaved-indicator" style={{
             display: 'inline-flex', alignItems: 'center', gap: 5,

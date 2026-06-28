@@ -75,6 +75,7 @@ export interface AdminOrder extends AdminOrderLineInput {
   consumer_price?: number | null;
   partner_price?: number | null;
   partner_settled_at?: string | null;
+  recurring_contract_id?: string | null;
 }
 
 export interface AdminOrderGroup {
