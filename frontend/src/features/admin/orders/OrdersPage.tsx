@@ -1044,7 +1044,23 @@ export function OrdersPage({ onOpenOrder, onCreateOrder, onEditOrder, initialTab
                   </td>
                   <td>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}>
-                      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'block' }}>{o.serviceName}</span>
+                      <span style={{ display: 'flex', alignItems: 'center', gap: 4, minWidth: 0 }}>
+                        {o.recurringContractId && (
+                          <span
+                            data-testid="order-row-recurring-badge"
+                            title="정기청소 계약에서 생성된 주문"
+                            style={{
+                              flexShrink: 0,
+                              fontSize: 9.5, fontWeight: 700, lineHeight: 1.5,
+                              padding: '0 5px', borderRadius: 8,
+                              background: 'var(--brand-bg)', color: 'var(--brand)',
+                            }}
+                          >
+                            정기
+                          </span>
+                        )}
+                        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{o.serviceName}</span>
+                      </span>
                       {o.sizeOrQuantity && (
                         <span style={{ color: 'var(--text-quaternary)', fontSize: 10.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                           {o.sizeOrQuantity}
@@ -1461,6 +1477,7 @@ function toOrderRow(order) {
     id: order.id,
     groupId: order.group_id || null,
     partnerId: order.partner_id || null,
+    recurringContractId: order.recurring_contract_id || null,
     status,
     rawStatus,
     receivedRaw: order.received_date,
