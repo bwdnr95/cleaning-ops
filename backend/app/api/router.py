@@ -9,6 +9,7 @@ from app.api.routes.admin import (
     partner_settlements,
     partners,
     photos,
+    recurring,
     reports,
     services,
 )
@@ -30,6 +31,7 @@ api_router.include_router(
 api_router.include_router(photos.router, prefix="/admin/photos", tags=["admin-photos"])
 api_router.include_router(messages.router, prefix="/admin/messages", tags=["admin-messages"])
 api_router.include_router(services.router, prefix="/admin/services", tags=["admin-services"])
+api_router.include_router(recurring.router, prefix="/admin/recurring", tags=["admin-recurring"])
 api_router.include_router(reports.router, prefix="/admin/reports", tags=["admin-reports"])
 api_router.include_router(jobs.router, prefix="/partner/jobs", tags=["partner-jobs"])
 api_router.include_router(customer_orders.router, prefix="/customer/orders", tags=["customer-orders"])

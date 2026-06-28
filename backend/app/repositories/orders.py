@@ -113,6 +113,19 @@ class OrderRepository(Repository[Order]):
         )
         return int(self.db.scalar(stmt) or 0)
 
+    def list_recurring_orders_in_month(self, contract_id: str, billing_month: str) -> list[Order]:
+        """정기계약에서 생성된 주문 중 방문월(scheduled_date 기준)이 billing_month인 것."""
+        stmt = select(Order).where(
+            Order.recurring_contract_id == contract_id,
+            Order.deleted_at.is_(None),
+        )
+        rows = list(self.db.scalars(stmt))
+        return [
+            o
+            for o in rows
+            if o.scheduled_date is not None and o.scheduled_date.strftime("%Y-%m") == billing_month
+        ]
+
 
 OVERDUE_UNPAID_PAYMENT_STATUSES: tuple[str, ...] = (
     PaymentStatus.UNPAID,

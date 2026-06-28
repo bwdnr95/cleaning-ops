@@ -6,7 +6,12 @@ from uuid import uuid4
 from sqlalchemy.orm import Session
 
 from app.core.time import business_today, utc_now
-from app.domain.constants import OrderStatus, RecurringContractStatus, RecurringOccurrenceStatus
+from app.domain.constants import (
+    OrderStatus,
+    RecurrenceMode,
+    RecurringContractStatus,
+    RecurringOccurrenceStatus,
+)
 from app.domain.recurrence import (
     HORIZON_DAYS,
     OVERDUE_GRACE_DAYS,
@@ -18,12 +23,17 @@ from app.models.order_group import OrderGroup
 from app.models.recurring_contract import RecurringContract
 from app.models.recurring_occurrence import RecurringOccurrence
 from app.repositories.order_groups import OrderGroupRepository
+from app.repositories.orders import OrderRepository
+from app.repositories.partners import PartnerRepository
 from app.repositories.recurring import RecurringContractRepository, RecurringOccurrenceRepository
 from app.schemas.order import OrderGroupCreate, OrderLineCreate
 from app.schemas.recurring import (
     ApproveItem,
     ApproveOccurrencesResult,
+    PendingOccurrenceRead,
     RecurringContractCreate,
+    RecurringContractRead,
+    RecurringContractSummaryRead,
     RecurringContractUpdate,
     SkipItem,
     SkipOccurrencesResult,
@@ -231,3 +241,90 @@ class RecurringService:
             skipped.append(occ.id)
         self.db.commit()
         return SkipOccurrencesResult(skipped_occurrence_ids=skipped)
+
+    # --- DTO 매핑 (라우트용) ---
+    def _next_due(self, contract: RecurringContract) -> date | None:
+        today = business_today()
+        for _seq, due in iter_due_dates(self._spec(contract), until=today + timedelta(days=365)):
+            if due >= today:
+                return due
+        return None
+
+    def _schedule_text(self, contract: RecurringContract) -> str:
+        if contract.recurrence_mode == RecurrenceMode.MONTHLY:
+            return f"매월 {contract.day_of_month}일"
+        weekday_ko = ["월", "화", "수", "목", "금", "토", "일"]
+        every = "매주" if contract.interval_weeks == 1 else f"{contract.interval_weeks}주마다"
+        wd = (
+            weekday_ko[contract.weekday]
+            if contract.weekday is not None
+            else weekday_ko[contract.start_date.weekday()]
+        )
+        return f"{every} {wd}요일"
+
+    def to_contract_read(self, contract: RecurringContract) -> RecurringContractRead:
+        group = self.groups.get(contract.order_group_id)
+        data = {
+            **{c.name: getattr(contract, c.name) for c in contract.__table__.columns},
+            "customer_name": group.customer_name if group else "",
+            "customer_phone": group.customer_phone if group else "",
+            "customer_address": group.customer_address if group else "",
+            "customer_address_detail": group.customer_address_detail if group else None,
+            "customer_visible_payment": group.customer_visible_payment if group else False,
+            "notes": group.notes if group else None,
+            "customer_token": group.customer_token if group else "",
+            "next_due_date": self._next_due(contract),
+        }
+        return RecurringContractRead.model_validate(data)
+
+    def list_contract_summaries(self) -> list[RecurringContractSummaryRead]:
+        pend_by_contract: dict[str, int] = {}
+        for occ in self.occurrences.list_pending():
+            pend_by_contract[occ.contract_id] = pend_by_contract.get(occ.contract_id, 0) + 1
+        order_repo = OrderRepository(self.db)
+        month = billing_month_of(business_today())
+        out: list[RecurringContractSummaryRead] = []
+        for contract in self.contracts.list_all():
+            group = self.groups.get(contract.order_group_id)
+            this_month = order_repo.list_recurring_orders_in_month(contract.id, month)
+            out.append(
+                RecurringContractSummaryRead(
+                    id=contract.id,
+                    label=contract.label,
+                    customer_name=group.customer_name if group else "",
+                    status=contract.status,
+                    schedule_text=self._schedule_text(contract),
+                    next_due_date=self._next_due(contract),
+                    pending_count=pend_by_contract.get(contract.id, 0),
+                    this_month_count=len(this_month),
+                    this_month_amount=float(sum((o.total_amount or 0) for o in this_month)),
+                )
+            )
+        return out
+
+    def list_pending_views(self) -> list[PendingOccurrenceRead]:
+        partner_repo = PartnerRepository(self.db)
+        today = business_today()
+        views: list[PendingOccurrenceRead] = []
+        for occ in self.occurrences.list_pending():
+            contract = self.contracts.get(occ.contract_id)
+            if contract is None:
+                continue
+            group = self.groups.get(contract.order_group_id)
+            partner = partner_repo.get(contract.default_partner_id) if contract.default_partner_id else None
+            views.append(
+                PendingOccurrenceRead(
+                    occurrence_id=occ.id,
+                    contract_id=contract.id,
+                    contract_label=contract.label,
+                    customer_name=group.customer_name if group else "",
+                    sequence_no=occ.sequence_no,
+                    due_date=occ.due_date,
+                    service_name=contract.service_name,
+                    total_amount=float(contract.total_amount) if contract.total_amount is not None else None,
+                    default_partner_id=contract.default_partner_id,
+                    default_partner_name=partner.name if partner else None,
+                    is_overdue=occ.due_date < today,
+                )
+            )
+        return views
