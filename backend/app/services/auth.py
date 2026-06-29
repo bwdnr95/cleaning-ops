@@ -182,8 +182,14 @@ class AuthService:
                 partner_id=user.partner_id,
             ),
             refresh_token=refresh_token,
-            user=to_auth_user_dto(user),
+            user=to_auth_user_dto(user, partner_name=self._partner_name_for(user)),
         )
+
+    def _partner_name_for(self, user: User) -> str | None:
+        if not user.partner_id:
+            return None
+        partner = PartnerRepository(self.db).get(user.partner_id)
+        return partner.name if partner else None
 
     def _decode_refresh_payload(self, token: str) -> dict:
         try:
@@ -221,7 +227,7 @@ class AuthService:
         return bool(partner and partner.is_active)
 
 
-def to_auth_user_dto(user: User) -> AuthUserRead:
+def to_auth_user_dto(user: User, *, partner_name: str | None = None) -> AuthUserRead:
     role = user.role if isinstance(user.role, UserRole) else UserRole(str(user.role))
     return AuthUserRead(
         id=user.id,
@@ -230,6 +236,7 @@ def to_auth_user_dto(user: User) -> AuthUserRead:
         email=user.email,
         phone=user.phone,
         partner_id=user.partner_id,
+        partner_name=partner_name,
     )
 
 

@@ -72,6 +72,16 @@ def _partner_b_headers() -> dict:
     return {"Authorization": f"Bearer {token}"}
 
 
+def test_partner_login_includes_partner_company_name() -> None:
+    """협력사 로그인 응답에 회사명(partner_name)이 포함된다(앱바 노출용)."""
+    client = make_test_client()
+    session = login(client, "/api/auth/partner/login", DEV_PARTNER_PHONE, DEV_PARTNER_PASSWORD)
+    user = session["user"]
+    assert user["role"] == "partner"
+    assert isinstance(user.get("partner_name"), str)
+    assert user["partner_name"].strip()
+
+
 def test_partner_can_add_memo_and_read_it_back() -> None:
     client = make_test_client()
     headers = _partner_headers(client)

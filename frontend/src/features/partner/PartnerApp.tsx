@@ -12,11 +12,14 @@ export function PartnerApp() {
   // 작업 상세는 자체 헤더/하단 CTA를 가진 전체 화면이라 앱바·네비를 숨긴다.
   // 내 정보 탭에서는 detailOpen이 의미 없으므로 항상 셸(앱바+네비)을 보여준다.
   const showShell = tab !== 'jobs' || !detailOpen;
-  const name = (auth.user?.name || '협력사').trim();
+  const company = (auth.user?.partner_name || '').trim();
+  const manager = (auth.user?.name || '협력사').trim();
+  // 앱바엔 회사명(있으면)을 우선 노출, 없으면 담당자명으로 폴백.
+  const title = company || manager;
 
   return (
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column', background: '#f4f6f8', overflow: 'hidden' }}>
-      {showShell && <PartnerTopBar name={name} subtitle={tab === 'account' ? '내 정보' : '오늘의 현장'} />}
+      {showShell && <PartnerTopBar title={title} subtitle={tab === 'account' ? '내 정보' : '오늘의 현장'} />}
 
       <div style={{ flex: 1, minHeight: 0 }}>
         {tab === 'jobs' ? (
@@ -48,8 +51,8 @@ export function PartnerApp() {
   );
 }
 
-function PartnerTopBar({ name, subtitle }) {
-  const initial = (name || '협').charAt(0) || '협';
+function PartnerTopBar({ title, subtitle }) {
+  const initial = (title || '협').charAt(0) || '협';
   return (
     <header
       data-testid="partner-topbar"
@@ -69,7 +72,7 @@ function PartnerTopBar({ name, subtitle }) {
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ fontSize: 10, fontWeight: 800, letterSpacing: '0.1em', color: 'var(--brand)' }}>CLEAN OPS · 협력사</div>
         <div style={{ fontSize: 15.5, fontWeight: 800, color: 'var(--text)', letterSpacing: '-0.01em', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-          {name}님 <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--text-tertiary)' }}>· {subtitle}</span>
+          {title} <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--text-tertiary)' }}>· {subtitle}</span>
         </div>
       </div>
       <span style={{ width: 36, height: 36, borderRadius: '50%', background: 'var(--brand-bg)', color: 'var(--brand)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 15, fontWeight: 800, flexShrink: 0 }}>

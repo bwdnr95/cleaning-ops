@@ -14,6 +14,8 @@ class AuthUserRead(ApiModel):
     email: str | None = None
     phone: str | None = None
     partner_id: str | None = None
+    # 협력사 회사명(역할이 partner일 때만). 관리자/세션 식별엔 영향 없음.
+    partner_name: str | None = None
 
 
 class LoginResponse(ApiModel):

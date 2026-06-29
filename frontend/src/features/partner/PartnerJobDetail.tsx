@@ -11,6 +11,7 @@ import {
 import { uploadPartnerJobPhoto } from '../../api/photos';
 import { ApiError, toApiAssetUrl } from '../../api/client';
 import { useApiResource } from '../../api/useApiResource';
+import { useAuth } from '../../store/authStore';
 import { formatQuantity } from '../../domain/format';
 import { digitsOnly, formatPhone } from '../../domain/phone';
 import { parseDateValue } from '../../domain/time';
@@ -407,18 +408,27 @@ function formatJobAddress(job) {
 }
 
 function PartnerJobList({ jobs, onSelect, onReload = undefined }) {
+  const [filter, setFilter] = React.useState(null);
+  const toggleFilter = (key) => setFilter((current) => (current === key ? null : key));
+  const visibleJobs = filter ? jobs.filter((job) => jobBucket(job.status) === filter) : jobs;
+
   return (
     <div data-testid="partner-jobs-page" style={{ height: '100%', background: '#f4f6f8', overflow: 'auto', padding: 14 }}>
-      <PartnerHomeHero jobs={jobs} />
+      <PartnerHomeHero jobs={jobs} activeFilter={filter} onToggleFilter={toggleFilter} />
 
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
         <h2 style={{ margin: 0, fontSize: 16.5, fontWeight: 800 }}>
-          내 작업
+          {filter ? `${BUCKET_LABELS[filter]} 작업` : '내 작업'}
           {jobs.length > 0 && (
-            <span style={{ marginLeft: 6, fontSize: 13, fontWeight: 600, color: 'var(--text-tertiary)' }}>{jobs.length}건</span>
+            <span style={{ marginLeft: 6, fontSize: 13, fontWeight: 600, color: 'var(--text-tertiary)' }}>{visibleJobs.length}건</span>
           )}
         </h2>
         <div style={{ flex: 1 }} />
+        {filter && (
+          <button type="button" onClick={() => setFilter(null)} style={{ height: 32, padding: '0 11px', borderRadius: 8, border: '1px solid var(--border)', background: '#fff', color: 'var(--text-secondary)', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>
+            전체 보기
+          </button>
+        )}
         {onReload && (
           <button
             type="button"
@@ -451,71 +461,145 @@ function PartnerJobList({ jobs, onSelect, onReload = undefined }) {
             </button>
           )}
         </div>
-      ) : (
-      <div style={{ display: 'grid', gap: 10 }}>
-        {jobs.map((job) => (
-          <button key={job.id} data-testid={`partner-job-row-${job.id}`} onClick={() => onSelect(job.id)} style={{ textAlign: 'left', background: '#fff', border: '1px solid var(--border)', borderRadius: 10, padding: 14, cursor: 'pointer' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-              <PartnerStatusBadge status={job.status}/>
-              {job.is_recurring && <span data-testid="partner-recurring-badge"><Badge tone="brand">정기</Badge></span>}
-              <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--text-tertiary)' }}>{formatKoreanDate(job.scheduled_date)}</span>
-            </div>
-            <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 4 }}>{job.service_name}</div>
-            <div style={{ fontSize: 12.5, color: 'var(--text-secondary)', lineHeight: 1.45 }}>{formatJobAddress(job)}</div>
-            <div style={{ marginTop: 10, display: 'flex', alignItems: 'center', gap: 6, color: 'var(--brand)', fontSize: 12.5, fontWeight: 700 }}>
-              상세 보기 <Icon name="chevronRight" size={14}/>
-            </div>
+      ) : visibleJobs.length === 0 ? (
+        <div style={{ background: '#fff', border: '1px solid var(--border)', borderRadius: 12, padding: '26px 20px', textAlign: 'center', color: 'var(--text-tertiary)' }}>
+          <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 12 }}>{BUCKET_LABELS[filter]} 상태인 작업이 없어요</div>
+          <button type="button" onClick={() => setFilter(null)} style={{ height: 36, padding: '0 16px', borderRadius: 9, border: '1px solid var(--brand)', background: '#fff', color: 'var(--brand)', fontSize: 12.5, fontWeight: 700, cursor: 'pointer' }}>
+            전체 보기
           </button>
-        ))}
-      </div>
+        </div>
+      ) : (
+        <div style={{ display: 'grid', gap: 10 }}>
+          {visibleJobs.map((job) => (
+            <button key={job.id} data-testid={`partner-job-row-${job.id}`} onClick={() => onSelect(job.id)} style={{ textAlign: 'left', background: '#fff', border: '1px solid var(--border)', borderRadius: 10, padding: 14, cursor: 'pointer' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                <PartnerStatusBadge status={job.status}/>
+                {job.is_recurring && <span data-testid="partner-recurring-badge"><Badge tone="brand">정기</Badge></span>}
+                <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--text-tertiary)' }}>{formatKoreanDate(job.scheduled_date)}</span>
+              </div>
+              <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 4 }}>{job.service_name}</div>
+              <div style={{ fontSize: 12.5, color: 'var(--text-secondary)', lineHeight: 1.45 }}>{formatJobAddress(job)}</div>
+              <div style={{ marginTop: 10, display: 'flex', alignItems: 'center', gap: 6, color: 'var(--brand)', fontSize: 12.5, fontWeight: 700 }}>
+                상세 보기 <Icon name="chevronRight" size={14}/>
+              </div>
+            </button>
+          ))}
+        </div>
       )}
     </div>
   );
 }
 
-function PartnerHomeHero({ jobs }) {
+function PartnerHomeHero({ jobs, activeFilter = null, onToggleFilter = undefined }) {
+  const auth = useAuth();
   const summary = summarizeJobs(jobs);
+  const manager = (auth.user?.name || '').trim();
+  const handleToggle = (key) => onToggleFilter && onToggleFilter(key);
   return (
-    <div data-testid="partner-home-hero" style={{ background: 'var(--brand)', borderRadius: 14, padding: '15px 16px 14px', marginBottom: 14, color: '#fff', boxShadow: '0 6px 16px rgba(15,23,42,0.12)' }}>
-      <div style={{ fontSize: 12, opacity: 0.85, display: 'flex', alignItems: 'center', gap: 5 }}>
-        <Icon name="calendar" size={13} color="#fff" /> {todayLabel()}
+    <div
+      data-testid="partner-home-hero"
+      style={{
+        background: 'linear-gradient(135deg, rgba(255,255,255,0.16), rgba(0,0,0,0.10)), var(--brand)',
+        borderRadius: 16,
+        padding: '16px 16px 14px',
+        marginBottom: 14,
+        color: '#fff',
+        boxShadow: '0 8px 20px rgba(15,23,42,0.16)',
+      }}
+    >
+      <div style={{ fontSize: 13.5, fontWeight: 700 }}>
+        {greetingPrefix()}{manager ? `, ${manager}님` : ''} 👋
       </div>
-      <div style={{ fontSize: 17, fontWeight: 800, marginTop: 4, letterSpacing: '-0.01em' }}>
-        {jobs.length > 0 ? `오늘 처리할 작업 ${jobs.length}건` : '오늘은 배정된 작업이 없어요'}
+      <div style={{ fontSize: 11.5, opacity: 0.85, display: 'flex', alignItems: 'center', gap: 5, marginTop: 5 }}>
+        <Icon name="calendar" size={12} color="#fff" /> {todayLabel()}
+      </div>
+      <div style={{ fontSize: 16.5, fontWeight: 800, marginTop: 6, letterSpacing: '-0.01em' }}>
+        {heroHeadline(jobs, summary)}
       </div>
       <div style={{ display: 'flex', gap: 8, marginTop: 13 }}>
-        <HeroStat label="예정" value={summary.upcoming} />
-        <HeroStat label="진행" value={summary.inProgress} />
-        <HeroStat label="완료" value={summary.done} />
+        <HeroStat label="예정" value={summary.upcoming} active={activeFilter === 'upcoming'} onClick={() => handleToggle('upcoming')} />
+        <HeroStat label="진행" value={summary.inProgress} active={activeFilter === 'inProgress'} onClick={() => handleToggle('inProgress')} />
+        <HeroStat label="완료" value={summary.done} active={activeFilter === 'done'} onClick={() => handleToggle('done')} />
       </div>
     </div>
   );
 }
 
-function HeroStat({ label, value }) {
+function HeroStat({ label, value, active, onClick }) {
   return (
-    <div style={{ flex: 1, background: 'rgba(255,255,255,0.16)', borderRadius: 10, padding: '9px 6px', textAlign: 'center' }}>
+    <button
+      type="button"
+      onClick={onClick}
+      style={{
+        flex: 1,
+        border: active ? '1.5px solid #fff' : '1.5px solid transparent',
+        background: active ? 'rgba(255,255,255,0.30)' : 'rgba(255,255,255,0.16)',
+        color: '#fff',
+        borderRadius: 11,
+        padding: '9px 6px',
+        textAlign: 'center',
+        cursor: 'pointer',
+      }}
+    >
       <div style={{ fontSize: 19, fontWeight: 800, lineHeight: 1 }}>{value}</div>
-      <div style={{ fontSize: 11, opacity: 0.92, marginTop: 4 }}>{label}</div>
-    </div>
+      <div style={{ fontSize: 11, opacity: 0.95, marginTop: 4 }}>{label}</div>
+    </button>
   );
+}
+
+const BUCKET_LABELS = { upcoming: '예정', inProgress: '진행 중', done: '완료' };
+const DONE_BUCKET_STATUSES = ['사진검수대기', '고객전달필요', '고객전달완료', '고객확인필요', '서비스완료'];
+
+function jobBucket(status) {
+  if (status === '작업진행') {
+    return 'inProgress';
+  }
+  if (DONE_BUCKET_STATUSES.includes(status)) {
+    return 'done';
+  }
+  return 'upcoming';
 }
 
 function summarizeJobs(jobs) {
-  const doneStatuses = ['사진검수대기', '고객전달필요', '고객전달완료', '고객확인필요', '서비스완료'];
-  let upcoming = 0;
-  let inProgress = 0;
-  let done = 0;
+  const summary = { upcoming: 0, inProgress: 0, done: 0 };
   for (const job of jobs) {
-    if (job.status === '작업진행') {
-      inProgress += 1;
-    } else if (doneStatuses.includes(job.status)) {
-      done += 1;
-    } else {
-      upcoming += 1;
-    }
+    summary[jobBucket(job.status)] += 1;
   }
-  return { upcoming, inProgress, done };
+  return summary;
+}
+
+function heroHeadline(jobs, summary) {
+  if (jobs.length === 0) {
+    return '오늘은 배정된 작업이 없어요';
+  }
+  if (summary.inProgress > 0) {
+    return `진행 중인 작업 ${summary.inProgress}건`;
+  }
+  const todayCount = jobs.filter((job) => isToday(job.scheduled_date)).length;
+  if (todayCount > 0) {
+    return `오늘 방문 예정 ${todayCount}건`;
+  }
+  return `예정된 작업 ${summary.upcoming}건`;
+}
+
+function isToday(value) {
+  const date = parseDateValue(value);
+  if (!date) {
+    return false;
+  }
+  const now = new Date();
+  return date.getFullYear() === now.getFullYear() && date.getMonth() === now.getMonth() && date.getDate() === now.getDate();
+}
+
+function greetingPrefix() {
+  const hour = new Date().getHours();
+  if (hour < 12) {
+    return '좋은 아침이에요';
+  }
+  if (hour < 18) {
+    return '안녕하세요';
+  }
+  return '오늘도 수고하셨어요';
 }
 
 function todayLabel() {
