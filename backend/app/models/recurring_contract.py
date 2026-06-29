@@ -19,6 +19,7 @@ class RecurringContract(TimestampMixin, Base):
     day_of_month: Mapped[int | None] = mapped_column(Integer)
     interval_weeks: Mapped[int | None] = mapped_column(Integer)
     weekday: Mapped[int | None] = mapped_column(Integer)
+    weekdays: Mapped[str | None] = mapped_column(String(20))  # CSV "0,2,4" (다중요일). 레거시 weekday와 병행.
     start_date: Mapped[date] = mapped_column(Date, index=True)
     # 라이프사이클
     status: Mapped[str] = mapped_column(String(20), default=RecurringContractStatus.ACTIVE, index=True)
