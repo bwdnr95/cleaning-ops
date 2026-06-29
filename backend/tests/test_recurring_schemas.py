@@ -54,3 +54,22 @@ def test_contract_create_weekly_with_interval_weeks_ok():
 def test_contract_create_rejects_invalid_vat_type():
     with pytest.raises(ValidationError):
         RecurringContractCreate(**_create_kwargs(vat_type="bogus"))
+
+
+def test_contract_create_rejects_out_of_range_weekday():
+    # weekdays 요소는 0~6만 허용(범위 밖이면 _schedule_text IndexError로 목록 API 500 유발).
+    with pytest.raises(ValidationError):
+        RecurringContractCreate(
+            **_create_kwargs(
+                recurrence_mode=RecurrenceMode.WEEKLY, day_of_month=None, interval_weeks=1, weekdays=[9]
+            )
+        )
+
+
+def test_contract_create_accepts_valid_weekdays():
+    payload = RecurringContractCreate(
+        **_create_kwargs(
+            recurrence_mode=RecurrenceMode.WEEKLY, day_of_month=None, interval_weeks=1, weekdays=[0, 2, 4]
+        )
+    )
+    assert payload.weekdays == [0, 2, 4]
