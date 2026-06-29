@@ -15,6 +15,7 @@ export interface RecurringContractInput {
   day_of_month?: number | null;
   interval_weeks?: number | null;
   weekday?: number | null;
+  weekdays?: number[] | null; // 주간 다중요일(월=0 ... 일=6). 레거시 단일 weekday와 병행.
   start_date: string;
   end_date?: string | null;
   max_occurrences?: number | null;

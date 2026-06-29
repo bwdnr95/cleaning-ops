@@ -40,16 +40,27 @@ export function formatAmount(value: number | null | undefined): string {
 
 // 계약 상세는 schedule_text를 내려받지 않으므로(요약 DTO 전용) 원시 스케줄 필드로 표기를 만든다.
 export function formatScheduleText(
-  contract: Pick<RecurringContract, 'recurrence_mode' | 'day_of_month' | 'interval_weeks' | 'weekday'>,
+  contract: Pick<
+    RecurringContract,
+    'recurrence_mode' | 'day_of_month' | 'interval_weeks' | 'weekday' | 'weekdays'
+  >,
 ): string {
   if (contract.recurrence_mode === 'monthly') {
     return contract.day_of_month != null ? `매월 ${contract.day_of_month}일` : '매월';
   }
   const interval = contract.interval_weeks ?? 1;
   const base = interval === 1 ? '매주' : interval === 2 ? '격주' : `${interval}주마다`;
-  const weekday =
-    contract.weekday != null && WEEKDAY_LABEL[contract.weekday]
-      ? ` (${WEEKDAY_LABEL[contract.weekday]})`
-      : '';
-  return `${base}${weekday}`;
+  // 다중요일(weekdays)을 우선 사용하고, 없으면 레거시 단일 weekday로 폴백한다.
+  const source =
+    contract.weekdays && contract.weekdays.length > 0
+      ? contract.weekdays
+      : contract.weekday != null
+        ? [contract.weekday]
+        : [];
+  const labels = [...source]
+    .sort((a, b) => a - b)
+    .map((w) => WEEKDAY_LABEL[w])
+    .filter(Boolean);
+  const suffix = labels.length > 0 ? ` (${labels.join('·')})` : '';
+  return `${base}${suffix}`;
 }

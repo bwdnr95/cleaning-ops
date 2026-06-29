@@ -6,6 +6,7 @@ import {
   updateRecurringContract,
   type RecurringContractInput,
 } from '../../../api/recurring';
+import { WEEKDAY_LABEL } from '../../../domain/recurrence';
 
 type PartnerOption = { id: string; name: string };
 
@@ -50,7 +51,18 @@ export function RecurringContractForm({
   onDone: () => void;
   onCancel: () => void;
 }) {
-  const [form, setForm] = React.useState<RecurringContractInput>(initial ?? EMPTY);
+  const [form, setForm] = React.useState<RecurringContractInput>(() => {
+    if (!initial) return EMPTY;
+    // 레거시 단일 weekday만 가진 주간 계약을 편집할 때 토글이 비어 보이지 않도록 weekdays로 시드한다.
+    if (
+      initial.recurrence_mode === 'weekly' &&
+      (initial.weekdays == null || initial.weekdays.length === 0) &&
+      initial.weekday != null
+    ) {
+      return { ...initial, weekdays: [initial.weekday] };
+    }
+    return initial;
+  });
   const [partners, setPartners] = React.useState<PartnerOption[]>([]);
   const [error, setError] = React.useState<string | null>(null);
   const [saving, setSaving] = React.useState(false);
@@ -64,16 +76,18 @@ export function RecurringContractForm({
   const set = <K extends keyof RecurringContractInput>(key: K, value: RecurringContractInput[K]) =>
     setForm((prev) => ({ ...prev, [key]: value }));
 
-  // 주간 주기에서는 start_date의 요일을 weekday(월=0 ... 일=6)로 자동 동기화한다(설계 §10.1).
-  React.useEffect(() => {
-    if (form.recurrence_mode === 'weekly' && form.start_date) {
-      const parsed = new Date(form.start_date);
-      if (!Number.isNaN(parsed.getTime())) {
-        const wd = (parsed.getDay() + 6) % 7; // JS 일=0 → 월=0 규약 변환
-        if (form.weekday !== wd) set('weekday', wd);
-      }
-    }
-  }, [form.recurrence_mode, form.start_date]); // eslint-disable-line react-hooks/exhaustive-deps
+  // 주간 다중요일 토글(월=0 ... 일=6). 선택/해제 후 항상 오름차순 정렬해 둔다.
+  const toggleWeekday = (idx: number) => {
+    const current = form.weekdays ?? [];
+    const next = current.includes(idx)
+      ? current.filter((w) => w !== idx)
+      : [...current, idx].sort((a, b) => a - b);
+    set('weekdays', next);
+  };
+
+  // weekly인데 요일을 하나도 고르지 않으면 저장 불가(백엔드는 폴백하지만 의도 명확화를 위해 막는다).
+  const weeklyNeedsWeekday =
+    form.recurrence_mode === 'weekly' && (form.weekdays ?? []).length === 0;
 
   const submit = async () => {
     setSaving(true);
@@ -83,6 +97,7 @@ export function RecurringContractForm({
         ...form,
         day_of_month: form.recurrence_mode === 'monthly' ? form.day_of_month ?? 1 : null,
         interval_weeks: form.recurrence_mode === 'weekly' ? form.interval_weeks ?? 1 : null,
+        weekdays: form.recurrence_mode === 'weekly' ? form.weekdays ?? [] : null,
       };
       if (initial) {
         await updateRecurringContract(initial.id, payload);
@@ -203,19 +218,65 @@ export function RecurringContractForm({
                 />
               </label>
             ) : (
-              <label style={labelStyle}>
-                간격(주)
-                <select
-                  style={inputStyle}
-                  value={form.interval_weeks ?? 1}
-                  onChange={(e) => set('interval_weeks', Number(e.target.value))}
-                  data-testid="rc-interval-weeks"
-                >
-                  <option value={1}>매주</option>
-                  <option value={2}>격주</option>
-                  <option value={4}>4주마다</option>
-                </select>
-              </label>
+              <>
+                <label style={labelStyle}>
+                  간격(주)
+                  <select
+                    style={inputStyle}
+                    value={form.interval_weeks ?? 1}
+                    onChange={(e) => set('interval_weeks', Number(e.target.value))}
+                    data-testid="rc-interval-weeks"
+                  >
+                    <option value={1}>매주</option>
+                    <option value={2}>격주</option>
+                    <option value={4}>4주마다</option>
+                  </select>
+                </label>
+                <label style={labelStyle}>
+                  요일 선택 (다중 가능)
+                  <div
+                    style={{
+                      display: 'grid',
+                      gridTemplateColumns: 'repeat(7, 1fr)',
+                      gap: 6,
+                      marginTop: 2,
+                    }}
+                  >
+                    {WEEKDAY_LABEL.map((lbl, idx) => {
+                      const on = (form.weekdays ?? []).includes(idx);
+                      return (
+                        <button
+                          type="button"
+                          key={idx}
+                          data-testid={`rc-weekday-${idx}`}
+                          aria-pressed={on}
+                          onClick={() => toggleWeekday(idx)}
+                          style={{
+                            height: 44, // 모바일 터치 타겟 최소 44px
+                            borderRadius: 6,
+                            fontSize: 15,
+                            cursor: 'pointer',
+                            border: `1px solid ${on ? 'var(--brand)' : 'var(--border)'}`,
+                            background: on ? 'var(--brand-bg)' : 'var(--surface)',
+                            color: on ? 'var(--brand)' : 'var(--text-secondary)',
+                            fontWeight: on ? 700 : 500,
+                          }}
+                        >
+                          {lbl}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  {weeklyNeedsWeekday && (
+                    <span
+                      data-testid="rc-weekday-warning"
+                      style={{ fontSize: 11.5, color: 'var(--danger-fg, #c0392b)', fontWeight: 500 }}
+                    >
+                      주간 계약은 요일을 1개 이상 선택하세요.
+                    </span>
+                  )}
+                </label>
+              </>
             )}
             <label style={labelStyle}>
               시작일
@@ -322,7 +383,7 @@ export function RecurringContractForm({
         <div style={{ display: 'flex', gap: 8, marginTop: 16 }}>
           <button
             className="btn btn--primary"
-            disabled={saving}
+            disabled={saving || weeklyNeedsWeekday}
             onClick={() => void submit()}
             data-testid="rc-submit"
           >
