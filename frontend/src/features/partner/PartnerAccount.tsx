@@ -42,11 +42,6 @@ export function PartnerAccount() {
 
   return (
     <div data-testid="partner-account-page" style={{ height: '100%', background: '#f4f6f8', overflow: 'auto', padding: 14 }}>
-      <div style={{ marginBottom: 14 }}>
-        <div className="app-eyebrow">협력사 계정</div>
-        <h2 style={{ margin: '2px 0 0', fontSize: 20 }}>내 정보</h2>
-      </div>
-
       <Panel>
         <SectionLabel>협력사 정보</SectionLabel>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>

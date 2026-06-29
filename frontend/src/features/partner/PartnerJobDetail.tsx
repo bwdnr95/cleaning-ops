@@ -409,25 +409,25 @@ function formatJobAddress(job) {
 function PartnerJobList({ jobs, onSelect, onReload = undefined }) {
   return (
     <div data-testid="partner-jobs-page" style={{ height: '100%', background: '#f4f6f8', overflow: 'auto', padding: 14 }}>
-      <div style={{ display: 'flex', alignItems: 'flex-end', gap: 8, marginBottom: 14 }}>
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div className="app-eyebrow">협력사 현장</div>
-          <h2 style={{ margin: '2px 0 0', fontSize: 20 }}>
-            내 작업
-            {jobs.length > 0 && (
-              <span style={{ marginLeft: 6, fontSize: 14, fontWeight: 600, color: 'var(--text-tertiary)' }}>{jobs.length}건</span>
-            )}
-          </h2>
-        </div>
+      <PartnerHomeHero jobs={jobs} />
+
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+        <h2 style={{ margin: 0, fontSize: 16.5, fontWeight: 800 }}>
+          내 작업
+          {jobs.length > 0 && (
+            <span style={{ marginLeft: 6, fontSize: 13, fontWeight: 600, color: 'var(--text-tertiary)' }}>{jobs.length}건</span>
+          )}
+        </h2>
+        <div style={{ flex: 1 }} />
         {onReload && (
           <button
             type="button"
             data-testid="partner-jobs-refresh"
             onClick={onReload}
             aria-label="새로고침"
-            style={{ width: 38, height: 38, flexShrink: 0, borderRadius: 9, border: '1px solid var(--border)', background: '#fff', color: 'var(--text-secondary)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}
+            style={{ width: 34, height: 34, flexShrink: 0, borderRadius: 9, border: '1px solid var(--border)', background: '#fff', color: 'var(--text-secondary)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}
           >
-            <Icon name="refresh" size={16} />
+            <Icon name="refresh" size={15} />
           </button>
         )}
       </div>
@@ -471,6 +471,57 @@ function PartnerJobList({ jobs, onSelect, onReload = undefined }) {
       )}
     </div>
   );
+}
+
+function PartnerHomeHero({ jobs }) {
+  const summary = summarizeJobs(jobs);
+  return (
+    <div data-testid="partner-home-hero" style={{ background: 'var(--brand)', borderRadius: 14, padding: '15px 16px 14px', marginBottom: 14, color: '#fff', boxShadow: '0 6px 16px rgba(15,23,42,0.12)' }}>
+      <div style={{ fontSize: 12, opacity: 0.85, display: 'flex', alignItems: 'center', gap: 5 }}>
+        <Icon name="calendar" size={13} color="#fff" /> {todayLabel()}
+      </div>
+      <div style={{ fontSize: 17, fontWeight: 800, marginTop: 4, letterSpacing: '-0.01em' }}>
+        {jobs.length > 0 ? `오늘 처리할 작업 ${jobs.length}건` : '오늘은 배정된 작업이 없어요'}
+      </div>
+      <div style={{ display: 'flex', gap: 8, marginTop: 13 }}>
+        <HeroStat label="예정" value={summary.upcoming} />
+        <HeroStat label="진행" value={summary.inProgress} />
+        <HeroStat label="완료" value={summary.done} />
+      </div>
+    </div>
+  );
+}
+
+function HeroStat({ label, value }) {
+  return (
+    <div style={{ flex: 1, background: 'rgba(255,255,255,0.16)', borderRadius: 10, padding: '9px 6px', textAlign: 'center' }}>
+      <div style={{ fontSize: 19, fontWeight: 800, lineHeight: 1 }}>{value}</div>
+      <div style={{ fontSize: 11, opacity: 0.92, marginTop: 4 }}>{label}</div>
+    </div>
+  );
+}
+
+function summarizeJobs(jobs) {
+  const doneStatuses = ['사진검수대기', '고객전달필요', '고객전달완료', '고객확인필요', '서비스완료'];
+  let upcoming = 0;
+  let inProgress = 0;
+  let done = 0;
+  for (const job of jobs) {
+    if (job.status === '작업진행') {
+      inProgress += 1;
+    } else if (doneStatuses.includes(job.status)) {
+      done += 1;
+    } else {
+      upcoming += 1;
+    }
+  }
+  return { upcoming, inProgress, done };
+}
+
+function todayLabel() {
+  const now = new Date();
+  const weekday = ['일', '월', '화', '수', '목', '금', '토'][now.getDay()];
+  return `${now.getMonth() + 1}월 ${now.getDate()}일 ${weekday}요일`;
 }
 
 function PhotoPanel({ title, tone, photos, onAdd, disabled }) {
