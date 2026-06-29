@@ -21,6 +21,7 @@ class RecurringContractBase(ApiModel):
     day_of_month: int | None = Field(default=None, ge=1, le=31)
     interval_weeks: int | None = Field(default=None, ge=1, le=12)
     weekday: int | None = Field(default=None, ge=0, le=6)
+    weekdays: list[int] | None = None
     start_date: date
     end_date: date | None = None
     max_occurrences: int | None = Field(default=None, ge=1)
@@ -61,6 +62,7 @@ class RecurringContractUpdate(ApiModel):
     day_of_month: int | None = Field(default=None, ge=1, le=31)
     interval_weeks: int | None = Field(default=None, ge=1, le=12)
     weekday: int | None = Field(default=None, ge=0, le=6)
+    weekdays: list[int] | None = None
     start_date: date | None = None
     end_date: date | None = None
     max_occurrences: int | None = Field(default=None, ge=1)

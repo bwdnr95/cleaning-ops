@@ -19,7 +19,9 @@ from app.domain.recurrence import (
     OVERDUE_GRACE_DAYS,
     ScheduleSpec,
     billing_month_of,
+    format_weekdays_csv,
     iter_due_dates,
+    parse_weekdays_csv,
     validate_recurrence_fields,
 )
 from app.models.recurring_contract import RecurringContract
@@ -82,6 +84,9 @@ class RecurringService:
             actor_user_id=actor_user_id,
         )
         data = payload.model_dump()
+        # 다중요일은 list[int] → CSV "0,2,4"로 직렬화해 컬럼에 저장한다.
+        if data.get("weekdays") is not None:
+            data["weekdays"] = format_weekdays_csv(data["weekdays"])
         for field in _GROUP_FIELDS:
             data.pop(field, None)
         contract = RecurringContract(
@@ -120,6 +125,9 @@ class RecurringService:
                     if field == "customer_phone":
                         value = normalize_phone(value)
                     setattr(group, field, value)
+        # 다중요일은 list[int] → CSV로 직렬화(None이면 미선택으로 초기화).
+        if "weekdays" in changes:
+            changes["weekdays"] = format_weekdays_csv(changes["weekdays"])
         for key, value in changes.items():
             setattr(contract, key, value)
         # 머지 결과(모드+짝 필드)를 commit 전에 재검증한다. weekly↔monthly 모드만
@@ -159,6 +167,7 @@ class RecurringService:
             day_of_month=contract.day_of_month,
             interval_weeks=contract.interval_weeks,
             weekday=contract.weekday,
+            weekdays=parse_weekdays_csv(contract.weekdays) or None,
             end_date=contract.end_date,
             max_occurrences=contract.max_occurrences,
         )
@@ -295,13 +304,13 @@ class RecurringService:
         if contract.recurrence_mode == RecurrenceMode.MONTHLY:
             return f"매월 {contract.day_of_month}일"
         weekday_ko = ["월", "화", "수", "목", "금", "토", "일"]
-        every = "매주" if contract.interval_weeks == 1 else f"{contract.interval_weeks}주마다"
-        wd = (
-            weekday_ko[contract.weekday]
-            if contract.weekday is not None
-            else weekday_ko[contract.start_date.weekday()]
-        )
-        return f"{every} {wd}요일"
+        every = {1: "매주", 2: "격주"}.get(contract.interval_weeks, f"{contract.interval_weeks}주마다")
+        # 폴백 체인(도메인과 동일): weekdays → weekday → start_date 요일
+        wds = parse_weekdays_csv(contract.weekdays)
+        if not wds:
+            wds = (contract.weekday,) if contract.weekday is not None else (contract.start_date.weekday(),)
+        days = "·".join(weekday_ko[w] for w in sorted(set(wds)))
+        return f"{every} {days}"
 
     def to_contract_read(self, contract: RecurringContract) -> RecurringContractRead:
         group = self.groups.get(contract.order_group_id)
@@ -311,6 +320,8 @@ class RecurringService:
         )
         data = {
             **{c.name: getattr(contract, c.name) for c in contract.__table__.columns},
+            # 컬럼은 CSV이지만 Read DTO는 list[int]을 기대하므로 덮어쓴다.
+            "weekdays": list(parse_weekdays_csv(contract.weekdays)) or None,
             "customer_name": group.customer_name if group else "",
             "customer_phone": group.customer_phone if group else "",
             "customer_address": group.customer_address if group else "",

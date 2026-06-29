@@ -256,3 +256,36 @@ def test_update_contract_normalizes_customer_phone(db_session):
     )
     group = OrderGroupRepository(db_session).get(c.order_group_id)
     assert group.customer_phone == "01011113333"
+
+
+def test_create_weekly_contract_with_weekdays_generates_multiple_per_week(db_session):
+    svc = RecurringService(db_session)
+    c = svc.create_contract(
+        RecurringContractCreate(
+            label="다중요일", customer_name="강남", customer_phone="01011112222",
+            customer_address="A", recurrence_mode=RecurrenceMode.WEEKLY, interval_weeks=1,
+            weekdays=[0, 2, 4], start_date=date(2026, 6, 1), service_name="청소",
+            total_amount=100000,
+        ),
+        actor_user_id=None,
+    )
+    assert svc.get_contract(c.id).weekdays == "0,2,4"  # CSV로 저장
+    read = svc.to_contract_read(c)
+    assert read.weekdays == [0, 2, 4]                  # list로 복원
+    # today=5/24 → horizon(today+14)=6/7 → 첫 주 월·수·금 3건만 도래(6/8 이후는 horizon 밖)
+    svc.sync_due_occurrences(today=date(2026, 5, 24))
+    dues = sorted(o.due_date for o in svc.occurrences.list_by_contract(c.id))
+    assert dues == [date(2026, 6, 1), date(2026, 6, 3), date(2026, 6, 5)]
+
+
+def test_schedule_text_weekly_multiple(db_session):
+    svc = RecurringService(db_session)
+    svc.create_contract(
+        RecurringContractCreate(
+            label="x", customer_name="c", customer_phone="01000000000", customer_address="A",
+            recurrence_mode=RecurrenceMode.WEEKLY, interval_weeks=1, weekdays=[0, 2, 4],
+            start_date=date(2026, 6, 1), service_name="청소",
+        ),
+        actor_user_id=None,
+    )
+    assert svc.list_contract_summaries()[0].schedule_text == "매주 월·수·금"
