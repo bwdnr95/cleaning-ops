@@ -20,6 +20,7 @@ class ScheduleSpec:
     day_of_month: int | None = None
     interval_weeks: int | None = None
     weekday: int | None = None
+    weekdays: tuple[int, ...] | None = None
     end_date: date | None = None
     max_occurrences: int | None = None
 
@@ -40,6 +41,20 @@ def validate_recurrence_fields(
         raise ValueError("invalid_recurrence_fields")
 
 
+def parse_weekdays_csv(value: str | None) -> tuple[int, ...]:
+    """CSV "0,2,4" → (0,2,4). 정렬·중복제거. 빈 값/None → ()."""
+    if not value:
+        return ()
+    return tuple(sorted({int(p) for p in value.split(",") if p.strip() != ""}))
+
+
+def format_weekdays_csv(weekdays) -> str | None:
+    """[4,0,2] → "0,2,4". 빈 값/None → None(미선택)."""
+    if not weekdays:
+        return None
+    return ",".join(str(w) for w in sorted({int(x) for x in weekdays}))
+
+
 def billing_month_of(due: date) -> str:
     return f"{due.year:04d}-{due.month:02d}"
 
@@ -58,9 +73,10 @@ def iter_due_dates(spec: ScheduleSpec, *, until: date) -> Iterator[tuple[int, da
 
     sequence_no는 계약 내 회차 순번(1부터). end_date/max_occurrences는 종료 조건.
 
-    WEEKLY는 `start_date`를 요일 앵커로 사용한다(모든 회차가 start_date.weekday()).
-    `spec.weekday`는 표시/검증용 메타이며 계산에 쓰이지 않으므로, 폼에서 start_date와
-    동기화되어 있어야 한다(설계 §10.1).
+    WEEKLY는 한 주에 여러 요일을 가질 수 있다(예: 매주 월·수·금). 선택 요일은
+    `spec.weekdays`(집합)로 결정하고, 비어 있으면 레거시 `spec.weekday`(단일) →
+    그것도 없으면 `start_date.weekday()`로 폴백한다. 활성 주(start_date 주에서
+    `interval_weeks`마다)의 각 선택 요일을 시간순으로 산출한다.
     """
     seq = 0
     if spec.mode == RecurrenceMode.MONTHLY:
@@ -82,17 +98,29 @@ def iter_due_dates(spec: ScheduleSpec, *, until: date) -> Iterator[tuple[int, da
     elif spec.mode == RecurrenceMode.WEEKLY:
         if not spec.interval_weeks:
             raise ValueError("interval_weeks_required_for_weekly")
+        # 폴백 체인: weekdays → weekday → start_date 요일
+        wds = spec.weekdays or (
+            (spec.weekday,) if spec.weekday is not None else (spec.start_date.weekday(),)
+        )
+        wds = tuple(sorted(set(wds)))
+        anchor_monday = spec.start_date - timedelta(days=spec.start_date.weekday())
         step = timedelta(weeks=spec.interval_weeks)
-        due = spec.start_date
+        week_monday = anchor_monday
         while True:
-            if due > until:
+            if week_monday > until:
                 return
-            if spec.end_date is not None and due > spec.end_date:
-                return
-            seq += 1
-            if spec.max_occurrences is not None and seq > spec.max_occurrences:
-                return
-            yield seq, due
-            due = due + step
+            for w in wds:
+                due = week_monday + timedelta(days=w)
+                if due < spec.start_date:
+                    continue
+                if due > until:
+                    break  # 이 주의 나머지 요일도 초과 → 다음 주
+                if spec.end_date is not None and due > spec.end_date:
+                    return
+                seq += 1
+                if spec.max_occurrences is not None and seq > spec.max_occurrences:
+                    return
+                yield seq, due
+            week_monday = week_monday + step
     else:
         raise ValueError(f"unknown_recurrence_mode:{spec.mode}")
