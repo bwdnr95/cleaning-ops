@@ -197,7 +197,7 @@ export function PartnerJobDetail({ onDetailOpenChange = undefined } = {}) {
   }
 
   if (!selectedJobId) {
-    return <PartnerJobList jobs={jobs.data || []} onSelect={setSelectedJobId} />;
+    return <PartnerJobList jobs={jobs.data || []} onSelect={setSelectedJobId} onReload={() => jobs.reload()} />;
   }
 
   if (detail.isLoading && !selectedFromList) {
@@ -406,17 +406,52 @@ function formatJobAddress(job) {
   return [job.customer_address, job.customer_address_detail].filter(Boolean).join(' ');
 }
 
-function PartnerJobList({ jobs, onSelect }) {
-  if (jobs.length === 0) {
-    return <PartnerState text="배정된 작업이 없습니다." />;
-  }
-
+function PartnerJobList({ jobs, onSelect, onReload = undefined }) {
   return (
     <div data-testid="partner-jobs-page" style={{ height: '100%', background: '#f4f6f8', overflow: 'auto', padding: 14 }}>
-      <div style={{ marginBottom: 14 }}>
-        <div className="app-eyebrow">협력사 현장</div>
-        <h2 style={{ margin: '2px 0 0', fontSize: 20 }}>내 작업</h2>
+      <div style={{ display: 'flex', alignItems: 'flex-end', gap: 8, marginBottom: 14 }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div className="app-eyebrow">협력사 현장</div>
+          <h2 style={{ margin: '2px 0 0', fontSize: 20 }}>
+            내 작업
+            {jobs.length > 0 && (
+              <span style={{ marginLeft: 6, fontSize: 14, fontWeight: 600, color: 'var(--text-tertiary)' }}>{jobs.length}건</span>
+            )}
+          </h2>
+        </div>
+        {onReload && (
+          <button
+            type="button"
+            data-testid="partner-jobs-refresh"
+            onClick={onReload}
+            aria-label="새로고침"
+            style={{ width: 38, height: 38, flexShrink: 0, borderRadius: 9, border: '1px solid var(--border)', background: '#fff', color: 'var(--text-secondary)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}
+          >
+            <Icon name="refresh" size={16} />
+          </button>
+        )}
       </div>
+
+      {jobs.length === 0 ? (
+        <div data-testid="partner-jobs-empty" style={{ marginTop: 8, background: '#fff', border: '1px solid var(--border)', borderRadius: 12, padding: '34px 20px', textAlign: 'center' }}>
+          <div style={{ width: 54, height: 54, margin: '0 auto 14px', borderRadius: 15, background: 'var(--brand-bg)', color: 'var(--brand)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <Icon name="inbox" size={26} />
+          </div>
+          <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 6 }}>배정된 작업이 없습니다</div>
+          <div style={{ fontSize: 12.5, color: 'var(--text-tertiary)', lineHeight: 1.55 }}>
+            운영팀이 작업을 배정하면<br />이곳에 자동으로 표시됩니다.
+          </div>
+          {onReload && (
+            <button
+              type="button"
+              onClick={onReload}
+              style={{ marginTop: 18, height: 40, padding: '0 18px', borderRadius: 10, border: '1px solid var(--brand)', background: '#fff', color: 'var(--brand)', fontSize: 13, fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}
+            >
+              <Icon name="refresh" size={14} /> 새로고침
+            </button>
+          )}
+        </div>
+      ) : (
       <div style={{ display: 'grid', gap: 10 }}>
         {jobs.map((job) => (
           <button key={job.id} data-testid={`partner-job-row-${job.id}`} onClick={() => onSelect(job.id)} style={{ textAlign: 'left', background: '#fff', border: '1px solid var(--border)', borderRadius: 10, padding: 14, cursor: 'pointer' }}>
@@ -433,6 +468,7 @@ function PartnerJobList({ jobs, onSelect }) {
           </button>
         ))}
       </div>
+      )}
     </div>
   );
 }
