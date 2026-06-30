@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.domain.constants import OrderStatus, ReceiptStatus, ReceiptType, TimelineEventType
 from app.domain.order_pricing import order_consumer_total
-from app.domain.payment_status import PAYMENT_TRACKED_FIELDS
+from app.domain.payment_status import PAYMENT_TRACKED_FIELDS, PaymentStatus
 from app.domain.phone import normalize_phone
 from app.models.order import Order
 from app.models.order_group import OrderGroup
@@ -287,6 +287,45 @@ class OrderService:
                 title="상태 변경",
                 description="방문일 지정으로 자동 일정확정 처리되었습니다.",
                 metadata={"from": old_status, "to": OrderStatus.SCHEDULE_CONFIRMED.value, "auto": True},
+            )
+
+        # #2: 완납(paid) 처리 시 자동 최종결제완료(서비스완료). 운영자가 같은 요청에서 상태를
+        # 직접 지정했으면 그 값을 존중하고, 취소/이미 완료 건은 건드리지 않는다.
+        if (
+            changes.get("payment_status") == PaymentStatus.PAID
+            and "status" not in changes
+            and order.status not in (OrderStatus.CANCELLED, OrderStatus.COMPLETED)
+        ):
+            from_status = order.status
+            order.status = OrderStatus.COMPLETED
+            self.timeline.record(
+                order_id=order.id,
+                actor_user_id=actor_user_id,
+                event_type=TimelineEventType.STATUS_CHANGED,
+                title="상태 변경",
+                description="완납 처리로 자동 최종결제완료(서비스완료) 전환되었습니다.",
+                metadata={"from": from_status, "to": OrderStatus.COMPLETED.value, "auto": True},
+            )
+
+        # #3: 최종결제완료(서비스완료) 전환 시 자동 완납(paid). 운영자가 같은 요청에서 결제를
+        # 직접 지정했으면 존중하고, 이미 완납/환불 건은 덮어쓰지 않는다.
+        if (
+            changes.get("status") == OrderStatus.COMPLETED
+            and "payment_status" not in changes
+            and order.payment_status not in (PaymentStatus.PAID, PaymentStatus.REFUNDED)
+        ):
+            from_payment = order.payment_status
+            order.payment_status = PaymentStatus.PAID
+            self.timeline.record(
+                order_id=order.id,
+                actor_user_id=actor_user_id,
+                event_type=TimelineEventType.MEMO_ADDED,
+                title="결제/정산 변경",
+                description="최종결제완료(서비스완료) 전환으로 자동 완납 처리되었습니다.",
+                metadata={
+                    "changes": {"payment_status": {"from": from_payment, "to": PaymentStatus.PAID.value}},
+                    "auto": True,
+                },
             )
 
         if "status" in changes and changes["status"] != old_status:
