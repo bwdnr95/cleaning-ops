@@ -82,6 +82,9 @@ class PartnerSettlementItemRead(ApiModel):
     partner_price: float | None = None
     partner_payment_status: str | None = None
     settled_at: datetime | None = None
+    # 이 라인이 속한 그룹(고객)의 합계. 0원 라인 보조표시용(취소/삭제 제외).
+    group_consumer_total: float = 0
+    group_partner_total: float = 0
 
 
 class PartnerSettlementListRead(ApiModel):

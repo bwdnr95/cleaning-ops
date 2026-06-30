@@ -67,3 +67,61 @@ def test_order_page_payment_check_filter_matches_count_definition(db_session):
     assert match(past, "payment_check") is True           # 과거 → 포함
     assert match(unassigned, "payment_check") is True     # 미배정 → 포함
     assert match(cancelled, "payment_check") is False     # 취소 → 제외
+
+
+def test_settlement_item_includes_group_totals(db_session):
+    # 한 그룹(고객)에 2라인: 금액은 라인1에만. 둘 다 DEV_PARTNER에 배정·서비스완료·미정산.
+    group = OrderGroup(
+        id=str(uuid4()), customer_token=f"t-{uuid4()}", customer_name="강남",
+        customer_phone="01011112222", customer_address="A", customer_visible_payment=False,
+    )
+    db_session.add(group)
+    db_session.flush()
+    common = dict(
+        group_id=group.id, status=OrderStatus.COMPLETED, received_date=date(2026, 1, 1),
+        service_name="청소", partner_id=DEV_PARTNER_ID, partner_payment_status="unpaid",
+        customer_token=group.customer_token, customer_name="강남", customer_phone="01011112222",
+        customer_address="A",
+    )
+    db_session.add(Order(id=str(uuid4()), total_amount=120000, partner_payment_amount=80000, **common))
+    db_session.add(Order(id=str(uuid4()), total_amount=0, partner_payment_amount=0, **common))
+    db_session.commit()
+
+    result = PartnerSettlementService(db_session).list_settlements(partner_id=DEV_PARTNER_ID, status="unpaid")
+    items = [i for i in result.items if i.customer_name == "강남"]
+    assert len(items) == 2
+    for it in items:
+        assert it.group_consumer_total == 120000  # 그룹 합계가 두 라인 모두에 실림
+        assert it.group_partner_total == 80000
+
+
+def test_settlement_group_totals_exclude_cancelled_line(db_session):
+    # 같은 그룹에 취소 라인이 섞이면 그 금액은 그룹 합계에서 제외된다.
+    group = OrderGroup(
+        id=str(uuid4()), customer_token=f"t-{uuid4()}", customer_name="서초",
+        customer_phone="01033334444", customer_address="A", customer_visible_payment=False,
+    )
+    db_session.add(group)
+    db_session.flush()
+    common = dict(
+        group_id=group.id, received_date=date(2026, 1, 1), service_name="청소",
+        partner_id=DEV_PARTNER_ID, partner_payment_status="unpaid",
+        customer_token=group.customer_token, customer_name="서초", customer_phone="01033334444",
+        customer_address="A",
+    )
+    db_session.add(Order(
+        id=str(uuid4()), status=OrderStatus.COMPLETED,
+        total_amount=100000, partner_payment_amount=70000, **common,
+    ))
+    db_session.add(Order(
+        id=str(uuid4()), status=OrderStatus.CANCELLED,
+        total_amount=50000, partner_payment_amount=30000, **common,
+    ))
+    db_session.commit()
+
+    result = PartnerSettlementService(db_session).list_settlements(partner_id=DEV_PARTNER_ID, status="unpaid")
+    items = [i for i in result.items if i.customer_name == "서초"]
+    # 미정산 목록엔 서비스완료 라인만 뜬다(취소는 unpaid 조건 밖).
+    assert len(items) == 1
+    assert items[0].group_consumer_total == 100000  # 취소 50000 제외
+    assert items[0].group_partner_total == 70000     # 취소 30000 제외

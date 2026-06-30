@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Iterable
 from datetime import date
 from decimal import Decimal
 
@@ -61,6 +62,7 @@ class PartnerSettlementService:
             to_date=to_date,
         )
         groups_by_id = self.groups.list_by_ids(order.group_id for order in orders)
+        group_totals = self._group_totals(order.group_id for order in orders)
         # 취소건은 목록(items)에는 남겨 기록을 보존하되, 건수/금액 집계에선 제외한다.
         countable = [order for order in orders if order.status != OrderStatus.CANCELLED]
         total_partner_price = sum(
@@ -72,7 +74,11 @@ class PartnerSettlementService:
             Decimal("0"),
         )
         items = [
-            to_settlement_item(order, group=groups_by_id.get(order.group_id))
+            to_settlement_item(
+                order,
+                group=groups_by_id.get(order.group_id),
+                group_totals=group_totals.get(order.group_id, (0.0, 0.0)),
+            )
             for order in orders
         ]
         return PartnerSettlementListRead(
@@ -140,6 +146,24 @@ class PartnerSettlementService:
             updated_order_ids=[order.id for order in orders],
             skipped_order_ids=[],
         )
+
+    def _group_totals(self, group_ids: Iterable[str]) -> dict[str, tuple[float, float]]:
+        """결과에 포함된 각 그룹(고객)의 합계(취소·삭제 제외)를 (소비자가, 도급가)로 계산.
+
+        0원 라인 보조표시용 — 한 그룹에 금액이 한 라인에만 입력돼 다른 라인이
+        0원으로 보일 때, 그 라인이 속한 그룹 총액을 함께 노출하기 위함이다.
+        """
+        totals: dict[str, tuple[float, float]] = {}
+        for group_id in {gid for gid in group_ids if gid}:
+            lines = self.groups.list_lines(group_id)  # 삭제 제외
+            settleable = [line for line in lines if line.status != OrderStatus.CANCELLED]
+            consumer = sum((order_consumer_total(line) for line in settleable), Decimal("0"))
+            partner = sum(
+                (money_decimal(line.partner_payment_amount) for line in settleable),
+                Decimal("0"),
+            )
+            totals[group_id] = (float(consumer), float(partner))
+        return totals
 
     def _require_partner(self, partner_id: str) -> None:
         partner = self.partners.get(partner_id)
@@ -212,7 +236,10 @@ class PartnerSettlementService:
 
 
 def to_settlement_item(
-    order: Order, *, group: OrderGroup | None = None
+    order: Order,
+    *,
+    group: OrderGroup | None = None,
+    group_totals: tuple[float, float] = (0.0, 0.0),
 ) -> PartnerSettlementItemRead:
     # 정산 확인을 쉽게 하려고 기본주소 + 상세주소까지 모두 노출한다.
     base_address = (group.customer_address if group else None) or order.customer_address or ""
@@ -229,6 +256,8 @@ def to_settlement_item(
         partner_price=float(order.partner_payment_amount or 0),
         partner_payment_status=order.partner_payment_status,
         settled_at=order.partner_settled_at,
+        group_consumer_total=group_totals[0],
+        group_partner_total=group_totals[1],
     )
 
 
