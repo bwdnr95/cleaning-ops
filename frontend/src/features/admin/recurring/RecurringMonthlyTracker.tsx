@@ -48,7 +48,9 @@ export function RecurringMonthlyTracker() {
       setRows(await getRecurringMonthly(month));
     } catch (e) {
       setError(e instanceof Error ? e.message : '불러오기에 실패했습니다.');
-      setRows([]);
+      // 실패 시 빈 배열로 두면 "정기계약 없음" 빈 상태가 에러 배너와 함께 떠 오해를 준다.
+      // null로 되돌려 에러 배너만 노출한다(아래 로딩 분기는 !error로 가드).
+      setRows(null);
     }
   }, [month]);
 
@@ -114,7 +116,7 @@ export function RecurringMonthlyTracker() {
       )}
 
       {rows === null ? (
-        <div style={{ color: 'var(--text-tertiary)', fontSize: 13 }}>불러오는 중…</div>
+        error ? null : <div style={{ color: 'var(--text-tertiary)', fontSize: 13 }}>불러오는 중…</div>
       ) : rows.length === 0 ? (
         <div data-testid="monthly-empty" style={{ color: 'var(--text-tertiary)', fontSize: 13 }}>
           진행 중인 정기계약이 없습니다.
