@@ -1156,11 +1156,19 @@ def test_dashboard_summary_matches_operational_queue_definitions() -> None:
                     status=OrderStatus.CUSTOMER_DELIVERY_NEEDED,
                     scheduled_date=date(2026, 5, 7),
                 ),
+                # 과거 방문 + 미납 → '결제 확인 필요'로 카운트(오늘 이전이라 챙길 시점).
                 make_order(
                     "payment-pending",
                     status=OrderStatus.CONSULTING,
-                    scheduled_date=date(2026, 5, 8),
+                    scheduled_date=date(2026, 5, 2),
                     payment_status="balance_pending",
+                ),
+                # 미래 방문 + 미납 → 아직 결제 챙길 시점이 아니라 카운트에서 제외(#1).
+                make_order(
+                    "payment-future",
+                    status=OrderStatus.CONSULTING,
+                    scheduled_date=date(2026, 5, 20),
+                    payment_status="unpaid",
                 ),
                 make_order(
                     "payment-paid",
@@ -1192,6 +1200,7 @@ def test_dashboard_summary_matches_operational_queue_definitions() -> None:
     assert summary.partner_pending == 1
     assert summary.photo_review_pending == 0
     assert summary.customer_delivery_needed == 2
+    # 미납 계열 중 과거 방문(payment-pending)만 카운트, 미래 방문(payment-future)은 제외 → 1.
     assert summary.payment_check_needed == 1
     assert summary.monthly_completed == 1
     assert summary.monthly_revenue == 700000
