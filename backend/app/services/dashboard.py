@@ -38,9 +38,13 @@ class DashboardService:
             partner_pending=self._count(Order.status == OrderStatus.PARTNER_CONFIRMING),
             photo_review_pending=self._count(Order.status == OrderStatus.PHOTO_REVIEW_PENDING),
             customer_delivery_needed=self._count(Order.status == OrderStatus.CUSTOMER_DELIVERY_NEEDED),
+            # 결제 확인 필요: 미납 계열 + 취소 제외. 단 '방문일이 미래(오늘 이후)'인 건은
+            # 아직 결제를 챙길 시점이 아니라 제외한다(미배정=방문일 없음은 유지).
+            # 주문목록 payment_check 탭(order_page._matches_status_tab)과 동일 기준.
             payment_check_needed=self._count(
                 Order.payment_status.in_(PAYMENT_CHECK_STATUSES),
                 Order.status != OrderStatus.CANCELLED,
+                (Order.scheduled_date <= current) | Order.scheduled_date.is_(None),
             ),
             monthly_completed=self._count(Order.status == OrderStatus.COMPLETED, *month_filter),
             # 매출 = 기본가 + 현장추가비(주문목록 '총금액'·리포트 매출과 동일 정의)

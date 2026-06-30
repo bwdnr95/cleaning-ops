@@ -374,9 +374,13 @@ class OrderPageService:
         if status_key == "today":
             return order.status != OrderStatus.CANCELLED
         if status_key == "payment_check":
+            # 대시보드 카운트(services/dashboard.py)와 동일 기준: 미납 계열 + 취소 제외 +
+            # 방문일이 미래(오늘 이후)면 제외(미배정=방문일 없음은 유지).
+            today = business_today()
             return (
                 order.status != OrderStatus.CANCELLED
                 and order.payment_status in _PAYMENT_CHECK_STATUSES
+                and (order.scheduled_date is None or order.scheduled_date <= today)
             )
         if status_key in cls._RAW_STATUS_TAB:
             return order.status in cls._RAW_STATUS_TAB[status_key]
