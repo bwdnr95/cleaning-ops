@@ -57,7 +57,7 @@ const ADMIN_PAGE_META = {
   },
   recurring: {
     title: '정기청소',
-    subtitle: '정기계약 / 승인 대기',
+    subtitle: '정기계약 / 월 트래커',
     breadcrumb: ['운영', '정기청소'],
   },
   reports: {

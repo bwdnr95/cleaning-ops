@@ -43,9 +43,6 @@ export interface RecurringContractSummary {
   status: RecurringContractStatus;
   schedule_text: string;
   next_due_date: string | null;
-  pending_count: number;
-  this_month_count: number;
-  this_month_amount: number;
 }
 
 export interface RecurringContract extends RecurringContractInput {
@@ -54,57 +51,6 @@ export interface RecurringContract extends RecurringContractInput {
   customer_token: string;
   status: RecurringContractStatus;
   next_due_date: string | null;
-  this_month_count: number;
-  this_month_amount: number;
-}
-
-export type RecurringOccurrenceStatus = 'pending' | 'generated' | 'skipped';
-
-export interface RecurringOccurrence {
-  id: string;
-  contract_id: string;
-  sequence_no: number;
-  due_date: string;
-  billing_month: string;
-  status: RecurringOccurrenceStatus;
-  generated_order_id: string | null;
-  generated_at: string | null;
-  skipped_reason: string | null;
-}
-
-export interface PendingOccurrence {
-  occurrence_id: string;
-  contract_id: string;
-  contract_label: string;
-  customer_name: string;
-  sequence_no: number;
-  due_date: string;
-  service_name: string;
-  total_amount: number | null;
-  default_partner_id: string | null;
-  default_partner_name: string | null;
-  is_overdue: boolean;
-}
-
-export interface ApproveItemInput {
-  occurrence_id: string;
-  partner_id?: string | null;
-  scheduled_date?: string | null;
-  total_amount?: number | null;
-}
-
-export interface ApproveOccurrencesResult {
-  generated_order_ids: string[];
-  skipped_occurrence_ids: string[];
-}
-
-export interface SkipItemInput {
-  occurrence_id: string;
-  reason?: string;
-}
-
-export interface SkipOccurrencesResult {
-  skipped_occurrence_ids: string[];
 }
 
 export function listRecurringContracts(): Promise<RecurringContractSummary[]> {
@@ -113,12 +59,6 @@ export function listRecurringContracts(): Promise<RecurringContractSummary[]> {
 
 export function getRecurringContract(id: string): Promise<RecurringContract> {
   return apiRequest(`/admin/recurring/contracts/${encodeURIComponent(id)}`) as Promise<RecurringContract>;
-}
-
-export function listContractOccurrences(id: string): Promise<RecurringOccurrence[]> {
-  return apiRequest(
-    `/admin/recurring/contracts/${encodeURIComponent(id)}/occurrences`,
-  ) as Promise<RecurringOccurrence[]>;
 }
 
 export function createRecurringContract(input: RecurringContractInput): Promise<RecurringContract> {
@@ -157,26 +97,4 @@ export function deleteRecurringContract(id: string): Promise<void> {
   return apiRequest(`/admin/recurring/contracts/${encodeURIComponent(id)}`, {
     method: 'DELETE',
   }) as Promise<void>;
-}
-
-export function syncRecurringOccurrences(): Promise<PendingOccurrence[]> {
-  return apiRequest('/admin/recurring/occurrences/sync', { method: 'POST' }) as Promise<PendingOccurrence[]>;
-}
-
-export function listPendingOccurrences(): Promise<PendingOccurrence[]> {
-  return apiRequest('/admin/recurring/occurrences/pending') as Promise<PendingOccurrence[]>;
-}
-
-export function approveOccurrences(items: ApproveItemInput[]): Promise<ApproveOccurrencesResult> {
-  return apiRequest('/admin/recurring/occurrences/approve', {
-    method: 'POST',
-    body: { items },
-  }) as Promise<ApproveOccurrencesResult>;
-}
-
-export function skipOccurrences(items: SkipItemInput[]): Promise<SkipOccurrencesResult> {
-  return apiRequest('/admin/recurring/occurrences/skip', {
-    method: 'POST',
-    body: { items },
-  }) as Promise<SkipOccurrencesResult>;
 }

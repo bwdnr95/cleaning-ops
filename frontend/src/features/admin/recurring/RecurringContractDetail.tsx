@@ -4,11 +4,9 @@ import {
   deleteRecurringContract,
   endRecurringContract,
   getRecurringContract,
-  listContractOccurrences,
   pauseRecurringContract,
   resumeRecurringContract,
   type RecurringContract,
-  type RecurringOccurrence,
 } from '../../../api/recurring';
 import { Icon } from '../../../components/common/ui';
 import {
@@ -16,8 +14,6 @@ import {
   CONTRACT_STATUS_TONE,
   formatAmount,
   formatScheduleText,
-  OCCURRENCE_STATUS_LABEL,
-  OCCURRENCE_STATUS_TONE,
 } from '../../../domain/recurrence';
 import { RecurringContractForm } from './RecurringContractForm';
 
@@ -29,8 +25,6 @@ export function RecurringContractDetail({
   onBack: () => void;
 }) {
   const [contract, setContract] = React.useState<RecurringContract | null>(null);
-  const [occurrences, setOccurrences] = React.useState<RecurringOccurrence[] | null>(null);
-  const [occError, setOccError] = React.useState<string | null>(null);
   const [editing, setEditing] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const [busy, setBusy] = React.useState(false);
@@ -44,21 +38,9 @@ export function RecurringContractDetail({
     }
   }, [contractId]);
 
-  // 회차 원장은 계약 본문과 독립적으로 불러온다(원장 로딩 실패가 계약 화면 전체를 가리지 않도록).
-  const loadOccurrences = React.useCallback(async () => {
-    setOccError(null);
-    setOccurrences(null);
-    try {
-      setOccurrences(await listContractOccurrences(contractId));
-    } catch (e) {
-      setOccError(e instanceof Error ? e.message : '회차를 불러오지 못했습니다.');
-    }
-  }, [contractId]);
-
   React.useEffect(() => {
     void load();
-    void loadOccurrences();
-  }, [load, loadOccurrences]);
+  }, [load]);
 
   if (error) {
     return (
@@ -90,7 +72,6 @@ export function RecurringContractDetail({
         onDone={() => {
           setEditing(false);
           void load();
-          void loadOccurrences();
         }}
         onCancel={() => setEditing(false)}
       />
@@ -187,10 +168,6 @@ export function RecurringContractDetail({
           <Term label="시작일" value={contract.start_date} />
           <Term label="서비스" value={contract.service_name} />
           <Term label="1주기 금액" value={formatAmount(contract.total_amount ?? null)} />
-          <Term
-            label="이번 달"
-            value={`${contract.this_month_count}건 / ${formatAmount(contract.this_month_amount)}`}
-          />
           <Term label="다음 회차" value={contract.next_due_date ?? '-'} />
           <Term label="고객 링크" value={`/c/${contract.customer_token}`} mono />
         </dl>
@@ -239,111 +216,7 @@ export function RecurringContractDetail({
         <p style={{ fontSize: 12, color: 'var(--text-tertiary)', marginTop: 8 }}>
           삭제해도 이미 생성된 주문은 주문관리에 보존됩니다.
         </p>
-
-        <section style={{ marginTop: 24 }} data-testid="rc-occurrence-ledger">
-          <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 10 }}>
-            <h2 style={{ fontSize: 14, fontWeight: 700, margin: 0 }}>회차 원장</h2>
-            <span style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>
-              이번 달 {contract.this_month_count}건 / {formatAmount(contract.this_month_amount)}
-            </span>
-          </div>
-          <OccurrenceLedger occurrences={occurrences} error={occError} onRetry={() => void loadOccurrences()} />
-        </section>
       </div>
-    </div>
-  );
-}
-
-const ledgerCell: React.CSSProperties = {
-  padding: '7px 8px',
-  borderBottom: '1px solid var(--divider, var(--border))',
-  whiteSpace: 'nowrap',
-};
-
-const ledgerHead: React.CSSProperties = {
-  ...ledgerCell,
-  textAlign: 'left',
-  color: 'var(--text-tertiary)',
-  fontWeight: 600,
-};
-
-function OccurrenceLedger({
-  occurrences,
-  error,
-  onRetry,
-}: {
-  occurrences: RecurringOccurrence[] | null;
-  error: string | null;
-  onRetry: () => void;
-}) {
-  if (error) {
-    return (
-      <div data-testid="rc-occurrence-error" style={{ fontSize: 13, color: 'var(--danger-fg, #c0392b)' }}>
-        {error}{' '}
-        <button className="btn btn--ghost btn--sm" onClick={onRetry} style={{ marginLeft: 6 }}>
-          다시 시도
-        </button>
-      </div>
-    );
-  }
-  if (occurrences === null) {
-    return <div style={{ fontSize: 13, color: 'var(--text-tertiary)' }}>회차를 불러오는 중…</div>;
-  }
-  if (occurrences.length === 0) {
-    return (
-      <div style={{ fontSize: 13, color: 'var(--text-tertiary)' }}>
-        아직 생성된 회차가 없습니다. 정기청소 화면에 진입하면 도래분이 동기화됩니다.
-      </div>
-    );
-  }
-  return (
-    <div
-      style={{
-        overflowX: 'auto',
-        border: '1px solid var(--border)',
-        borderRadius: 8,
-        background: 'var(--surface)',
-      }}
-    >
-      <table style={{ width: '100%', minWidth: 420, fontSize: 13, borderCollapse: 'collapse' }}>
-        <thead>
-          <tr>
-            <th style={{ ...ledgerHead, width: 48 }}>순번</th>
-            <th style={ledgerHead}>방문일</th>
-            <th style={ledgerHead}>상태</th>
-            <th style={ledgerHead}>생성 주문</th>
-          </tr>
-        </thead>
-        <tbody>
-          {occurrences.map((occ) => (
-            <tr key={occ.id} data-testid={`rc-occurrence-${occ.id}`}>
-              <td style={ledgerCell}>{occ.sequence_no}</td>
-              <td style={ledgerCell}>{occ.due_date}</td>
-              <td style={ledgerCell}>
-                <span
-                  style={{
-                    padding: '2px 9px',
-                    borderRadius: 10,
-                    fontSize: 11.5,
-                    fontWeight: 600,
-                    background: OCCURRENCE_STATUS_TONE[occ.status],
-                    color: 'var(--text-secondary)',
-                  }}
-                >
-                  {OCCURRENCE_STATUS_LABEL[occ.status]}
-                </span>
-              </td>
-              <td style={{ ...ledgerCell, whiteSpace: 'normal', color: 'var(--text-secondary)' }}>
-                {occ.status === 'generated'
-                  ? '주문 생성됨'
-                  : occ.status === 'skipped'
-                    ? occ.skipped_reason || '건너뜀'
-                    : '-'}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
     </div>
   );
 }
