@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 
 from app.domain.constants import RecurringContractStatus, RecurringOccurrenceStatus
 from app.models.recurring_contract import RecurringContract
+from app.models.recurring_monthly_status import RecurringMonthlyStatus
 from app.models.recurring_occurrence import RecurringOccurrence
 from app.repositories.base import Repository
 
@@ -65,4 +66,20 @@ class RecurringOccurrenceRepository(Repository[RecurringOccurrence]):
             .where(RecurringOccurrence.status == RecurringOccurrenceStatus.PENDING)
             .order_by(RecurringOccurrence.due_date.asc())
         )
+        return list(self.db.scalars(stmt))
+
+
+class RecurringMonthlyStatusRepository(Repository[RecurringMonthlyStatus]):
+    def __init__(self, db: Session) -> None:
+        super().__init__(db, RecurringMonthlyStatus)
+
+    def get_by_contract_and_month(self, contract_id: str, billing_month: str) -> RecurringMonthlyStatus | None:
+        stmt = select(RecurringMonthlyStatus).where(
+            RecurringMonthlyStatus.contract_id == contract_id,
+            RecurringMonthlyStatus.billing_month == billing_month,
+        )
+        return self.db.scalar(stmt)
+
+    def list_by_month(self, billing_month: str) -> list[RecurringMonthlyStatus]:
+        stmt = select(RecurringMonthlyStatus).where(RecurringMonthlyStatus.billing_month == billing_month)
         return list(self.db.scalars(stmt))

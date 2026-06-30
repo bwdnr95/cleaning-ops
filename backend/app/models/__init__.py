@@ -6,6 +6,7 @@ from app.models.order_group import OrderGroup
 from app.models.partner import Partner, PartnerCategory
 from app.models.photo import OrderPhoto
 from app.models.recurring_contract import RecurringContract
+from app.models.recurring_monthly_status import RecurringMonthlyStatus
 from app.models.recurring_occurrence import RecurringOccurrence
 from app.models.refresh_token import RefreshToken
 from app.models.service_item import ServiceCategory, ServiceItem
@@ -23,6 +24,7 @@ __all__ = [
     "Partner",
     "PartnerCategory",
     "RecurringContract",
+    "RecurringMonthlyStatus",
     "RecurringOccurrence",
     "RefreshToken",
     "ServiceCategory",
