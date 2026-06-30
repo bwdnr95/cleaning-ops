@@ -11,6 +11,7 @@ from app.api.routes.admin import (
     photos,
     recurring,
     recurring_billing,
+    recurring_monthly,
     reports,
     services,
 )
@@ -37,6 +38,11 @@ api_router.include_router(
     recurring_billing.router,
     prefix="/admin/recurring/billing",
     tags=["admin-recurring-billing"],
+)
+api_router.include_router(
+    recurring_monthly.router,
+    prefix="/admin/recurring/monthly",
+    tags=["admin-recurring-monthly"],
 )
 api_router.include_router(reports.router, prefix="/admin/reports", tags=["admin-reports"])
 api_router.include_router(jobs.router, prefix="/partner/jobs", tags=["partner-jobs"])

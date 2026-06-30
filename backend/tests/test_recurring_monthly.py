@@ -56,3 +56,20 @@ def test_set_status_toggles(db_session):
     assert row.tax_invoice_issued is True and row.balance_paid is False
     row2 = svc.set_status(c.id, "2026-06", balance_paid=True, actor_user_id="admin")
     assert row2.tax_invoice_issued is True and row2.balance_paid is True
+
+
+def test_monthly_api_requires_admin(client):
+    assert client.get("/api/admin/recurring/monthly?month=2026-06").status_code == 401
+
+
+def test_monthly_api_list_and_set(client, seed_admin_token):
+    h = {"Authorization": f"Bearer {seed_admin_token}"}
+    body = {"label": "강남", "customer_name": "강남", "customer_phone": "01011112222",
+            "customer_address": "A", "recurrence_mode": "monthly", "day_of_month": 10,
+            "start_date": "2020-01-10", "service_name": "청소", "total_amount": 100000}
+    cid = client.post("/api/admin/recurring/contracts", json=body, headers=h).json()["id"]
+    lst = client.get("/api/admin/recurring/monthly?month=2026-06", headers=h)
+    assert lst.status_code == 200 and any(r["contract_id"] == cid for r in lst.json())
+    res = client.post("/api/admin/recurring/monthly/set",
+                      json={"contract_id": cid, "month": "2026-06", "tax_invoice_issued": True}, headers=h)
+    assert res.status_code == 200 and res.json()["tax_invoice_issued"] is True
