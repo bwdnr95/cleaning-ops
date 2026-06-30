@@ -121,6 +121,9 @@ export interface PartnerSettlementItem {
   partner_price: number | null;
   partner_payment_status: string | null;
   settled_at: string | null;
+  // 이 라인이 속한 그룹(고객)의 합계. 0원 라인 보조표시용.
+  group_consumer_total: number;
+  group_partner_total: number;
 }
 
 export interface PartnerSettlementListParams {

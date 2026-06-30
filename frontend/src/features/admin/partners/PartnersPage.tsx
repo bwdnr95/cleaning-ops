@@ -846,8 +846,26 @@ export function PartnersPage() {
                           </div>
                         </GridCell>
                         <GridCell>{job.customer_name}</GridCell>
-                        <GridCell mono>{formatWon(job.consumer_price)}</GridCell>
-                        <GridCell mono>{formatWon(job.partner_price)}</GridCell>
+                        <GridCell mono>
+                          <div>
+                            {formatWon(job.consumer_price)}
+                            {job.consumer_price === 0 && job.group_consumer_total > 0 && (
+                              <div style={{ fontSize: 10.5, color: 'var(--text-tertiary)', fontWeight: 400 }}>
+                                그룹 {formatWon(job.group_consumer_total)}
+                              </div>
+                            )}
+                          </div>
+                        </GridCell>
+                        <GridCell mono>
+                          <div>
+                            {formatWon(job.partner_price)}
+                            {job.partner_price === 0 && job.group_partner_total > 0 && (
+                              <div style={{ fontSize: 10.5, color: 'var(--text-tertiary)', fontWeight: 400 }}>
+                                그룹 {formatWon(job.group_partner_total)}
+                              </div>
+                            )}
+                          </div>
+                        </GridCell>
                         <GridCell>
                           {isCancelled
                             ? <span style={{ color: 'var(--text-quaternary)', fontSize: 11.5, fontWeight: 600 }}>정산 제외</span>
