@@ -6,6 +6,7 @@ from app.models.order_group import OrderGroup
 from app.models.recurring_contract import RecurringContract
 from app.models.recurring_monthly_status import RecurringMonthlyStatus
 from app.repositories.recurring import RecurringMonthlyStatusRepository
+from app.services.recurring_monthly import RecurringMonthlyService
 
 
 def _contract(db):
@@ -27,3 +28,31 @@ def test_monthly_status_persists_and_lookup(db_session):
     found = repo.get_by_contract_and_month(c.id, "2026-06")
     assert found is not None and found.tax_invoice_issued is False and found.balance_paid is False
     assert repo.get_by_contract_and_month(c.id, "2026-07") is None
+
+
+def test_list_month_upserts_active_contracts_idempotently(db_session):
+    c = _contract(db_session)  # start 2026-06-10, ACTIVE
+    db_session.commit()
+    svc = RecurringMonthlyService(db_session)
+    rows1 = svc.list_month("2026-06")
+    assert any(r.contract_id == c.id and r.amount == 150000 for r in rows1)
+    n_before = len(RecurringMonthlyStatusRepository(db_session).list_by_month("2026-06"))
+    svc.list_month("2026-06")  # 멱등
+    assert len(RecurringMonthlyStatusRepository(db_session).list_by_month("2026-06")) == n_before
+
+
+def test_list_month_excludes_before_start(db_session):
+    c = _contract(db_session)  # start 2026-06
+    db_session.commit()
+    rows = RecurringMonthlyService(db_session).list_month("2026-05")
+    assert all(r.contract_id != c.id for r in rows)  # 시작 전 달 제외
+
+
+def test_set_status_toggles(db_session):
+    c = _contract(db_session)
+    db_session.commit()
+    svc = RecurringMonthlyService(db_session)
+    row = svc.set_status(c.id, "2026-06", tax_invoice_issued=True, actor_user_id="admin")
+    assert row.tax_invoice_issued is True and row.balance_paid is False
+    row2 = svc.set_status(c.id, "2026-06", balance_paid=True, actor_user_id="admin")
+    assert row2.tax_invoice_issued is True and row2.balance_paid is True
