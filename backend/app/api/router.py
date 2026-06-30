@@ -10,7 +10,6 @@ from app.api.routes.admin import (
     partners,
     photos,
     recurring,
-    recurring_billing,
     recurring_monthly,
     reports,
     services,
@@ -34,11 +33,6 @@ api_router.include_router(photos.router, prefix="/admin/photos", tags=["admin-ph
 api_router.include_router(messages.router, prefix="/admin/messages", tags=["admin-messages"])
 api_router.include_router(services.router, prefix="/admin/services", tags=["admin-services"])
 api_router.include_router(recurring.router, prefix="/admin/recurring", tags=["admin-recurring"])
-api_router.include_router(
-    recurring_billing.router,
-    prefix="/admin/recurring/billing",
-    tags=["admin-recurring-billing"],
-)
 api_router.include_router(
     recurring_monthly.router,
     prefix="/admin/recurring/monthly",

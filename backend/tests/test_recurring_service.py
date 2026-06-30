@@ -1,22 +1,13 @@
 from datetime import date
-from uuid import uuid4
 
 import pytest
 from sqlalchemy import func, select
 
 from app.db.seed import DEV_PARTNER_ID
-from app.domain.constants import (
-    OrderStatus,
-    RecurrenceMode,
-    RecurringContractStatus,
-    RecurringOccurrenceStatus,
-    VatType,
-)
+from app.domain.constants import RecurrenceMode, RecurringContractStatus
 from app.models import OrderGroup
-from app.models.recurring_contract import RecurringContract
 from app.repositories.order_groups import OrderGroupRepository
-from app.repositories.orders import OrderRepository
-from app.schemas.recurring import ApproveItem, RecurringContractCreate, RecurringContractUpdate, SkipItem
+from app.schemas.recurring import RecurringContractCreate, RecurringContractUpdate
 from app.services.recurring import RecurringService
 
 
@@ -90,58 +81,6 @@ def test_soft_delete_hides_contract_but_keeps_group(db_session):
     assert OrderGroupRepository(db_session).get(gid) is not None
 
 
-def test_sync_creates_pending_occurrences_idempotently(db_session):
-    svc = RecurringService(db_session)
-    c = svc.create_contract(_make_payload(start_date=date(2026, 6, 10)), actor_user_id=None)
-    # 2026-06-20 기준, HORIZON 14일 → 6/10(과거, grace 내), 7/10? (7/10은 6/20+14=7/4 초과 → 미포함)
-    n1 = svc.sync_due_occurrences(today=date(2026, 6, 20))
-    pend1 = svc.occurrences.list_by_contract(c.id)
-    assert [o.due_date for o in pend1] == [date(2026, 6, 10)]
-    n2 = svc.sync_due_occurrences(today=date(2026, 6, 20))
-    pend2 = svc.occurrences.list_by_contract(c.id)
-    assert len(pend2) == 1  # 멱등 — 중복 생성 없음
-    assert n1 == 1 and n2 == 0
-
-
-def test_sync_isolates_bad_contract(db_session):
-    svc = RecurringService(db_session)
-    good = svc.create_contract(_make_payload(start_date=date(2026, 6, 10)), actor_user_id=None)
-    # 검증을 우회해 직접 불량 계약(monthly인데 day_of_month 없음)을 주입한다.
-    bad = RecurringContract(
-        id=str(uuid4()),
-        label="불량계약",
-        order_group_id=good.order_group_id,
-        recurrence_mode=RecurrenceMode.MONTHLY,
-        day_of_month=None,
-        start_date=date(2026, 6, 10),
-        status=RecurringContractStatus.ACTIVE,
-        service_name="불량",
-    )
-    db_session.add(bad)
-    db_session.commit()
-    # 불량 계약이 있어도 예외 없이 정상 계약은 처리되어야 한다(격리).
-    svc.sync_due_occurrences(today=date(2026, 6, 20))
-    assert svc.occurrences.list_by_contract(good.id)  # 정상 계약은 도래분 생성됨
-    assert svc.occurrences.list_by_contract(bad.id) == []  # 불량 계약은 건너뜀
-
-
-def test_sync_skips_paused_contract(db_session):
-    svc = RecurringService(db_session)
-    c = svc.create_contract(_make_payload(start_date=date(2026, 6, 10)), actor_user_id=None)
-    svc.set_status(c.id, RecurringContractStatus.PAUSED)
-    svc.sync_due_occurrences(today=date(2026, 6, 20))
-    assert svc.occurrences.list_by_contract(c.id) == []
-
-
-def test_sync_excludes_overdue_beyond_grace(db_session):
-    svc = RecurringService(db_session)
-    c = svc.create_contract(_make_payload(start_date=date(2026, 1, 10)), actor_user_id=None)
-    # today 6/20, grace 30일 → 5/21 이전 due는 제외. 6/10만 노출.
-    svc.sync_due_occurrences(today=date(2026, 6, 20))
-    dues = [o.due_date for o in svc.occurrences.list_by_contract(c.id)]
-    assert dues == [date(2026, 6, 10)]
-
-
 def test_create_contract_unknown_partner_no_orphan_group(db_session):
     svc = RecurringService(db_session)
     before = db_session.scalar(select(func.count()).select_from(OrderGroup))
@@ -150,84 +89,6 @@ def test_create_contract_unknown_partner_no_orphan_group(db_session):
     db_session.rollback()
     after = db_session.scalar(select(func.count()).select_from(OrderGroup))
     assert after == before  # 고아 그룹이 생성되지 않아야 한다
-
-
-def test_approve_keeps_default_vat_type_when_contract_vat_none(db_session):
-    svc = RecurringService(db_session)
-    # _make_payload는 vat_type을 설정하지 않으므로 contract.vat_type은 None.
-    c = svc.create_contract(_make_payload(start_date=date(2026, 6, 10)), actor_user_id=None)
-    assert c.vat_type is None
-    svc.sync_due_occurrences(today=date(2026, 6, 20))
-    occ = svc.occurrences.list_by_contract(c.id)[0]
-    result = svc.approve_occurrences([ApproveItem(occurrence_id=occ.id)], actor_user_id=None)
-    order = OrderRepository(db_session).get(result.generated_order_ids[0])
-    # 계약 vat_type이 None이면 OrderLineCreate 기본값(INCLUDED)을 유지해야 한다.
-    assert order.vat_type == VatType.INCLUDED
-
-
-def test_approve_uses_contract_vat_type_when_set(db_session):
-    svc = RecurringService(db_session)
-    c = svc.create_contract(
-        _make_payload(start_date=date(2026, 6, 10), vat_type="excluded"), actor_user_id=None
-    )
-    svc.sync_due_occurrences(today=date(2026, 6, 20))
-    occ = svc.occurrences.list_by_contract(c.id)[0]
-    result = svc.approve_occurrences([ApproveItem(occurrence_id=occ.id)], actor_user_id=None)
-    order = OrderRepository(db_session).get(result.generated_order_ids[0])
-    assert order.vat_type == VatType.EXCLUDED
-
-
-def test_approve_generates_confirmed_order_when_partner_present(db_session):
-    svc = RecurringService(db_session)
-    c = svc.create_contract(
-        _make_payload(start_date=date(2026, 6, 10), default_partner_id=DEV_PARTNER_ID), actor_user_id=None
-    )
-    svc.sync_due_occurrences(today=date(2026, 6, 20))
-    occ = svc.occurrences.list_by_contract(c.id)[0]
-    result = svc.approve_occurrences([ApproveItem(occurrence_id=occ.id)], actor_user_id=None)
-
-    assert len(result.generated_order_ids) == 1
-    order = OrderRepository(db_session).get(result.generated_order_ids[0])
-    assert order.status == OrderStatus.SCHEDULE_CONFIRMED
-    assert order.partner_id == DEV_PARTNER_ID
-    assert order.scheduled_date == occ.due_date
-    assert order.recurring_contract_id == c.id
-    db_session.refresh(occ)
-    assert occ.status == RecurringOccurrenceStatus.GENERATED
-    assert occ.generated_order_id == order.id
-
-
-def test_approve_generates_new_order_when_no_partner(db_session):
-    svc = RecurringService(db_session)
-    c = svc.create_contract(_make_payload(start_date=date(2026, 6, 10)), actor_user_id=None)
-    svc.sync_due_occurrences(today=date(2026, 6, 20))
-    occ = svc.occurrences.list_by_contract(c.id)[0]
-    result = svc.approve_occurrences([ApproveItem(occurrence_id=occ.id)], actor_user_id=None)
-    order = OrderRepository(db_session).get(result.generated_order_ids[0])
-    assert order.status == OrderStatus.NEW
-    assert order.partner_id is None
-
-
-def test_approve_skips_non_pending(db_session):
-    svc = RecurringService(db_session)
-    c = svc.create_contract(_make_payload(start_date=date(2026, 6, 10)), actor_user_id=None)
-    svc.sync_due_occurrences(today=date(2026, 6, 20))
-    occ = svc.occurrences.list_by_contract(c.id)[0]
-    svc.approve_occurrences([ApproveItem(occurrence_id=occ.id)], actor_user_id=None)
-    again = svc.approve_occurrences([ApproveItem(occurrence_id=occ.id)], actor_user_id=None)
-    assert again.generated_order_ids == []
-    assert occ.id in again.skipped_occurrence_ids
-
-
-def test_skip_marks_occurrence_skipped(db_session):
-    svc = RecurringService(db_session)
-    c = svc.create_contract(_make_payload(start_date=date(2026, 6, 10)), actor_user_id=None)
-    svc.sync_due_occurrences(today=date(2026, 6, 20))
-    occ = svc.occurrences.list_by_contract(c.id)[0]
-    svc.skip_occurrences([SkipItem(occurrence_id=occ.id, reason="고객 휴무")], actor_user_id=None)
-    db_session.refresh(occ)
-    assert occ.status == RecurringOccurrenceStatus.SKIPPED
-    assert occ.skipped_reason == "고객 휴무"
 
 
 def test_update_contract_unknown_partner_raises(db_session):
@@ -258,7 +119,7 @@ def test_update_contract_normalizes_customer_phone(db_session):
     assert group.customer_phone == "01011113333"
 
 
-def test_create_weekly_contract_with_weekdays_generates_multiple_per_week(db_session):
+def test_create_weekly_contract_with_weekdays_stores_and_restores_csv(db_session):
     svc = RecurringService(db_session)
     c = svc.create_contract(
         RecurringContractCreate(
@@ -272,10 +133,6 @@ def test_create_weekly_contract_with_weekdays_generates_multiple_per_week(db_ses
     assert svc.get_contract(c.id).weekdays == "0,2,4"  # CSV로 저장
     read = svc.to_contract_read(c)
     assert read.weekdays == [0, 2, 4]                  # list로 복원
-    # today=5/24 → horizon(today+14)=6/7 → 첫 주 월·수·금 3건만 도래(6/8 이후는 horizon 밖)
-    svc.sync_due_occurrences(today=date(2026, 5, 24))
-    dues = sorted(o.due_date for o in svc.occurrences.list_by_contract(c.id))
-    assert dues == [date(2026, 6, 1), date(2026, 6, 3), date(2026, 6, 5)]
 
 
 def test_schedule_text_weekly_multiple(db_session):

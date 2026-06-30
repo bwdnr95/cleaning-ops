@@ -5,16 +5,10 @@ from sqlalchemy.orm import Session
 from app.api.deps import CurrentUser, get_session, require_admin
 from app.domain.constants import RecurringContractStatus
 from app.schemas.recurring import (
-    ApproveOccurrencesRequest,
-    ApproveOccurrencesResult,
-    PendingOccurrenceRead,
     RecurringContractCreate,
     RecurringContractRead,
     RecurringContractSummaryRead,
     RecurringContractUpdate,
-    RecurringOccurrenceRead,
-    SkipOccurrencesRequest,
-    SkipOccurrencesResult,
 )
 from app.services.recurring import RecurringService
 
@@ -52,16 +46,6 @@ def get_contract(contract_id: str, db: Session = Depends(get_session), _: Curren
     if contract is None:
         raise HTTPException(status_code=404, detail="recurring_contract_not_found")
     return svc.to_contract_read(contract)
-
-
-@router.get("/contracts/{contract_id}/occurrences", response_model=list[RecurringOccurrenceRead])
-def list_contract_occurrences(
-    contract_id: str, db: Session = Depends(get_session), _: CurrentUser = Depends(require_admin)
-):
-    try:
-        return RecurringService(db).list_contract_occurrences(contract_id)
-    except ValueError as exc:
-        raise _err(exc) from exc
 
 
 @router.patch("/contracts/{contract_id}", response_model=RecurringContractRead)
@@ -114,33 +98,3 @@ def delete_contract(contract_id: str, db: Session = Depends(get_session), user: 
     except ValueError as exc:
         raise _err(exc) from exc
     return Response(status_code=204)
-
-
-@router.post("/occurrences/sync", response_model=list[PendingOccurrenceRead])
-def sync_occurrences(db: Session = Depends(get_session), _: CurrentUser = Depends(require_admin)):
-    svc = RecurringService(db)
-    svc.sync_due_occurrences()
-    return svc.list_pending_views()
-
-
-@router.get("/occurrences/pending", response_model=list[PendingOccurrenceRead])
-def list_pending(db: Session = Depends(get_session), _: CurrentUser = Depends(require_admin)):
-    return RecurringService(db).list_pending_views()
-
-
-@router.post("/occurrences/approve", response_model=ApproveOccurrencesResult)
-def approve_occurrences(
-    payload: ApproveOccurrencesRequest,
-    db: Session = Depends(get_session),
-    user: CurrentUser = Depends(require_admin),
-):
-    return RecurringService(db).approve_occurrences(payload.items, actor_user_id=user.id)
-
-
-@router.post("/occurrences/skip", response_model=SkipOccurrencesResult)
-def skip_occurrences(
-    payload: SkipOccurrencesRequest,
-    db: Session = Depends(get_session),
-    user: CurrentUser = Depends(require_admin),
-):
-    return RecurringService(db).skip_occurrences(payload.items, actor_user_id=user.id)

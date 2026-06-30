@@ -4,7 +4,7 @@ import pytest
 from pydantic import ValidationError
 
 from app.domain.constants import RecurrenceMode
-from app.schemas.recurring import ApproveOccurrencesRequest, RecurringContractCreate
+from app.schemas.recurring import RecurringContractCreate
 
 
 def test_contract_create_requires_service_and_schedule():
@@ -15,11 +15,6 @@ def test_contract_create_requires_service_and_schedule():
     )
     assert payload.discount_amount == 0
     assert payload.default_partner_id is None
-
-
-def test_approve_request_requires_at_least_one_item():
-    with pytest.raises(ValidationError):
-        ApproveOccurrencesRequest(items=[])
 
 
 def _create_kwargs(**over):

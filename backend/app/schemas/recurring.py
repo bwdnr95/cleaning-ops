@@ -90,9 +90,6 @@ class RecurringContractRead(RecurringContractBase):
     customer_token: str
     status: RecurringContractStatus
     next_due_date: date | None = None
-    # 이번 달 요약(목록 요약 DTO와 동일 정의: 방문월이 이번 청구월인 생성 주문 집계)
-    this_month_count: int = 0
-    this_month_amount: float = 0
     created_at: datetime | None = None
     updated_at: datetime | None = None
 
@@ -104,61 +101,3 @@ class RecurringContractSummaryRead(ApiModel):
     status: RecurringContractStatus
     schedule_text: str
     next_due_date: date | None = None
-    pending_count: int = 0
-    this_month_count: int = 0
-    this_month_amount: float = 0
-
-
-class RecurringOccurrenceRead(ApiModel):
-    id: str
-    contract_id: str
-    sequence_no: int
-    due_date: date
-    billing_month: str
-    status: str
-    generated_order_id: str | None = None
-    generated_at: datetime | None = None
-    skipped_reason: str | None = None
-
-
-class PendingOccurrenceRead(ApiModel):
-    occurrence_id: str
-    contract_id: str
-    contract_label: str
-    customer_name: str
-    sequence_no: int
-    due_date: date
-    service_name: str
-    total_amount: float | None = None
-    default_partner_id: str | None = None
-    default_partner_name: str | None = None
-    is_overdue: bool = False
-
-
-class ApproveItem(ApiModel):
-    occurrence_id: str
-    partner_id: str | None = None
-    scheduled_date: date | None = None
-    total_amount: float | None = None
-
-
-class ApproveOccurrencesRequest(ApiModel):
-    items: list[ApproveItem] = Field(min_length=1)
-
-
-class ApproveOccurrencesResult(ApiModel):
-    generated_order_ids: list[str]
-    skipped_occurrence_ids: list[str] = Field(default_factory=list)
-
-
-class SkipItem(ApiModel):
-    occurrence_id: str
-    reason: str | None = None
-
-
-class SkipOccurrencesRequest(ApiModel):
-    items: list[SkipItem] = Field(min_length=1)
-
-
-class SkipOccurrencesResult(ApiModel):
-    skipped_occurrence_ids: list[str]
