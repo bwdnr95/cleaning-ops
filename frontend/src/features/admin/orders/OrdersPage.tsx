@@ -7,7 +7,7 @@ import { sendAdminMessage } from '../../../api/messages';
 import { useApiResource } from '../../../api/useApiResource';
 import { ORDER_STATUS_OPTIONS, orderStatusLabel, orderWorkflowStatusValue } from '../../../domain/orderStatus';
 import { formatQuantity } from '../../../domain/format';
-import { receiptBadge } from '../../../domain/receiptType';
+import { RECEIPT_STATUSES, RECEIPT_TYPES, receiptBadge } from '../../../domain/receiptType';
 import { PAYMENT_STATUSES, paymentStatusLabel } from '../../../domain/paymentStatus';
 import { formatPhone } from '../../../domain/phone';
 import { OrderImportDialog } from './OrderImportDialog';
@@ -257,6 +257,8 @@ export function OrdersPage({ onOpenOrder, onCreateOrder, onEditOrder, initialTab
   const [bulkPartnerId, setBulkPartnerId] = React.useState('');
   const [bulkMessageType, setBulkMessageType] = React.useState('customer_schedule_confirmed');
   const [bulkPaymentStatus, setBulkPaymentStatus] = React.useState('paid');
+  const [bulkReceiptType, setBulkReceiptType] = React.useState('cash_receipt');
+  const [bulkReceiptStatus, setBulkReceiptStatus] = React.useState('issued');
   const [bulkScheduledDate, setBulkScheduledDate] = React.useState('');
   const [isImportOpen, setImportOpen] = React.useState(false);
   const [columnWidths, setColumnWidths] = React.useState(getInitialOrderTableColumnWidths);
@@ -482,6 +484,15 @@ export function OrdersPage({ onOpenOrder, onCreateOrder, onEditOrder, initialTab
     await runSelectedOrdersAction({
       successLabel: `${paymentStatusLabel(bulkPaymentStatus)} 결제상태로 변경했습니다.`,
       execute: (orderId) => updateAdminOrder(orderId, { payment_status: bulkPaymentStatus }),
+    });
+  };
+
+  const handleBulkReceiptChange = async () => {
+    // 발급X(none)면 2차는 '해당없음'으로 강제(백엔드도 정규화하지만 UI 일관성).
+    const receiptStatus = bulkReceiptType === 'none' ? 'not_applicable' : bulkReceiptStatus;
+    await runSelectedOrdersAction({
+      successLabel: '증빙자료를 변경했습니다.',
+      execute: (orderId) => updateAdminOrder(orderId, { receipt_type: bulkReceiptType, receipt_status: receiptStatus }),
     });
   };
 
@@ -891,6 +902,7 @@ export function OrdersPage({ onOpenOrder, onCreateOrder, onEditOrder, initialTab
           <button data-testid="orders-bulk-message-open" style={bulkActionButton(bulkAction === 'message')} onClick={() => setBulkAction(bulkAction === 'message' ? null : 'message')}>메시지</button>
           <button data-testid="orders-bulk-partner-open" style={bulkActionButton(bulkAction === 'partner')} onClick={() => setBulkAction(bulkAction === 'partner' ? null : 'partner')}>협력사 배정</button>
           <button data-testid="orders-bulk-payment-open" style={bulkActionButton(bulkAction === 'payment')} onClick={() => setBulkAction(bulkAction === 'payment' ? null : 'payment')}>결제상태</button>
+          <button data-testid="orders-bulk-evidence-open" style={bulkActionButton(bulkAction === 'evidence')} onClick={() => setBulkAction(bulkAction === 'evidence' ? null : 'evidence')}>증빙자료</button>
           <button data-testid="orders-bulk-schedule-open" style={bulkActionButton(bulkAction === 'schedule')} onClick={() => setBulkAction(bulkAction === 'schedule' ? null : 'schedule')}>일정 변경</button>
           <button
             data-testid="orders-bulk-delete"
@@ -917,6 +929,10 @@ export function OrdersPage({ onOpenOrder, onCreateOrder, onEditOrder, initialTab
           onMessageTypeChange={setBulkMessageType}
           bulkPaymentStatus={bulkPaymentStatus}
           onPaymentStatusChange={setBulkPaymentStatus}
+          bulkReceiptType={bulkReceiptType}
+          onReceiptTypeChange={setBulkReceiptType}
+          bulkReceiptStatus={bulkReceiptStatus}
+          onReceiptStatusChange={setBulkReceiptStatus}
           bulkScheduledDate={bulkScheduledDate}
           onScheduledDateChange={setBulkScheduledDate}
           isSaving={isSavingAction}
@@ -924,6 +940,7 @@ export function OrdersPage({ onOpenOrder, onCreateOrder, onEditOrder, initialTab
           onApplyPartner={() => void handleBulkPartnerAssign()}
           onApplyMessage={() => void handleBulkMessageSend()}
           onApplyPaymentStatus={() => void handleBulkPaymentStatusChange()}
+          onApplyEvidence={() => void handleBulkReceiptChange()}
           onApplySchedule={() => void handleBulkScheduleChange()}
         />
       )}
@@ -1243,6 +1260,10 @@ function BulkActionPanel({
   onMessageTypeChange,
   bulkPaymentStatus,
   onPaymentStatusChange,
+  bulkReceiptType,
+  onReceiptTypeChange,
+  bulkReceiptStatus,
+  onReceiptStatusChange,
   bulkScheduledDate,
   onScheduledDateChange,
   isSaving,
@@ -1250,6 +1271,7 @@ function BulkActionPanel({
   onApplyPartner,
   onApplyMessage,
   onApplyPaymentStatus,
+  onApplyEvidence,
   onApplySchedule,
 }) {
   return (
@@ -1297,6 +1319,21 @@ function BulkActionPanel({
             {PAYMENT_STATUSES.map((status) => <option key={status.value} value={status.value}>{status.label}</option>)}
           </select>
           <button data-testid="orders-bulk-payment-apply" className="btn btn--primary btn--sm" disabled={isSaving} onClick={onApplyPaymentStatus}>
+            {isSaving ? '처리 중' : '적용'}
+          </button>
+        </>
+      )}
+
+      {action === 'evidence' && (
+        <>
+          <span style={panelLabelStyle}>선택 주문 증빙</span>
+          <select data-testid="orders-bulk-receipt-type" className="input" value={bulkReceiptType} onChange={(event) => onReceiptTypeChange(event.target.value)} style={{ width: 150, height: 32 }}>
+            {RECEIPT_TYPES.map((type) => <option key={type.value} value={type.value}>{type.label}</option>)}
+          </select>
+          <select data-testid="orders-bulk-receipt-status" className="input" value={bulkReceiptType === 'none' ? 'not_applicable' : bulkReceiptStatus} disabled={bulkReceiptType === 'none'} onChange={(event) => onReceiptStatusChange(event.target.value)} style={{ width: 150, height: 32 }}>
+            {RECEIPT_STATUSES.map((status) => <option key={status.value} value={status.value}>{status.label}</option>)}
+          </select>
+          <button data-testid="orders-bulk-receipt-apply" className="btn btn--primary btn--sm" disabled={isSaving} onClick={onApplyEvidence}>
             {isSaving ? '처리 중' : '적용'}
           </button>
         </>
