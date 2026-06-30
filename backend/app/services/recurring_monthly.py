@@ -79,7 +79,6 @@ class RecurringMonthlyService:
     def set_status(
         self, contract_id: str, month: str, *,
         tax_invoice_issued: bool | None = None, balance_paid: bool | None = None,
-        actor_user_id: str | None,
     ) -> RecurringMonthlyRowRead:
         contract = self.contracts.get(contract_id)
         if contract is None:

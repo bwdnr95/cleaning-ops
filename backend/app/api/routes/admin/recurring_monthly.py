@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from app.api.deps import CurrentUser, get_session, require_admin
@@ -9,7 +9,11 @@ router = APIRouter()
 
 
 @router.get("", response_model=list[RecurringMonthlyRowRead])
-def list_monthly(month: str, db: Session = Depends(get_session), _: CurrentUser = Depends(require_admin)):
+def list_monthly(
+    month: str = Query(pattern=r"^\d{4}-(0[1-9]|1[0-2])$"),
+    db: Session = Depends(get_session),
+    _: CurrentUser = Depends(require_admin),
+):
     return RecurringMonthlyService(db).list_month(month)
 
 
@@ -17,13 +21,12 @@ def list_monthly(month: str, db: Session = Depends(get_session), _: CurrentUser 
 def set_monthly(
     payload: SetMonthlyStatusRequest,
     db: Session = Depends(get_session),
-    user: CurrentUser = Depends(require_admin),
+    _: CurrentUser = Depends(require_admin),
 ):
     try:
         return RecurringMonthlyService(db).set_status(
             payload.contract_id, payload.month,
             tax_invoice_issued=payload.tax_invoice_issued, balance_paid=payload.balance_paid,
-            actor_user_id=user.id,
         )
     except ValueError as exc:
         raise HTTPException(

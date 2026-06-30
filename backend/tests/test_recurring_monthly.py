@@ -52,9 +52,9 @@ def test_set_status_toggles(db_session):
     c = _contract(db_session)
     db_session.commit()
     svc = RecurringMonthlyService(db_session)
-    row = svc.set_status(c.id, "2026-06", tax_invoice_issued=True, actor_user_id="admin")
+    row = svc.set_status(c.id, "2026-06", tax_invoice_issued=True)
     assert row.tax_invoice_issued is True and row.balance_paid is False
-    row2 = svc.set_status(c.id, "2026-06", balance_paid=True, actor_user_id="admin")
+    row2 = svc.set_status(c.id, "2026-06", balance_paid=True)
     assert row2.tax_invoice_issued is True and row2.balance_paid is True
 
 
@@ -73,3 +73,13 @@ def test_monthly_api_list_and_set(client, seed_admin_token):
     res = client.post("/api/admin/recurring/monthly/set",
                       json={"contract_id": cid, "month": "2026-06", "tax_invoice_issued": True}, headers=h)
     assert res.status_code == 200 and res.json()["tax_invoice_issued"] is True
+
+
+def test_monthly_api_rejects_invalid_month(client, seed_admin_token):
+    # 잘못된 월은 GET 500이 아니라 422, POST는 영속화 없이 422 (검증 일원화).
+    h = {"Authorization": f"Bearer {seed_admin_token}"}
+    assert client.get("/api/admin/recurring/monthly?month=2026-13", headers=h).status_code == 422
+    assert client.get("/api/admin/recurring/monthly?month=foo", headers=h).status_code == 422
+    assert client.post("/api/admin/recurring/monthly/set",
+                       json={"contract_id": "x", "month": "2026-13", "tax_invoice_issued": True},
+                       headers=h).status_code == 422

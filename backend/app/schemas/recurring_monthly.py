@@ -16,6 +16,6 @@ class RecurringMonthlyRowRead(ApiModel):
 
 class SetMonthlyStatusRequest(ApiModel):
     contract_id: str
-    month: str = Field(pattern=r"^\d{4}-\d{2}$")
+    month: str = Field(pattern=r"^\d{4}-(0[1-9]|1[0-2])$")
     tax_invoice_issued: bool | None = None
     balance_paid: bool | None = None
