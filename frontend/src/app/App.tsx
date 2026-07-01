@@ -10,6 +10,7 @@ import { MessagesPage } from '../features/admin/messages/MessagesPage';
 import { OrderDetailPage } from '../features/admin/orders/OrderDetailPage';
 import { OrderFormPage } from '../features/admin/orders/OrderFormPage';
 import { OrdersPage } from '../features/admin/orders/OrdersPage';
+import { BrokersPage } from '../features/admin/brokers/BrokersPage';
 import { PartnersPage } from '../features/admin/partners/PartnersPage';
 import { PhotoReviewPage } from '../features/admin/photo-review/PhotoReviewPage';
 import { ProductsPage } from '../features/admin/products/ProductsPage';
@@ -49,6 +50,11 @@ const ADMIN_PAGE_META = {
     title: '발송이력',
     subtitle: '고객/협력사 안내',
     breadcrumb: ['운영', '발송이력'],
+  },
+  brokers: {
+    title: '중개사관리',
+    subtitle: '중개사별 건수 / 매출',
+    breadcrumb: ['운영', '중개사관리'],
   },
   partners: {
     title: '협력사관리',
@@ -135,14 +141,14 @@ export function App() {
 
   if (isStandaloneCustomerLink) {
     return (
-      <main style={{ minHeight: '100vh', height: '100vh', width: '100vw', background: '#f7f6f3' }}>
+      <main style={{ minHeight: '100dvh', height: '100dvh', width: '100vw', background: '#f7f6f3' }}>
         <CustomerReservation />
       </main>
     );
   }
 
   return (
-    <main style={{ height: '100vh', width: '100vw', overflow: 'hidden', background: 'var(--bg)' }}>
+    <main style={{ height: '100dvh', width: '100vw', overflow: 'hidden', background: 'var(--bg)' }}>
         {mode === 'admin' && (
           <>
             {isSwitchingRole ? (
@@ -250,6 +256,7 @@ export function App() {
                         />
                       )}
                       {page === 'products' && <ProductsPage />}
+                      {page === 'brokers' && <BrokersPage />}
                       {page === 'partners' && <PartnersPage />}
                       {page === 'recurring' && (
                         <RecurringContractsPage
@@ -263,7 +270,7 @@ export function App() {
                           onOpenOrder={(orderId) => navigateAdmin(toOrderDetailRoute(orderId, ordersView))}
                         />
                       )}
-                      {!['dashboard', 'orders', 'calendar', 'photos', 'products', 'partners', 'recurring', 'reports', 'sends'].includes(page) && (
+                      {!['dashboard', 'orders', 'calendar', 'photos', 'products', 'brokers', 'partners', 'recurring', 'reports', 'sends'].includes(page) && (
                         <ComingSoon page={page} />
                       )}
                     </>

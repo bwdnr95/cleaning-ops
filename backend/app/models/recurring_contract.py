@@ -29,6 +29,8 @@ class RecurringContract(TimestampMixin, Base):
     # 회차 템플릿
     default_partner_id: Mapped[str | None] = mapped_column(ForeignKey("partners.id"))
     team_name: Mapped[str | None] = mapped_column(String(120))
+    # 청소 담당자 연락처(계약 참조용). 협력사 배정과 별개의 자유 입력값.
+    team_phone: Mapped[str | None] = mapped_column(String(30))
     service_category_id: Mapped[str | None] = mapped_column(ForeignKey("service_categories.id"))
     service_item_id: Mapped[str | None] = mapped_column(ForeignKey("service_items.id"))
     service_name: Mapped[str] = mapped_column(String(160))

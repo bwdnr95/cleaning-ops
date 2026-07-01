@@ -29,6 +29,7 @@ class RecurringContractBase(ApiModel):
     # 회차 템플릿
     default_partner_id: str | None = None
     team_name: str | None = None
+    team_phone: str | None = None
     service_category_id: str | None = None
     service_item_id: str | None = None
     service_name: str
@@ -69,6 +70,7 @@ class RecurringContractUpdate(ApiModel):
     max_occurrences: int | None = Field(default=None, ge=1)
     default_partner_id: str | None = None
     team_name: str | None = None
+    team_phone: str | None = None
     service_category_id: str | None = None
     service_item_id: str | None = None
     service_name: str | None = None

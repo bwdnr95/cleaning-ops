@@ -113,6 +113,10 @@ function NavButton({ testId, icon, label, active, onClick }) {
 const navBarStyle = {
   flexShrink: 0,
   height: 62,
+  // 3-4: 일반 모바일 브라우저(사파리/크롬)에서 하단 네비가 잘리지 않도록,
+  // 컨테이너는 100dvh(App.tsx)를 쓰고 여기선 iOS 홈 인디케이터 영역을 추가로 확보한다.
+  boxSizing: 'content-box' as const,
+  paddingBottom: 'env(safe-area-inset-bottom)',
   display: 'flex',
   alignItems: 'stretch',
   background: '#fff',

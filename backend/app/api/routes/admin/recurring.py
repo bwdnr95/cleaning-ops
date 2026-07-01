@@ -1,9 +1,10 @@
-from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 
 from sqlalchemy.orm import Session
 
 from app.api.deps import CurrentUser, get_session, require_admin
 from app.domain.constants import RecurringContractStatus
+from app.schemas.order import AdminOrderRead
 from app.schemas.recurring import (
     RecurringContractCreate,
     RecurringContractRead,
@@ -18,6 +19,16 @@ router = APIRouter()
 def _err(exc: ValueError) -> HTTPException:
     detail = str(exc)
     return HTTPException(status_code=404 if detail.endswith("_not_found") else 400, detail=detail)
+
+
+@router.get("/orders", response_model=list[AdminOrderRead])
+def list_recurring_orders(
+    month: str = Query(pattern=r"^\d{4}-(0[1-9]|1[0-2])$"),
+    db: Session = Depends(get_session),
+    user: CurrentUser = Depends(require_admin),
+):
+    # 2-3/2-4: 해당 월의 정기 주문을 (없으면) 생성한 뒤 목록으로 반환한다(월 트래커와 동일한 lazy 생성).
+    return RecurringService(db).list_month_orders(month, actor_user_id=user.id)
 
 
 @router.get("/contracts", response_model=list[RecurringContractSummaryRead])

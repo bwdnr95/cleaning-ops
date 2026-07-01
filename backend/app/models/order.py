@@ -1,7 +1,7 @@
 from datetime import date, datetime
 from decimal import Decimal
 
-from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Numeric, String, Text
+from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Numeric, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.domain.constants import OrderStatus
@@ -10,6 +10,15 @@ from app.models.base import Base, TimestampMixin
 
 class Order(TimestampMixin, Base):
     __tablename__ = "orders"
+    # 정기 주문 멱등 슬롯: 같은 계약의 같은 '생성 예정일'은 1건만 존재한다(재생성/동시생성 방지).
+    # 일회성 주문은 두 값이 모두 NULL이라 제약에 걸리지 않는다(유니크에서 NULL은 서로 구별됨).
+    __table_args__ = (
+        UniqueConstraint(
+            "recurring_contract_id",
+            "recurring_planned_date",
+            name="uq_orders_recurring_slot",
+        ),
+    )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
     group_id: Mapped[str] = mapped_column(ForeignKey("order_groups.id"), index=True)
@@ -19,6 +28,8 @@ class Order(TimestampMixin, Base):
     requested_time: Mapped[str | None] = mapped_column(String(80))
     partner_id: Mapped[str | None] = mapped_column(ForeignKey("partners.id"), index=True)
     team_name: Mapped[str | None] = mapped_column(String(120))
+    # 중개사(주문을 소개한 중개업체). partner_id 와 동형(라인 단위).
+    broker_id: Mapped[str | None] = mapped_column(ForeignKey("brokers.id"), index=True)
     service_category_id: Mapped[str | None] = mapped_column(ForeignKey("service_categories.id"))
     service_item_id: Mapped[str | None] = mapped_column(ForeignKey("service_items.id"))
     service_name: Mapped[str] = mapped_column(String(160))
@@ -59,6 +70,9 @@ class Order(TimestampMixin, Base):
         index=True,
         nullable=True,
     )
+    # 정기청소에서 자동 생성된 회차의 '생성 당시 예정일'(불변). 멱등 생성 키.
+    # scheduled_date는 운영자가 옮길 수 있어 멱등 키로 쓰지 않는다.
+    recurring_planned_date: Mapped[date | None] = mapped_column(Date, index=True)
     deleted_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True),
         nullable=True,

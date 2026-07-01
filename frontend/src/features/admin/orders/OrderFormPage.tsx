@@ -3,6 +3,7 @@ import React from 'react';
 import {
   createOrderGroup,
   getAdminOrder,
+  listBrokers,
   listPartners,
   listServiceCatalog,
   updateAdminOrder,
@@ -21,6 +22,7 @@ export function OrderFormPage({ mode = 'create', orderId = null, duplicateFromOr
   // 복제: create 저장 경로를 그대로 쓰되, 기존 주문의 고객정보만 복사한다(서비스/일정/협력사는 공란).
   const isDuplicate = mode === 'create' && Boolean(duplicateFromOrderId);
   const partners = useApiResource(listPartners);
+  const brokers = useApiResource(listBrokers);
   const serviceCatalog = useApiResource(listServiceCatalog);
   const [form, setForm] = React.useState(() => createEmptyGroupForm());
   const [isLoadingOrder, setIsLoadingOrder] = React.useState(mode === 'edit' || isDuplicate);
@@ -295,6 +297,7 @@ export function OrderFormPage({ mode = 'create', orderId = null, duplicateFromOr
                     canRemove={mode === 'create' && form.lines.length > 1}
                     activeServiceCategories={activeServiceCategories}
                     partners={partners.data || []}
+                    brokers={brokers.data || []}
                     onFieldChange={setLineField}
                     onMoneyChange={handleMoneyChange}
                     onPartnerChange={handlePartnerChange}
@@ -358,6 +361,7 @@ function LineEditor({
   canRemove,
   activeServiceCategories,
   partners,
+  brokers,
   onFieldChange,
   onMoneyChange,
   onPartnerChange,
@@ -437,7 +441,19 @@ function LineEditor({
             <DatePicker testId={`order-line-${lineIndex}-scheduled-date`} value={line.scheduled_date} onChange={(value) => onFieldChange(lineIndex, 'scheduled_date', value)} placeholder="방문일 선택" />
           </Field>
           <TextField testId={`order-line-${lineIndex}-requested-time`} label="요청 시간" value={line.requested_time} onChange={(value) => onFieldChange(lineIndex, 'requested_time', value)} placeholder="14:00 또는 오후 2-5시" />
-          <TextField label="팀명" value={line.team_name} onChange={(value) => onFieldChange(lineIndex, 'team_name', value)} />
+          <Field label="중개사">
+            <select
+              className="input"
+              data-testid={`order-line-${lineIndex}-broker`}
+              value={line.broker_id}
+              onChange={(event) => onFieldChange(lineIndex, 'broker_id', event.target.value)}
+            >
+              <option value="">없음</option>
+              {brokers.map((broker) => (
+                <option key={broker.id} value={broker.id}>{broker.name}</option>
+              ))}
+            </select>
+          </Field>
           <TextField label="상품 상세" span={2} multiline value={line.service_detail} onChange={(value) => onFieldChange(lineIndex, 'service_detail', value)} />
           <TextField label="요청사항" span={2} multiline value={line.special_request} onChange={(value) => onFieldChange(lineIndex, 'special_request', value)} />
         </FieldGrid>
@@ -580,6 +596,7 @@ function createEmptyLineForm() {
     requested_time: '',
     partner_id: '',
     team_name: '',
+    broker_id: '',
     service_category_id: '',
     service_item_id: '',
     service_name: '',
@@ -643,6 +660,7 @@ function toLineForm(order) {
     requested_time: order.requested_time || '',
     partner_id: order.partner_id || '',
     team_name: order.team_name || '',
+    broker_id: order.broker_id || '',
     service_category_id: order.service_category_id || '',
     service_item_id: order.service_item_id || '',
     service_name: order.service_name || '',
@@ -694,6 +712,7 @@ function toLinePayload(line) {
     requested_time: emptyToNull(line.requested_time),
     partner_id: emptyToNull(line.partner_id),
     team_name: emptyToNull(line.team_name),
+    broker_id: emptyToNull(line.broker_id),
     service_category_id: emptyToNull(line.service_category_id),
     service_item_id: emptyToNull(line.service_item_id),
     service_name: line.service_name.trim(),

@@ -5,6 +5,7 @@ import { CONTRACT_STATUS_LABEL, CONTRACT_STATUS_TONE } from '../../../domain/rec
 import { RecurringContractDetail } from './RecurringContractDetail';
 import { RecurringContractForm } from './RecurringContractForm';
 import { RecurringMonthlyTracker } from './RecurringMonthlyTracker';
+import { RecurringOrdersList } from './RecurringOrdersList';
 
 type View = { mode: 'list' } | { mode: 'create' } | { mode: 'detail'; id: string };
 
@@ -45,7 +46,7 @@ export function RecurringContractsPage({
   const [contracts, setContracts] = React.useState<RecurringContractSummary[] | null>(null);
   const [error, setError] = React.useState<string | null>(null);
   // 정기청소 영역 상단 탭: 계약 관리(기존) / 월 트래커(세금계산서·잔금).
-  const [tab, setTab] = React.useState<'contracts' | 'monthly'>('contracts');
+  const [tab, setTab] = React.useState<'contracts' | 'monthly' | 'orders'>('contracts');
 
   const load = React.useCallback(async () => {
     setError(null);
@@ -53,7 +54,9 @@ export function RecurringContractsPage({
       setContracts(await listRecurringContracts());
     } catch (e) {
       setError(e instanceof Error ? e.message : '불러오기에 실패했습니다.');
-      setContracts([]);
+      // 실패 시 []로 두면 에러 배너 + "정기계약 없음" 빈상태가 동시에 떠 오해를 준다.
+      // null로 되돌려 에러 배너만 노출한다(아래 로딩 분기는 error로 가드). 월 트래커(2c275b3)와 동일.
+      setContracts(null);
     }
   }, []);
 
@@ -95,9 +98,19 @@ export function RecurringContractsPage({
           >
             월 트래커
           </button>
+          <button
+            type="button"
+            className="btn btn--ghost btn--sm"
+            data-testid="recurring-tab-orders"
+            style={{ fontWeight: tab === 'orders' ? 700 : 400 }}
+            onClick={() => setTab('orders')}
+          >
+            정기 주문
+          </button>
         </div>
 
         {tab === 'monthly' && <RecurringMonthlyTracker />}
+        {tab === 'orders' && <RecurringOrdersList />}
         {tab === 'contracts' && (
           <>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -134,7 +147,7 @@ export function RecurringContractsPage({
             <section>
               <h2 style={{ fontSize: 14, fontWeight: 700, margin: '0 0 10px' }}>정기계약</h2>
               {contracts === null ? (
-                <div style={{ color: 'var(--text-tertiary)', fontSize: 13 }}>불러오는 중…</div>
+                error ? null : <div style={{ color: 'var(--text-tertiary)', fontSize: 13 }}>불러오는 중…</div>
               ) : contracts.length === 0 ? (
                 <div style={{ color: 'var(--text-tertiary)', fontSize: 13 }}>등록된 정기계약이 없습니다.</div>
               ) : (

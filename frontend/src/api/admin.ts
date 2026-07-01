@@ -11,6 +11,7 @@ export interface AdminOrderLineInput {
   requested_time?: string | null;
   partner_id?: string | null;
   team_name?: string | null;
+  broker_id?: string | null;
   service_category_id?: string | null;
   service_item_id?: string | null;
   service_name: string;
@@ -191,6 +192,7 @@ export interface AdminOrderPageParams {
   received_from?: string;
   received_to?: string;
   partner_id?: string;
+  broker_id?: string;
   q?: string;
 }
 
@@ -438,6 +440,44 @@ export function updatePartnerCategory(categoryId, input) {
 
 export function deletePartnerCategory(categoryId) {
   return apiRequest(`/admin/partners/categories/${encodeURIComponent(categoryId)}`, {
+    method: 'DELETE',
+  });
+}
+
+// 중개사(broker) — 협력사와 동일 패턴. listBrokers=활성만(드롭다운용), listAdminBrokers=전체(관리 화면용).
+export function listBrokers() {
+  return apiRequest('/admin/brokers');
+}
+
+export function listAdminBrokers({ includeInactive = true } = {}) {
+  const params = new URLSearchParams();
+  if (includeInactive) {
+    params.set('include_inactive', 'true');
+  }
+  const query = params.toString();
+  return apiRequest(`/admin/brokers${query ? `?${query}` : ''}`);
+}
+
+export function createAdminBroker(input) {
+  return apiRequest('/admin/brokers', {
+    method: 'POST',
+    body: input,
+  });
+}
+
+export function getAdminBroker(brokerId) {
+  return apiRequest(`/admin/brokers/${encodeURIComponent(brokerId)}`);
+}
+
+export function updateAdminBroker(brokerId, input) {
+  return apiRequest(`/admin/brokers/${encodeURIComponent(brokerId)}`, {
+    method: 'PATCH',
+    body: input,
+  });
+}
+
+export function deleteAdminBroker(brokerId) {
+  return apiRequest(`/admin/brokers/${encodeURIComponent(brokerId)}`, {
     method: 'DELETE',
   });
 }

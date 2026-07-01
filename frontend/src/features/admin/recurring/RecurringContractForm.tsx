@@ -326,6 +326,16 @@ export function RecurringContractForm({
               />
             </label>
             <label style={labelStyle}>
+              상품 상세(선택)
+              <textarea
+                style={{ ...inputStyle, minHeight: 60, resize: 'vertical', fontFamily: 'inherit' }}
+                value={form.service_detail ?? ''}
+                onChange={(e) => set('service_detail', e.target.value || null)}
+                data-testid="rc-service-detail"
+                placeholder="예: 3층 사무실 · 화장실 2칸 포함"
+              />
+            </label>
+            <label style={labelStyle}>
               1주기 금액
               <input
                 style={inputStyle}
@@ -354,11 +364,33 @@ export function RecurringContractForm({
               />
             </label>
             <label style={labelStyle}>
-              특이사항(선택)
+              특별 요청(선택)
               <input
                 style={inputStyle}
                 value={form.special_request ?? ''}
                 onChange={(e) => set('special_request', e.target.value || null)}
+                data-testid="rc-special-request"
+              />
+            </label>
+            <label style={labelStyle}>
+              청소 담당팀(선택)
+              <input
+                style={inputStyle}
+                value={form.team_name ?? ''}
+                onChange={(e) => set('team_name', e.target.value || null)}
+                data-testid="rc-team-name"
+                placeholder="예: 1팀 / 김반장팀"
+              />
+            </label>
+            <label style={labelStyle}>
+              청소 담당자 번호(선택)
+              <input
+                style={inputStyle}
+                value={form.team_phone ?? ''}
+                onChange={(e) => set('team_phone', e.target.value || null)}
+                data-testid="rc-team-phone"
+                inputMode="numeric"
+                placeholder="01012345678"
               />
             </label>
             <label style={labelStyle}>

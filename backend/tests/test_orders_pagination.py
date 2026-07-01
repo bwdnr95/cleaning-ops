@@ -268,8 +268,8 @@ def test_status_tab_counts_match_universe() -> None:
     assert counts["all"] == TOTAL_ORDERS - 1  # '전체' 카운트는 취소 제외(취소는 cancel 탭)
     assert counts["consulting_unassigned"] == 1
     assert counts["schedule_partner_checking"] == 1
-    # 작업예정: future-scheduled, today-scheduled, past-unpaid(SCHEDULED) = 3
-    assert counts["schedule_work_confirmed"] == 3
+    # 4-1: '일정 및 작업 확정' = 작업예정 3건(future/today/past-unpaid) + 상담중/미배정 1건 합산 = 4.
+    assert counts["schedule_work_confirmed"] == 4
     # 고객전달필요: delivery-needed + completed-unpaid(워크플로 끌어내림) = 2
     assert counts["work_done"] == 2
     # 서비스완료 + 완납: completed-paid + past-paid = 2 (visit_preset=all 이라 과거 완납 포함).
@@ -292,6 +292,40 @@ def test_status_tab_filter_applies() -> None:
     ids = {item["id"] for item in body["items"]}
     assert body["total"] == 2
     assert ids == {"ord-delivery-needed", "ord-completed-unpaid"}
+
+
+def test_schedule_tab_includes_consulting_unassigned() -> None:
+    # 4-1: '일정 및 작업 확정' 탭은 작업예정 워크플로 + 상담중/미배정을 함께 노출한다(카운트=목록 일치).
+    client = _make_client()
+    headers = _auth(client)
+
+    body = _get_page(
+        client,
+        headers,
+        visit_preset="all",
+        status="schedule_work_confirmed",
+        page=1,
+        page_size=50,
+    )
+    ids = {item["id"] for item in body["items"]}
+    assert ids == {
+        "ord-future-scheduled",
+        "ord-today-scheduled",
+        "ord-past-unpaid",
+        "ord-consulting",
+    }
+    assert body["total"] == 4
+
+    # 상담중/미배정 탭은 그대로 유지된다(두 탭에 중복 노출되는 것은 의도된 동작).
+    consulting = _get_page(
+        client,
+        headers,
+        visit_preset="all",
+        status="consulting_unassigned",
+        page=1,
+        page_size=50,
+    )
+    assert {item["id"] for item in consulting["items"]} == {"ord-consulting"}
 
 
 def test_summary_sums_include_onsite_extra() -> None:

@@ -1,5 +1,6 @@
 from app.models.base import Base
 from app.models.audit_log import AuditLog
+from app.models.broker import Broker
 from app.models.message import MessageLog
 from app.models.order import Order
 from app.models.order_group import OrderGroup
@@ -16,6 +17,7 @@ from app.models.user import User
 __all__ = [
     "Base",
     "AuditLog",
+    "Broker",
     "MessageLog",
     "Order",
     "OrderGroup",

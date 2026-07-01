@@ -2,7 +2,7 @@ import React from 'react';
 import { DatePicker } from '../../../components/common/DatePicker';
 import { PaginationBar } from '../../../components/common/Pagination';
 import { Avatar, Icon } from '../../../components/common/ui';
-import { bulkDeleteAdminOrders, exportAdminOrders, listAdminOrdersPage, listPartners, updateAdminOrder, type AdminOrderPageParams, type AdminOrderSort } from '../../../api/admin';
+import { bulkDeleteAdminOrders, exportAdminOrders, listAdminOrdersPage, listBrokers, listPartners, updateAdminOrder, type AdminOrderPageParams, type AdminOrderSort } from '../../../api/admin';
 import { sendAdminMessage } from '../../../api/messages';
 import { useApiResource } from '../../../api/useApiResource';
 import { ORDER_STATUS_OPTIONS, orderStatusLabel, orderWorkflowStatusValue } from '../../../domain/orderStatus';
@@ -12,6 +12,7 @@ import { PAYMENT_STATUSES, paymentStatusLabel } from '../../../domain/paymentSta
 import { formatPhone } from '../../../domain/phone';
 import { OrderImportDialog } from './OrderImportDialog';
 import { PartnerFilterSelect } from './PartnerFilterSelect';
+import { BrokerFilterSelect } from './BrokerFilterSelect';
 import {
   addDays,
   formatDateValue,
@@ -244,6 +245,7 @@ export function OrdersPage({ onOpenOrder, onCreateOrder, onEditOrder, initialTab
   const [query, setQuery] = React.useState('');
   const [dateFilter, setDateFilter] = React.useState(() => createInitialDateFilter(initialTab, initialDatePreset));
   const [partnerFilter, setPartnerFilter] = React.useState('all');
+  const [brokerFilter, setBrokerFilter] = React.useState('all');
   const [receivedDateFilter, setReceivedDateFilter] = React.useState(() => createDateFilter('all'));
   const [page, setPage] = React.useState(1);
   const [pageSize, setPageSize] = React.useState(50);
@@ -285,6 +287,7 @@ export function OrdersPage({ onOpenOrder, onCreateOrder, onEditOrder, initialTab
     received_from: receivedDateFilter.start || undefined,
     received_to: receivedDateFilter.end || undefined,
     partner_id: partnerFilter === 'all' ? undefined : partnerFilter,
+    broker_id: brokerFilter === 'all' ? undefined : brokerFilter,
     q: debouncedQuery || undefined,
   }), [
     page,
@@ -298,6 +301,7 @@ export function OrdersPage({ onOpenOrder, onCreateOrder, onEditOrder, initialTab
     receivedDateFilter.start,
     receivedDateFilter.end,
     partnerFilter,
+    brokerFilter,
     debouncedQuery,
   ]);
   const ordersResourceKey = [
@@ -312,11 +316,13 @@ export function OrdersPage({ onOpenOrder, onCreateOrder, onEditOrder, initialTab
     receivedDateFilter.start,
     receivedDateFilter.end,
     partnerFilter,
+    brokerFilter,
     debouncedQuery,
   ].join('|');
   const loadOrders = React.useCallback(() => listAdminOrdersPage(orderPageParams), [orderPageParams]);
   const ordersResource = useApiResource(loadOrders, ordersResourceKey);
   const partnersResource = useApiResource(listPartners);
+  const brokersResource = useApiResource(listBrokers);
   const orderPage = ordersResource.data;
   const items = React.useMemo(
     () => (orderPage?.items ? orderPage.items.map(toOrderRow) : []),
@@ -338,6 +344,13 @@ export function OrdersPage({ onOpenOrder, onCreateOrder, onEditOrder, initialTab
       .slice()
       .sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'ko'));
   }, [partners]);
+  const brokers = React.useMemo(() => brokersResource.data || [], [brokersResource.data]);
+  const sortedActiveBrokers = React.useMemo(() => {
+    return brokers
+      .filter((broker) => broker.is_active !== false)
+      .slice()
+      .sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'ko'));
+  }, [brokers]);
 
   React.useEffect(() => {
     setTab(initialTab);
@@ -361,6 +374,7 @@ export function OrdersPage({ onOpenOrder, onCreateOrder, onEditOrder, initialTab
     dateFilter.start,
     dateFilter.end,
     partnerFilter,
+    brokerFilter,
     receivedDateFilter.start,
     receivedDateFilter.end,
   ]);
@@ -738,6 +752,20 @@ export function OrdersPage({ onOpenOrder, onCreateOrder, onEditOrder, initialTab
         />
         {partnerFilter !== 'all' && (
           <button type="button" data-testid="orders-partner-clear" style={softGhostBtn} onClick={() => setPartnerFilter('all')}>
+            해제
+          </button>
+        )}
+        <span style={{ width: 1, height: 16, background: 'var(--divider)', margin: '0 2px' }} />
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, color: 'var(--text-tertiary)', fontSize: 12, fontWeight: 600, whiteSpace: 'nowrap' }}>
+          <Icon name="star" size={12}/> 중개사
+        </span>
+        <BrokerFilterSelect
+          brokers={sortedActiveBrokers}
+          value={brokerFilter}
+          onChange={setBrokerFilter}
+        />
+        {brokerFilter !== 'all' && (
+          <button type="button" data-testid="orders-broker-clear" style={softGhostBtn} onClick={() => setBrokerFilter('all')}>
             해제
           </button>
         )}

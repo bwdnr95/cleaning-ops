@@ -111,6 +111,7 @@ class OrderPageService:
         received_from: date | None = None,
         received_to: date | None = None,
         partner_id: str | None = None,
+        broker_id: str | None = None,
         q: str | None = None,
     ) -> OrderPageResult:
         today = business_today()
@@ -156,6 +157,9 @@ class OrderPageService:
         # 3) 협력사 필터
         if partner_id:
             rows = [order for order in rows if order.partner_id == partner_id]
+        # 3-1) 중개사 필터 (협력사와 동일 패턴)
+        if broker_id:
+            rows = [order for order in rows if order.broker_id == broker_id]
         # 4) 검색 필터
         if has_search:
             rows = [
@@ -391,6 +395,9 @@ class OrderPageService:
             return workflow == "작업예정"
         if status_key == "done":
             return workflow in ("고객전달필요", "서비스완료")
+        if status_key == "schedule_work_confirmed":
+            # 4-1: '일정 및 작업 확정' 탭에 상담중/미배정(워크플로 '상담중'=신규접수·상담중)도 함께 노출한다.
+            return workflow in ("작업예정", "상담중")
         tab_status = status_tab_value(status_key)
         if tab_status is not None:
             return workflow == tab_status
@@ -409,6 +416,16 @@ class OrderPageService:
             for key, tab_status in ORDER_STATUS_TAB_OPTIONS:
                 if workflow == tab_status:
                     counts[key] += 1
+        # 4-1: '일정 및 작업 확정' 탭 카운트에 상담중/미배정(워크플로 '상담중')을 합산해
+        # 탭을 눌렀을 때의 목록(=_matches_status_tab)과 카운트를 일치시킨다.
+        counts["schedule_work_confirmed"] = (
+            counts.get("schedule_work_confirmed", 0)
+            + sum(
+                1
+                for order in rows
+                if order_workflow_status(order.status, order.payment_status) == "상담중"
+            )
+        )
         return counts
 
     @staticmethod

@@ -659,6 +659,7 @@ def to_admin_order_dto(
         requested_time=order.requested_time,
         partner_id=order.partner_id,
         team_name=order.team_name,
+        broker_id=order.broker_id,
         service_category_id=order.service_category_id,
         service_item_id=order.service_item_id,
         service_name=order.service_name,

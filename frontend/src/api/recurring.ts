@@ -1,3 +1,4 @@
+import type { AdminOrder } from './admin';
 import { apiRequest } from './client';
 
 export type RecurrenceMode = 'monthly' | 'weekly';
@@ -21,6 +22,7 @@ export interface RecurringContractInput {
   max_occurrences?: number | null;
   default_partner_id?: string | null;
   team_name?: string | null;
+  team_phone?: string | null;
   service_category_id?: string | null;
   service_item_id?: string | null;
   service_name: string;
@@ -97,4 +99,11 @@ export function deleteRecurringContract(id: string): Promise<void> {
   return apiRequest(`/admin/recurring/contracts/${encodeURIComponent(id)}`, {
     method: 'DELETE',
   }) as Promise<void>;
+}
+
+// 2-3/2-4: 해당 월의 정기 주문 목록(없으면 서버가 예정일마다 멱등 생성). month = "YYYY-MM".
+export function listRecurringOrders(month: string): Promise<AdminOrder[]> {
+  return apiRequest(
+    `/admin/recurring/orders?month=${encodeURIComponent(month)}`,
+  ) as Promise<AdminOrder[]>;
 }

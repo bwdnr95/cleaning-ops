@@ -2,6 +2,7 @@ from fastapi import APIRouter
 
 from app.api.routes import auth, health, webhooks
 from app.api.routes.admin import (
+    brokers,
     calendar,
     dashboard,
     messages,
@@ -23,6 +24,7 @@ api_router.include_router(auth.router, prefix="/auth", tags=["auth"])
 api_router.include_router(dashboard.router, prefix="/admin/dashboard", tags=["admin-dashboard"])
 api_router.include_router(calendar.router, prefix="/admin/calendar", tags=["admin-calendar"])
 api_router.include_router(orders.router, prefix="/admin/orders", tags=["admin-orders"])
+api_router.include_router(brokers.router, prefix="/admin/brokers", tags=["admin-brokers"])
 api_router.include_router(partners.router, prefix="/admin/partners", tags=["admin-partners"])
 api_router.include_router(
     partner_settlements.router,

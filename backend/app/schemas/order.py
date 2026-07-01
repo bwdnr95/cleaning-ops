@@ -41,6 +41,7 @@ class OrderLineBase(ApiModel):
     requested_time: str | None = None
     partner_id: str | None = None
     team_name: str | None = None
+    broker_id: str | None = None
     service_category_id: str | None = None
     service_item_id: str | None = None
     service_name: str
@@ -85,6 +86,7 @@ class OrderUpdate(ApiModel):
     requested_time: str | None = None
     partner_id: str | None = None
     team_name: str | None = None
+    broker_id: str | None = None
     service_category_id: str | None = None
     service_item_id: str | None = None
     service_name: str | None = None

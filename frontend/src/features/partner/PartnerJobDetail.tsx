@@ -369,7 +369,7 @@ export function PartnerJobDetail({ onDetailOpenChange = undefined } = {}) {
         {uploadError && <div style={{ margin: '-2px 2px 10px', color: 'var(--danger-fg)', fontSize: 11.5 }}>{uploadError}</div>}
       </div>
 
-      <div style={{ padding: '10px 14px 12px', background: '#fff', borderTop: '1px solid var(--border)', boxShadow: '0 -4px 12px rgba(15,23,42,0.04)' }}>
+      <div style={{ padding: '10px 14px calc(12px + env(safe-area-inset-bottom))', background: '#fff', borderTop: '1px solid var(--border)', boxShadow: '0 -4px 12px rgba(15,23,42,0.04)' }}>
         {canStart || canComplete ? (
           <div style={{ display: 'grid', gridTemplateColumns: canStart && canComplete ? '1fr 1fr' : '1fr', gap: 8 }}>
             {canStart && (
@@ -408,9 +408,17 @@ function formatJobAddress(job) {
 }
 
 function PartnerJobList({ jobs, onSelect, onReload = undefined }) {
-  const [filter, setFilter] = React.useState(null);
+  // 3-1: 로그인 직후 기본으로 '예정' 리스트가 보이도록 한다(전체보기 버튼은 필터 상태에서 상단 상시 노출).
+  const [filter, setFilter] = React.useState('upcoming');
   const toggleFilter = (key) => setFilter((current) => (current === key ? null : key));
-  const visibleJobs = filter ? jobs.filter((job) => jobBucket(job.status) === filter) : jobs;
+  const visibleJobs = React.useMemo(() => {
+    const base = filter ? jobs.filter((job) => jobBucket(job.status) === filter) : jobs;
+    // 3-2: '완료' 탭은 최근(방문일 늦은) 순으로 보여준다. 예정/진행은 백엔드 기본 오름차순 유지.
+    if (filter === 'done') {
+      return [...base].sort((a, b) => scheduledSortValue(b) - scheduledSortValue(a));
+    }
+    return base;
+  }, [jobs, filter]);
 
   return (
     <div data-testid="partner-jobs-page" style={{ height: '100%', background: '#f4f6f8', overflow: 'auto', padding: 14 }}>
@@ -479,6 +487,14 @@ function PartnerJobList({ jobs, onSelect, onReload = undefined }) {
               </div>
               <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 4 }}>{job.service_name}</div>
               <div style={{ fontSize: 12.5, color: 'var(--text-secondary)', lineHeight: 1.45 }}>{formatJobAddress(job)}</div>
+              {/* 3-3: 리스트에서 고객 성함/연락처를 바로 확인할 수 있게 노출한다. */}
+              <div style={{ marginTop: 6, display: 'flex', alignItems: 'center', gap: 6, fontSize: 12.5, flexWrap: 'wrap' }}>
+                <Icon name="user" size={12} color="var(--text-tertiary)" />
+                <span style={{ fontWeight: 600, color: 'var(--text)' }}>{job.customer_name} 님</span>
+                {job.customer_phone && (
+                  <span className="mono" style={{ color: 'var(--text-tertiary)' }}>· {formatPhone(job.customer_phone)}</span>
+                )}
+              </div>
               <div style={{ marginTop: 10, display: 'flex', alignItems: 'center', gap: 6, color: 'var(--brand)', fontSize: 12.5, fontWeight: 700 }}>
                 상세 보기 <Icon name="chevronRight" size={14}/>
               </div>
@@ -558,6 +574,11 @@ function jobBucket(status) {
     return 'done';
   }
   return 'upcoming';
+}
+
+function scheduledSortValue(job) {
+  const date = parseDateValue(job?.scheduled_date);
+  return date ? date.getTime() : -Infinity;
 }
 
 function summarizeJobs(jobs) {

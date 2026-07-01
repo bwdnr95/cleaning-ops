@@ -106,6 +106,7 @@ def list_orders_page(
     received_from: date | None = Query(default=None),
     received_to: date | None = Query(default=None),
     partner_id: str | None = Query(default=None),
+    broker_id: str | None = Query(default=None),
     q: str | None = Query(default=None),
     db: Session = Depends(get_session),
     _: CurrentUser = Depends(require_admin),
@@ -122,6 +123,7 @@ def list_orders_page(
         received_from=received_from,
         received_to=received_to,
         partner_id=partner_id or None,
+        broker_id=broker_id or None,
         q=q,
     )
     return AdminOrderPageRead(
