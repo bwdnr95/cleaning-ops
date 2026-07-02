@@ -1,7 +1,8 @@
 from datetime import date
 from uuid import uuid4
 
-from app.domain.constants import RecurrenceMode, RecurringContractStatus
+from app.domain.constants import OrderStatus, RecurrenceMode, RecurringContractStatus
+from app.models.order import Order
 from app.models.order_group import OrderGroup
 from app.models.recurring_contract import RecurringContract
 from app.models.recurring_monthly_status import RecurringMonthlyStatus
@@ -102,6 +103,21 @@ def test_month_amount_monthly_is_fixed(db_session):
     db_session.commit()
     row = next(r for r in RecurringMonthlyService(db_session).list_month("2026-06") if r.contract_id == c.id)
     assert row.amount == 50000
+
+
+def test_month_amount_per_visit_counts_actual_live_orders(db_session):
+    # per_visit: 그달 회차가 실제로 생성돼 있으면 살아있는(취소/삭제 제외) 방문만 청구한다.
+    # 6월 회차 3건 생성 후 1건 취소 → 2건만 청구(스케줄상 5회여도 실제 발생 기준).
+    c = _weekly_contract(db_session, billing_mode="per_visit", amount=50000)
+    for day, st in zip((1, 8, 15), (OrderStatus.SCHEDULED, OrderStatus.SCHEDULED, OrderStatus.CANCELLED)):
+        db_session.add(Order(
+            id=str(uuid4()), group_id=c.order_group_id, status=st,
+            received_date=date(2026, 6, 1), scheduled_date=date(2026, 6, day),
+            service_name="청소", recurring_contract_id=c.id, recurring_planned_date=date(2026, 6, day),
+        ))
+    db_session.commit()
+    row = next(r for r in RecurringMonthlyService(db_session).list_month("2026-06") if r.contract_id == c.id)
+    assert row.amount == 50000 * 2
 
 
 def test_monthly_api_rejects_invalid_month(client, seed_admin_token):

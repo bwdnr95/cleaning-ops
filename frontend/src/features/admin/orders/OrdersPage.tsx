@@ -1447,6 +1447,10 @@ function getVisibleStatusTabKey(tab) {
     work: 'schedule_work_confirmed',
     deliver: 'work_done',
     monthly_done: 'final_payment_complete',
+    // 대시보드 재정의(260702) 드릴다운 탭 → 탭바 하이라이트 근사 매핑.
+    unpaid_check: 'work_done',
+    customer_check: 'customer_check_needed',
+    receivable: 'work_done',
   };
   return legacyMap[tab] || null;
 }
@@ -1631,7 +1635,7 @@ function createInitialDateFilter(initialTab, initialDatePreset) {
   if (initialTab === 'tomorrow_notice') {
     return createDateFilter('tomorrow');
   }
-  if (['payment_check', 'photo_review', 'deliver', 'partner_pending'].includes(initialTab)) {
+  if (['payment_check', 'photo_review', 'deliver', 'partner_pending', 'unpaid_check', 'customer_check', 'receivable'].includes(initialTab)) {
     return createDateFilter('all');
   }
   if (['monthly_done', 'monthly_revenue'].includes(initialTab)) {

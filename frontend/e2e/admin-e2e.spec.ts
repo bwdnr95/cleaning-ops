@@ -65,11 +65,12 @@ test('dashboard KPI cards open the matching operational filters', async ({ page 
   for (const item of [
     ['dashboard-kpi-today_jobs', 'orders-date-preset-today'],
     ['dashboard-kpi-tomorrow_notice', 'orders-date-preset-tomorrow'],
-    ['dashboard-kpi-photo_review', 'orders-date-preset-all'],
-    ['dashboard-kpi-customer_delivery', 'orders-date-preset-all'],
-    ['dashboard-kpi-payment_check', 'orders-date-preset-all'],
+    ['dashboard-kpi-partner_pending', 'orders-date-preset-all'],
+    ['dashboard-kpi-unpaid_check', 'orders-date-preset-all'],
+    ['dashboard-kpi-customer_check', 'orders-date-preset-all'],
     ['dashboard-kpi-monthly_done', 'orders-date-preset-month'],
-    ['dashboard-kpi-monthly_revenue', 'orders-date-preset-month'],
+    ['dashboard-kpi-monthly_contract', 'orders-date-preset-month'],
+    ['dashboard-kpi-receivable', 'orders-date-preset-all'],
   ]) {
     await page.getByTestId(item[0]).click();
     await expect(page.getByTestId('admin-orders-page')).toBeVisible();
@@ -122,11 +123,12 @@ test('admin order status tabs use the simplified workflow states only', async ({
   await expect(page.getByTestId(`admin-order-row-${unpaidCompletedOrder.id}`)).toHaveCount(0);
 });
 
-test('dashboard monthly revenue KPI shows current-month completed paid orders', async ({ page, request }) => {
+test('dashboard monthly contract KPI opens current-month orders', async ({ page, request }) => {
   const order = await createMonthlyRevenueOrder(request);
 
   await loginAsAdmin(page);
-  await page.getByTestId('dashboard-kpi-monthly_revenue').click();
+  // '이번 달 계약금액' 카드 = 당월 방문건(전체) 드릴다운(월 프리셋).
+  await page.getByTestId('dashboard-kpi-monthly_contract').click();
 
   await expect(page.getByTestId('admin-orders-page')).toBeVisible();
   await expect(page.getByTestId('orders-date-preset-month')).toHaveAttribute('aria-pressed', 'true');
@@ -770,12 +772,15 @@ async function createMonthlyRevenueOrder(request) {
   const adminSession = await loginViaApi(request, 'admin');
   const adminHeaders = authHeaders(adminSession.access_token);
   const suffix = Date.now();
+  // 이번 달(월 프리셋) 안에 들도록 현재 연·월의 중순 날짜를 쓴다(하드코딩 날짜는 달이 바뀌면 깨진다).
+  const now = new Date();
+  const monthDay = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-15`;
   return checkedJson(await request.post(`${backendUrl}/api/admin/orders`, {
     headers: adminHeaders,
     data: {
       status: '서비스완료',
-      received_date: '2026-06-01',
-      scheduled_date: '2026-06-01',
+      received_date: monthDay,
+      scheduled_date: monthDay,
       requested_time: '10:00',
       service_name: 'Monthly Revenue QA',
       customer_name: `Monthly Revenue Customer ${suffix}`,

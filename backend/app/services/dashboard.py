@@ -1,6 +1,6 @@
 from datetime import date, timedelta
 
-from sqlalchemy import extract, func, select
+from sqlalchemy import case, extract, func, select
 from sqlalchemy.orm import Session
 
 from app.core.time import business_today
@@ -8,9 +8,9 @@ from app.domain.constants import OrderStatus
 from app.domain.order_metrics import (
     REVENUE_STATUSES,
     SCHEDULED_WORKFLOW_STATUSES,
-    TODAY_JOBS_EXCLUDED_STATUSES,
+    WORK_DONE_STATUSES,
 )
-from app.domain.payment_status import PAYMENT_CHECK_STATUSES
+from app.domain.payment_status import PAYMENT_CHECK_STATUSES, PaymentStatus
 from app.models.message import MessageLog
 from app.models.order import Order
 from app.models.photo import OrderPhoto
@@ -28,31 +28,58 @@ class DashboardService:
             extract("month", Order.scheduled_date) == current.month,
         )
 
+        # 소비자가(총액) = total_amount + onsite_extra. 계약금/잔금(deposit/balance)은 import·정기 주문에서
+        # 비어 있을 수 있어(₩0로 샘) 금액 지표는 항상 채워지는 total 기반으로 계산한다(매출·인사이트와 동일 기준).
+        consumer_total = func.coalesce(Order.total_amount, 0) + func.coalesce(Order.onsite_extra_amount, 0)
+        # 고객 미수금(미납 잔액): 계약금만 낸(balance_pending) 건은 잔금만, 그 외 미납(pending/unpaid)은 소비자가 전액.
+        outstanding_amount = case(
+            (
+                Order.payment_status == PaymentStatus.BALANCE_PENDING,
+                func.coalesce(Order.balance_amount, 0),
+            ),
+            else_=consumer_total,
+        )
+
         return DashboardSummary(
-            # 3-2: '오늘 작업 예정'은 확정 이전 상태(상담중/미배정·협력사확인중)를 날짜가 있어도 제외한다.
-            # 주문 리스트 'today' 탭과 동일 기준으로 숫자를 일치시킨다.
+            # 오늘/내일 '일정 및 작업 확정'(작업예정 워크플로) 방문 — 주문목록 today/tomorrow_notice 탭과 일치.
             today_jobs=self._count(
                 Order.scheduled_date == current,
-                Order.status.not_in(TODAY_JOBS_EXCLUDED_STATUSES),
+                Order.status.in_(SCHEDULED_WORKFLOW_STATUSES),
             ),
-            # 내일 방문 예정 '일정 및 작업 확정'(작업예정 워크플로) 전체 — 주문목록 같은 탭/카운트와 일치.
             tomorrow_notice_targets=self._count(
                 Order.scheduled_date == tomorrow,
                 Order.status.in_(SCHEDULED_WORKFLOW_STATUSES),
             ),
             partner_pending=self._count(Order.status == OrderStatus.PARTNER_CONFIRMING),
+            # 미정산 확인 = 작업완료(고객전달필요~서비스완료) 중 고객 미수(미납) 건.
+            unpaid_check_needed=self._count(
+                Order.status.in_(WORK_DONE_STATUSES),
+                Order.payment_status.in_(PAYMENT_CHECK_STATUSES),
+            ),
+            customer_check_needed=self._count(Order.status == OrderStatus.CUSTOMER_CHECK_NEEDED),
+            # 이번 달 완료 = 당월 방문 + 작업완료 상태.
+            monthly_completed=self._count(Order.status.in_(WORK_DONE_STATUSES), *month_filter),
+            # 이번 달 계약금액 = 당월 방문건(취소 제외)의 소비자가(총액=계약금+잔금) 합(결제 여부 무관).
+            monthly_contract_amount=self._sum(
+                consumer_total,
+                Order.status != OrderStatus.CANCELLED,
+                *month_filter,
+            ),
+            # 미정산 금액 = '미정산 확인'과 동일 모집단(작업완료 & 고객 미수)의 미수금 합.
+            # 미래 예약·상담 리드는 아직 미수금이 아니므로 작업완료(WORK_DONE) 게이트로 제외한다.
+            outstanding_receivable=self._sum(
+                outstanding_amount,
+                Order.status.in_(WORK_DONE_STATUSES),
+                Order.payment_status.in_(PAYMENT_CHECK_STATUSES),
+            ),
+            # --- 레거시 지표(현행 카드엔 미표시, 리스트 드릴다운/리포트 정합용) ---
             photo_review_pending=self._count(Order.status == OrderStatus.PHOTO_REVIEW_PENDING),
             customer_delivery_needed=self._count(Order.status == OrderStatus.CUSTOMER_DELIVERY_NEEDED),
-            # 결제 확인 필요: 미납 계열 + 취소 제외. 단 '방문일이 미래(오늘 이후)'인 건은
-            # 아직 결제를 챙길 시점이 아니라 제외한다(미배정=방문일 없음은 유지).
-            # 주문목록 payment_check 탭(order_page._matches_status_tab)과 동일 기준.
             payment_check_needed=self._count(
                 Order.payment_status.in_(PAYMENT_CHECK_STATUSES),
                 Order.status != OrderStatus.CANCELLED,
                 (Order.scheduled_date <= current) | Order.scheduled_date.is_(None),
             ),
-            monthly_completed=self._count(Order.status == OrderStatus.COMPLETED, *month_filter),
-            # 매출 = 기본가 + 현장추가비(주문목록 '총금액'·리포트 매출과 동일 정의)
             monthly_revenue=self._sum(
                 func.coalesce(Order.total_amount, 0) + func.coalesce(Order.onsite_extra_amount, 0),
                 Order.status.in_(REVENUE_STATUSES),

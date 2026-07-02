@@ -4,10 +4,12 @@ from calendar import monthrange
 from datetime import date
 from uuid import uuid4
 
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.domain.constants import RecurringBillingMode
+from app.domain.constants import OrderStatus, RecurringBillingMode
 from app.domain.recurrence import iter_due_dates
+from app.models.order import Order
 from app.models.recurring_contract import RecurringContract
 from app.models.recurring_monthly_status import RecurringMonthlyStatus
 from app.repositories.order_groups import OrderGroupRepository
@@ -62,12 +64,11 @@ class RecurringMonthlyService:
         )
 
     def _month_amount(self, contract: RecurringContract, month: str) -> float | None:
-        """월 청구 금액. per_visit=회당 금액×그달 방문 횟수, monthly=월 고정 금액.
+        """월 청구 금액. per_visit=회당 금액×그달 청구 대상 방문 수, monthly=월 고정 금액.
 
-        per_visit 방문 횟수는 '계약 스케줄'(iter_due_dates) 기준 — 즉 계약상 청구해야 할 회차 수다.
-        운영자가 개별 회차 주문을 삭제/이동하더라도 이 값은 스케줄대로 계산되므로 트래커 청구액과
-        실제 발생 주문이 어긋날 수 있다(계약 기준 청구가 의도). 실제 살아있는 주문 수로 재정산하려면
-        별도 작업이 필요하다.
+        per_visit는 '실제 발생한 방문'만 청구한다: 그달의 살아있는(삭제/취소 제외) 정기 회차 주문을
+        방문일(scheduled_date) 기준으로 센다 → 회차를 삭제/취소/이동하면 청구액이 실제 발생과 일치한다.
+        그달 회차가 아직 생성되지 않았으면(미래 달 등) 계약 스케줄 기준으로 예상 청구액을 보여준다.
         """
         if contract.total_amount is None:
             return None
@@ -75,12 +76,34 @@ class RecurringMonthlyService:
         if contract.billing_mode == RecurringBillingMode.MONTHLY:
             return amount
         first, last = _month_bounds(month)
-        visits = sum(
+        # 청구 대상 = 살아있는(soft-delete 아님) + 취소 아님 + 방문일이 그달인 정기 회차.
+        billable = self.db.scalar(
+            select(func.count(Order.id)).where(
+                Order.recurring_contract_id == contract.id,
+                Order.deleted_at.is_(None),
+                Order.status != OrderStatus.CANCELLED,
+                Order.scheduled_date >= first,
+                Order.scheduled_date <= last,
+            )
+        ) or 0
+        if billable > 0:
+            return amount * billable
+        # 살아있는 방문이 0: 그달 회차가 이미 생성됐다면(전부 취소/삭제) 0, 미생성이면 스케줄 예상.
+        generated = self.db.scalar(
+            select(func.count(Order.id)).where(
+                Order.recurring_contract_id == contract.id,
+                Order.recurring_planned_date >= first,
+                Order.recurring_planned_date <= last,
+            )
+        ) or 0
+        if generated > 0:
+            return 0.0
+        scheduled_visits = sum(
             1
             for _seq, due in iter_due_dates(self._recurring._spec(contract), until=last)
             if first <= due <= last
         )
-        return amount * visits
+        return amount * scheduled_visits
 
     def list_month(self, month: str) -> list[RecurringMonthlyRowRead]:
         first, last = _month_bounds(month)

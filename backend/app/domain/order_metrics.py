@@ -26,16 +26,6 @@ SCHEDULED_WORKFLOW_STATUSES: tuple[OrderStatus, ...] = (
     OrderStatus.IN_PROGRESS,
 )
 
-# '오늘 작업 예정'(대시보드 today_jobs / 주문목록 'today' 탭)에서 제외하는 상태.
-# 취소 + 확정 이전 상태(상담중/미배정=신규접수·상담중, 협력사확인중)는 날짜가 지정돼 있어도
-# '오늘 확정된 작업'이 아니므로 오늘 작업 예정 집계/목록에서 뺀다.
-TODAY_JOBS_EXCLUDED_STATUSES: tuple[OrderStatus, ...] = (
-    OrderStatus.CANCELLED,
-    OrderStatus.NEW,
-    OrderStatus.CONSULTING,
-    OrderStatus.PARTNER_CONFIRMING,
-)
-
 # 협력사 '진행 중' 작업으로 세는 상태(취소·완료 제외).
 ACTIVE_JOB_STATUSES: tuple[OrderStatus, ...] = (
     OrderStatus.PARTNER_CONFIRMING,
@@ -51,6 +41,15 @@ ACTIVE_JOB_STATUSES: tuple[OrderStatus, ...] = (
 # 협력사 '완료' 작업으로 세는 상태.
 COMPLETED_JOB_STATUSES: tuple[OrderStatus, ...] = (
     OrderStatus.CUSTOMER_DELIVERY_DONE,
+    OrderStatus.COMPLETED,
+)
+
+# '작업완료'(= 협력사가 작업을 끝낸 '고객전달필요'부터 최종 '서비스완료'까지 전부).
+# 대시보드 '미정산 확인'(작업완료 & 고객 미수)·'이번 달 완료'(당월 작업완료) 카드의 단일 기준.
+WORK_DONE_STATUSES: tuple[OrderStatus, ...] = (
+    OrderStatus.CUSTOMER_DELIVERY_NEEDED,
+    OrderStatus.CUSTOMER_DELIVERY_DONE,
+    OrderStatus.CUSTOMER_CHECK_NEEDED,
     OrderStatus.COMPLETED,
 )
 

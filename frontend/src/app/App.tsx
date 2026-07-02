@@ -468,7 +468,7 @@ function getDefaultOrdersDatePreset(tab) {
   if (tab === 'tomorrow_notice') {
     return 'tomorrow';
   }
-  if (['payment_check', 'photo_review', 'deliver', 'partner_pending', 'monthly_done', 'monthly_revenue'].includes(tab)) {
+  if (['payment_check', 'photo_review', 'deliver', 'partner_pending', 'monthly_done', 'monthly_revenue', 'unpaid_check', 'customer_check', 'receivable'].includes(tab)) {
     return tab.startsWith('monthly_') ? 'month' : 'all';
   }
   return DEFAULT_ORDERS_VIEW.datePreset;
@@ -479,17 +479,15 @@ function toAdminNavBadges(summary) {
     return {};
   }
 
+  // 사이드바 주문 배지 = 대시보드 '업무 큐'(실행 대상 5종)의 합.
   const orderQueueCount = Number(summary.partner_pending || 0)
+    + Number(summary.unpaid_check_needed || 0)
+    + Number(summary.customer_check_needed || 0)
     + Number(summary.today_jobs || 0)
-    + Number(summary.tomorrow_notice_targets || 0)
-    + Number(summary.customer_delivery_needed || 0)
-    + Number(summary.payment_check_needed || 0);
-  const photoQueueCount = Number(summary.photo_review_pending || 0)
-    + Number(summary.customer_delivery_needed || 0);
+    + Number(summary.tomorrow_notice_targets || 0);
 
   return {
     orders: orderQueueCount > 0 ? String(orderQueueCount) : null,
-    photos: photoQueueCount > 0 ? String(photoQueueCount) : null,
   };
 }
 

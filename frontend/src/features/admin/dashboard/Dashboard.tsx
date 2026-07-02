@@ -1,6 +1,6 @@
 import { Badge, Icon, Sparkline, StatusBadge } from '../../../components/common/ui';
-import { KPI, QUEUES, RECENT_PHOTOS, RECENT_SENDS, TODAY_JOBS, TOMORROW_JOBS } from '../../../mocks/cleaningOpsData';
-import { getDashboardRecentActivity, getDashboardSummary, listAdminOrders } from '../../../api/admin';
+import { RECENT_PHOTOS, RECENT_SENDS, TODAY_JOBS, TOMORROW_JOBS } from '../../../mocks/cleaningOpsData';
+import { getDashboardRecentActivity, getDashboardSummary, listAdminOrders, type DashboardSummary } from '../../../api/admin';
 import { toApiAssetUrl } from '../../../api/client';
 import { useApiResource } from '../../../api/useApiResource';
 import { formatQuantity } from '../../../domain/format';
@@ -13,8 +13,9 @@ export function Dashboard({ onOpenOrder, onNav, onCreateOrder, userName = undefi
   const summary = useApiResource(getDashboardSummary);
   const orders = useApiResource(listAdminOrders);
   const recentActivity = useApiResource(getDashboardRecentActivity);
-  const kpis = summary.data ? toKpis(summary.data) : withKpiNavigation(KPI);
-  const queues = summary.data ? toQueues(summary.data) : QUEUES;
+  // 지표는 실데이터만 렌더한다. 로드 전/실패 시 mock 재무 숫자를 진짜처럼 노출하지 않도록 빈 배열 + 로딩/에러 배너로 처리.
+  const kpis = summary.data ? toKpis(summary.data) : [];
+  const queues = summary.data ? toQueues(summary.data) : [];
   const todayJobs = orders.data ? toDashJobs(orders.data, 'today') : TODAY_JOBS;
   const tomorrowJobs = orders.data ? toDashJobs(orders.data, 'tomorrow') : TOMORROW_JOBS;
   const recentPhotos = recentActivity.data ? toRecentPhotos(recentActivity.data.photos) : RECENT_PHOTOS;
@@ -47,7 +48,19 @@ export function Dashboard({ onOpenOrder, onNav, onCreateOrder, userName = undefi
           </div>
         </div>
 
-        {/* KPI grid — 넓은 화면에선 7열, 좁아지면 칸을 줄여 자동 줄바꿈(글자 세로 쪼개짐 방지) */}
+        {/* 지표 로드 실패/중 — mock 대신 명시적 상태 표시(.claude/rules/frontend.md 3종 처리). */}
+        {summary.error && (
+          <div data-testid="dashboard-summary-error" style={{ padding: '10px 12px', marginBottom: 12, borderRadius: 8, background: 'var(--danger-bg)', border: '1px solid var(--danger-border)', color: 'var(--danger-fg)', fontSize: 12.5 }}>
+            대시보드 지표를 불러오지 못했습니다. 새로고침을 눌러 다시 시도해주세요.
+          </div>
+        )}
+        {summary.isLoading && !summary.data && (
+          <div style={{ padding: '10px 12px', marginBottom: 12, borderRadius: 8, background: 'var(--bg-subtle)', color: 'var(--text-tertiary)', fontSize: 12.5 }}>
+            대시보드 지표를 불러오는 중입니다.
+          </div>
+        )}
+
+        {/* KPI grid — 8장. 넓은 화면에선 한 줄, 좁아지면 칸을 줄여 자동 줄바꿈(글자 세로 쪼개짐 방지) */}
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 10, marginBottom: 16 }}>
           {kpis.map((k, i) => (
             <button
@@ -310,26 +323,30 @@ function DashMessage({ text, tone = 'muted' }) {
   );
 }
 
-function toKpis(summary) {
+// 대시보드 KPI 8장 — 아래 순서/인덱스는 KPI_NAVIGATION과 정확히 일치시켜야 한다.
+function toKpis(summary: DashboardSummary) {
   return withKpiNavigation([
     { label: '오늘 작업 예정', value: summary.today_jobs, delta: '실시간', trend: [0, 0, 0, 0, summary.today_jobs || 0], tone: 'info' },
     { label: '내일 안내 대상', value: summary.tomorrow_notice_targets, delta: '실시간', trend: [0, 0, 0, 0, summary.tomorrow_notice_targets || 0], tone: 'warn' },
-    { label: '사진 검수 대기', value: summary.photo_review_pending, delta: '실시간', trend: [0, 0, 0, 0, summary.photo_review_pending || 0], tone: 'purple' },
-    { label: '고객 전달 필요', value: summary.customer_delivery_needed, delta: '실시간', trend: [0, 0, 0, 0, summary.customer_delivery_needed || 0], tone: 'warn' },
-    { label: '결제 확인 필요', value: summary.payment_check_needed, delta: '실시간', trend: [0, 0, 0, 0, summary.payment_check_needed || 0], tone: 'danger' },
+    { label: '협력사 확인 필요', value: summary.partner_pending, delta: '실시간', trend: [0, 0, 0, 0, summary.partner_pending || 0], tone: 'warn' },
+    { label: '미정산 확인', value: summary.unpaid_check_needed, delta: '실시간', trend: [0, 0, 0, 0, summary.unpaid_check_needed || 0], tone: 'danger' },
+    { label: '고객 확인 필요', value: summary.customer_check_needed, delta: '실시간', trend: [0, 0, 0, 0, summary.customer_check_needed || 0], tone: 'purple' },
     { label: '이번 달 완료', value: summary.monthly_completed, delta: '실시간', trend: [0, 0, 0, 0, summary.monthly_completed || 0], tone: 'success', suffix: '건' },
-    { label: '이번 달 계약금액', value: formatWon(summary.monthly_revenue), delta: '실시간', trend: [0, 0, 0, 0, summary.monthly_revenue || 0], tone: 'brand' },
+    { label: '이번 달 계약금액', value: formatWon(summary.monthly_contract_amount), delta: '실시간', trend: [0, 0, 0, 0, summary.monthly_contract_amount || 0], tone: 'brand' },
+    { label: '미정산 금액', value: formatWon(summary.outstanding_receivable), delta: '실시간', trend: [0, 0, 0, 0, summary.outstanding_receivable || 0], tone: 'danger' },
   ]);
 }
 
+// KPI 카드별 네비게이션 — toKpis 배열과 인덱스 1:1 매칭(순서 변경 시 함께 수정).
 const KPI_NAVIGATION = [
   { key: 'today_jobs', targetPage: 'orders', ordersTab: 'today', datePreset: 'today' },
   { key: 'tomorrow_notice', targetPage: 'orders', ordersTab: 'tomorrow_notice', datePreset: 'tomorrow' },
-  { key: 'photo_review', targetPage: 'orders', ordersTab: 'photo_review', datePreset: 'all' },
-  { key: 'customer_delivery', targetPage: 'orders', ordersTab: 'deliver', datePreset: 'all' },
-  { key: 'payment_check', targetPage: 'orders', ordersTab: 'payment_check', datePreset: 'all' },
+  { key: 'partner_pending', targetPage: 'orders', ordersTab: 'partner_pending', datePreset: 'all' },
+  { key: 'unpaid_check', targetPage: 'orders', ordersTab: 'unpaid_check', datePreset: 'all' },
+  { key: 'customer_check', targetPage: 'orders', ordersTab: 'customer_check', datePreset: 'all' },
   { key: 'monthly_done', targetPage: 'orders', ordersTab: 'monthly_done', datePreset: 'month' },
-  { key: 'monthly_revenue', targetPage: 'orders', ordersTab: 'monthly_revenue', datePreset: 'month' },
+  { key: 'monthly_contract', targetPage: 'orders', ordersTab: 'all', datePreset: 'month' },
+  { key: 'receivable', targetPage: 'orders', ordersTab: 'receivable', datePreset: 'all' },
 ];
 
 function withKpiNavigation(items) {
@@ -339,16 +356,19 @@ function withKpiNavigation(items) {
   }));
 }
 
-function toQueues(summary) {
+// 업무 큐 — 실행 대상 5종만 노출(사진검수·결제확인·고객전달은 카드 재정의로 제거).
+function toQueues(summary: DashboardSummary) {
   return [
     { key: 'partner_pending', title: '협력사 확인 필요', count: summary.partner_pending, tone: 'warn', icon: 'clock', desc: '배정 후 확인 대기', targetPage: 'orders', ordersTab: 'partner_pending', datePreset: 'all' },
-    { key: 'tomorrow_notify', title: '내일 안내 발송 필요', count: summary.tomorrow_notice_targets, tone: 'warn', icon: 'send', desc: '내일 작업 예정', targetPage: 'orders', ordersTab: 'tomorrow_notice', datePreset: 'tomorrow' },
+    { key: 'unpaid_check', title: '미정산 확인', count: summary.unpaid_check_needed, tone: 'danger', icon: 'creditCard', desc: '작업완료·고객 미수', targetPage: 'orders', ordersTab: 'unpaid_check', datePreset: 'all' },
+    { key: 'customer_check', title: '고객 확인 필요', count: summary.customer_check_needed, tone: 'purple', icon: 'user', desc: '고객 확인/컴플레인', targetPage: 'orders', ordersTab: 'customer_check', datePreset: 'all' },
     { key: 'today_work', title: '오늘 작업 예정', count: summary.today_jobs, tone: 'info', icon: 'truck', desc: '오늘 방문 예정 전체', targetPage: 'orders', ordersTab: 'today', datePreset: 'today' },
-    { key: 'photo_review', title: '사진 검수 대기', count: summary.photo_review_pending, tone: 'purple', icon: 'image', desc: '관리자 승인 필요', targetPage: 'orders', ordersTab: 'photo_review', datePreset: 'all' },
-    { key: 'customer_deliver', title: '고객 전달 필요', count: summary.customer_delivery_needed, tone: 'warn', icon: 'sparkles', desc: '검수 완료 후 전달', targetPage: 'orders', ordersTab: 'deliver', datePreset: 'all' },
-    { key: 'payment_check', title: '결제 확인 필요', count: summary.payment_check_needed, tone: 'danger', icon: 'creditCard', desc: '잔금/미수 확인', targetPage: 'orders', ordersTab: 'payment_check', datePreset: 'all' },
+    { key: 'tomorrow_notify', title: '내일 안내 발송 필요', count: summary.tomorrow_notice_targets, tone: 'warn', icon: 'send', desc: '내일 작업 예정', targetPage: 'orders', ordersTab: 'tomorrow_notice', datePreset: 'tomorrow' },
   ];
 }
+
+// '일정 및 작업 확정' 상태 집합. 대시보드 today_jobs / tomorrow_notice_targets 카운트와 동일 정의.
+const CONFIRMED_JOB_STATUSES = ['일정확정', '전날안내필요', '전날안내완료', '작업예정', '작업진행'];
 
 function toDashJobs(orders, target) {
   const today = getAppTodayDate();
@@ -356,13 +376,8 @@ function toDashJobs(orders, target) {
 
   return orders
     .filter((order) => isSameDateValue(order.scheduled_date, wanted))
-    .filter((order) => (
-      target === 'tomorrow'
-        // '내일 안내 대상' KPI = 내일 '일정 및 작업 확정'(작업예정 워크플로) 전체와 동일 정의
-        ? ['일정확정', '전날안내필요', '전날안내완료', '작업예정', '작업진행'].includes(order.status)
-        // 3-2: '오늘 작업 예정'은 확정 이전(상담중/미배정·협력사확인중)을 날짜 있어도 제외.
-        : !['취소', '신규접수', '상담중', '협력사확인중'].includes(order.status)
-    ))
+    // 오늘/내일 모두 '일정 및 작업 확정' 상태로 좁힌다(확정 이전·완료 이후는 리스트에서 제외).
+    .filter((order) => CONFIRMED_JOB_STATUSES.includes(order.status))
     .slice(0, 5)
     .map((order) => ({
       id: order.id,

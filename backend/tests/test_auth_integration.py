@@ -1200,17 +1200,89 @@ def test_dashboard_summary_matches_operational_queue_definitions() -> None:
 
         summary = DashboardService(db).summary(today=date(2026, 5, 4))
 
-    # 3-2: 오늘(2026-05-04) 방문 중 확정 이후만: scheduled/confirmed/day-before-done/photo-review = 4.
-    # (오늘 상담중·취소는 제외 — 상담중 미제외 시 5가 된다.)
-    assert summary.today_jobs == 4
+    # 오늘(2026-05-04) 방문 중 '일정 및 작업 확정'(작업예정 워크플로)만: scheduled/confirmed/day-before-done = 3.
+    # (상담중·취소는 물론, 고객전달필요(작업 끝난 건)도 '오늘 예정'이 아니므로 제외.)
+    assert summary.today_jobs == 3
     assert summary.tomorrow_notice_targets == 1
     assert summary.partner_pending == 1
+    # 이번 달 완료 = 당월 작업완료(고객전달필요~서비스완료): photo-review/customer-delivery/completed/delivered = 4.
+    assert summary.monthly_completed == 4
+    # 신규 카드: 작업완료 중 미수 0(WORK_DONE 건에 미납 결제상태 없음), 고객확인필요 0, 미수금 0.
+    assert summary.unpaid_check_needed == 0
+    assert summary.customer_check_needed == 0
+    assert summary.outstanding_receivable == 0
+    # 이번 달 계약금액 = 당월 방문건(취소 제외) 소비자가(총액) 합 = completed 400000 + delivered 300000.
+    assert summary.monthly_contract_amount == 700000
+    # 레거시 지표(카드 미표시, DTO 유지): 값은 종전과 동일.
     assert summary.photo_review_pending == 0
     assert summary.customer_delivery_needed == 2
-    # 미납 계열 중 과거 방문(payment-pending)만 카운트, 미래 방문(payment-future)은 제외 → 1.
-    assert summary.payment_check_needed == 1
-    assert summary.monthly_completed == 1
+    assert summary.payment_check_needed == 1  # 과거 미납(payment-pending)만, 미래(payment-future) 제외
     assert summary.monthly_revenue == 700000
+
+
+def test_dashboard_new_cards_260702() -> None:
+    """배치4 대시보드 재정의: 미정산 확인·고객 확인 필요·이번 달 계약금액·미정산(고객 미수) 금액."""
+    engine = create_engine(
+        "sqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    TestingSessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+    Base.metadata.create_all(bind=engine)
+
+    def mk(order_id, *, status, scheduled, payment_status=None, total=0, balance=0):
+        # 금액 지표는 소비자가(total_amount) 기준. 잔금대기 건만 balance_amount로 미수 잔액을 지정한다.
+        return Order(
+            id=order_id,
+            group_id=f"g-{order_id}",
+            status=status,
+            received_date=date(2026, 5, 1),
+            scheduled_date=scheduled,
+            service_name="청소",
+            customer_name="고객",
+            customer_phone="01011112222",
+            customer_address="서울 테스트구",
+            payment_status=payment_status,
+            total_amount=total,
+            balance_amount=balance,
+            customer_token=f"t-{order_id}",
+            customer_visible_payment=False,
+        )
+
+    with TestingSessionLocal() as db:
+        db.add_all(
+            [
+                # 작업완료 & 미수 → 미정산 확인 + 미수금(소비자가 전액)
+                mk("done-unpaid", status=OrderStatus.CUSTOMER_DELIVERY_DONE, scheduled=date(2026, 5, 4),
+                   payment_status="unpaid", total=300000),
+                # 작업완료 & 잔금대기 → 미정산 확인 + 미수금(잔금만)
+                mk("done-balance", status=OrderStatus.COMPLETED, scheduled=date(2026, 5, 5),
+                   payment_status="balance_pending", total=200000, balance=150000),
+                # 작업완료 & 완납 → 미정산 확인/미수금 제외(계약금액엔 포함)
+                mk("done-paid", status=OrderStatus.CUSTOMER_DELIVERY_DONE, scheduled=date(2026, 5, 6),
+                   payment_status="paid", total=200000),
+                # 고객확인필요(미수) → 고객 확인 필요 + 미정산 확인 + 미수금
+                mk("check-unpaid", status=OrderStatus.CUSTOMER_CHECK_NEEDED, scheduled=date(2026, 5, 7),
+                   payment_status="unpaid", total=80000),
+                # 고객확인필요(완납) → 고객 확인 필요만
+                mk("check-paid", status=OrderStatus.CUSTOMER_CHECK_NEEDED, scheduled=date(2026, 5, 8),
+                   payment_status="paid", total=80000),
+                # 취소 → 모든 집계 제외
+                mk("cancelled", status=OrderStatus.CANCELLED, scheduled=date(2026, 5, 9),
+                   payment_status="unpaid", total=99999),
+            ]
+        )
+        db.commit()
+        summary = DashboardService(db).summary(today=date(2026, 5, 4))
+
+    # 미정산 확인 = 작업완료(고객전달필요~) & 미수: done-unpaid + done-balance + check-unpaid = 3
+    assert summary.unpaid_check_needed == 3
+    # 고객 확인 필요 = 고객확인필요 전체(미수+완납): check-unpaid + check-paid = 2
+    assert summary.customer_check_needed == 2
+    # 이번 달 계약금액 = 당월 방문건(취소 제외) 소비자가 합 = 300000+200000+200000+80000+80000
+    assert summary.monthly_contract_amount == 860000
+    # 미정산(고객 미수) 금액 = done-unpaid(300000) + done-balance 잔금(150000) + check-unpaid(80000)
+    assert summary.outstanding_receivable == 530000
 
 
 def test_admin_dashboard_recent_activity_returns_photos_and_messages() -> None:

@@ -26,7 +26,7 @@ from app.domain.order_list import (
 from app.domain.order_metrics import (
     REVENUE_STATUSES,
     SCHEDULED_WORKFLOW_STATUSES,
-    TODAY_JOBS_EXCLUDED_STATUSES,
+    WORK_DONE_STATUSES,
 )
 from app.domain.payment_status import PAYMENT_CHECK_STATUSES
 from app.models.order import Order
@@ -226,7 +226,8 @@ class OrderPageService:
                 unpaid_total += amount
             if not (order.team_name or "").strip():
                 unassigned += 1
-            if order.scheduled_date == today:
+            # '오늘 작업'은 대시보드 today_jobs와 동일하게 오늘 방문 + '일정 및 작업 확정'(작업예정 워크플로)만.
+            if order.scheduled_date == today and workflow == "작업예정":
                 today_jobs += 1
             if workflow == "작업예정":
                 schedule_confirmed += 1
@@ -370,7 +371,10 @@ class OrderPageService:
         "photo_review": (OrderStatus.PHOTO_REVIEW_PENDING,),
         "deliver": (OrderStatus.CUSTOMER_DELIVERY_NEEDED,),
         "partner_pending": (OrderStatus.PARTNER_CONFIRMING,),
-        "monthly_done": (OrderStatus.COMPLETED,),
+        # 고객 확인 필요(대시보드 카드 드릴다운).
+        "customer_check": (OrderStatus.CUSTOMER_CHECK_NEEDED,),
+        # 이번 달 완료 = 작업완료(고객전달필요~서비스완료). 월 조건은 visit_preset(month)가 건다.
+        "monthly_done": WORK_DONE_STATUSES,
         "monthly_revenue": REVENUE_STATUSES,
     }
 
@@ -378,13 +382,24 @@ class OrderPageService:
     def _matches_status_tab(cls, order: Order, status_key: str | None) -> bool:
         if not status_key or status_key == "all":
             return True
-        # 3-2: '오늘 작업 예정'은 확정 이전(상담중/미배정·협력사확인중)을 제외(날짜 있어도).
-        # 대시보드 today_jobs 와 동일 기준. 날짜는 visit_preset 가 건다.
+        # '오늘 작업 예정' = 오늘 방문 + '일정 및 작업 확정'(작업예정 워크플로). 대시보드 today_jobs 와 동일.
+        # 날짜는 visit_preset(today) 가 건다.
         if status_key == "today":
-            return order.status not in TODAY_JOBS_EXCLUDED_STATUSES
+            return order.status in SCHEDULED_WORKFLOW_STATUSES
+        # 미정산 확인 = 작업완료(고객전달필요~서비스완료) & 고객 미수(미납). 대시보드 unpaid_check_needed 와 동일.
+        if status_key == "unpaid_check":
+            return (
+                order.status in WORK_DONE_STATUSES
+                and order.payment_status in _PAYMENT_CHECK_STATUSES
+            )
+        # 미정산 금액(고객 미수금) 드릴다운 = 작업완료 & 미수('미정산 확인'과 동일 모집단). 대시보드 outstanding_receivable 와 동일.
+        if status_key == "receivable":
+            return (
+                order.status in WORK_DONE_STATUSES
+                and order.payment_status in _PAYMENT_CHECK_STATUSES
+            )
         if status_key == "payment_check":
-            # 대시보드 카운트(services/dashboard.py)와 동일 기준: 미납 계열 + 취소 제외 +
-            # 방문일이 미래(오늘 이후)면 제외(미배정=방문일 없음은 유지).
+            # (레거시 탭) 미납 계열 + 취소 제외 + 방문일이 미래면 제외.
             today = business_today()
             return (
                 order.status != OrderStatus.CANCELLED

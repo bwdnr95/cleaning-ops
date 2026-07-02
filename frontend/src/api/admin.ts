@@ -157,8 +157,20 @@ export interface PartnerSettlementActionResult {
   skipped_order_ids: string[];
 }
 
-export function getDashboardSummary() {
-  return apiRequest('/admin/dashboard/summary');
+// 관리자 대시보드 요약 카드 지표. 백엔드 DashboardSummary DTO와 1:1로 맞춘다.
+export interface DashboardSummary {
+  today_jobs: number;              // 오늘 작업 예정 = 오늘 방문 + '일정 및 작업 확정' 상태
+  tomorrow_notice_targets: number; // 내일 안내 대상 = 내일 방문 + '일정 및 작업 확정' 상태
+  partner_pending: number;         // 협력사 확인 필요 = 협력사확인중
+  unpaid_check_needed: number;     // 미정산 확인 = 작업완료 & 고객 미수
+  customer_check_needed: number;   // 고객 확인 필요 = 고객확인필요 상태
+  monthly_completed: number;       // 이번 달 완료 = 당월 작업완료 건수
+  monthly_contract_amount: number; // 이번 달 계약금액(원)
+  outstanding_receivable: number;  // 미정산 금액 = 고객 미수금(원)
+}
+
+export function getDashboardSummary(): Promise<DashboardSummary> {
+  return apiRequest('/admin/dashboard/summary') as Promise<DashboardSummary>;
 }
 
 export function getDashboardRecentActivity() {
