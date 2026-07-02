@@ -118,8 +118,8 @@ DB write는 service/action 계층을 통해 수행하고, 그 안에서 권한 �
 
 - 모든 보고서 endpoint는 `require_admin` 가드와 `Order.deleted_at IS NULL` 필터를 강제한다.
 - **매출 정의는 `status IN (CUSTOMER_DELIVERY_DONE, COMPLETED)` 합계**다. `DashboardService.monthly_revenue`와 정확히 동일하게 유지한다. 화면마다 매출이 달라지면 운영자는 회사 매출을 믿을 수 없다.
-- **미정산 가시성**(정산 탭/협력사 미정산 합계/정산 백로그)은 다음 중 하나다(공통 헬퍼 `unpaid_partner_condition`): (a) `partner_payment_status`가 `PARTNER_SETTLEMENT_PENDING_STATUSES`(명시적 미지급/지급대기) — **주문 상태 무관**, 또는 (b) `OrderStatus.COMPLETED` + `partner_payment_status`가 NULL. 운영자가 미지급으로 표시한 건은 완료 전이라도 미정산으로 보여야 한다.
-- **정산 실행(지급완료 처리)** 가드(`is_unpaid_partner_order`)는 가시성과 분리한다: 미완료 작업을 지급완료로 찍지 못하도록 `OrderStatus.COMPLETED` 주문만 허용한다.
+- **미정산 가시성**(정산 탭/협력사 미정산 합계/정산 백로그, 공통 헬퍼 `unpaid_partner_condition`)은 **취소가 아니고 + 도급가(`partner_payment_amount`) > 0 + 아직 지급완료가 아닌**(`partner_payment_status`가 NULL 또는 `PARTNER_SETTLEMENT_PENDING_STATUSES`) 주문이다. **서비스완료 요건은 없다**(고객사 요청 1-1, 2026-07): 완료 전이라도 도급가를 입력한 미지급 건은 정산 대상으로 본다. 도급가 미입력(NULL/0)은 정산할 게 없어 제외한다.
+- **정산 실행(지급완료 처리)** 가드(`is_unpaid_partner_order`)는 가시성과 **동일 기준**을 쓴다(취소 아님 + 도급가>0 + 미지급). "미정산으로 보이는데 정산이 안 되는" 모순을 없애기 위함이다. (되돌리기 가드 `is_revertible_partner_order` = 취소 아님 + 지급완료(PAID).) ⚠️ 완료 전 정산은 이후 취소/변경 시 과지급 위험이 있으니, 도급가 입력을 게이트로 삼는다.
 - 집계는 SQLAlchemy의 `case`/`date_trunc` 같은 DB 방언 함수 대신 Python aggregation (`itertools.groupby` + `Decimal`)으로 구현한다. 운영 데이터량(수십~수백 건) 수준에서 성능 영향 없음 + dialect 무관.
 - Export는 화면의 현재 필터/기간을 query string으로 묶어 호출하고 backend가 content-disposition으로 다운로드시킨다. 파일명은 ASCII (`revenue.csv`).
 - 주문 import는 행별 validate + `group_key` 컬럼으로 묶어 OrderGroup 단위 commit. 한 group 안의 line 하나라도 실패하면 그 group 전체를 rollback한다.

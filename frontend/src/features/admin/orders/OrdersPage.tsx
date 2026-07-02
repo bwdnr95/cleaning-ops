@@ -1632,6 +1632,9 @@ function createInitialDateFilter(initialTab, initialDatePreset) {
   if (initialDatePreset) {
     return createDateFilter(initialDatePreset);
   }
+  if (initialTab === 'today') {
+    return createDateFilter('today');
+  }
   if (initialTab === 'tomorrow_notice') {
     return createDateFilter('tomorrow');
   }

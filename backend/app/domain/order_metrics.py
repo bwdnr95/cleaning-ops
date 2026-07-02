@@ -52,6 +52,3 @@ WORK_DONE_STATUSES: tuple[OrderStatus, ...] = (
     OrderStatus.CUSTOMER_CHECK_NEEDED,
     OrderStatus.COMPLETED,
 )
-
-# 정산(지급완료 처리) 가능 상태. 미완료 작업을 지급완료로 찍지 못하게 막는 기준.
-SETTLEABLE_ORDER_STATUSES: tuple[OrderStatus, ...] = (OrderStatus.COMPLETED,)

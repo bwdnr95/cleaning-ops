@@ -5,6 +5,7 @@ from datetime import date
 from uuid import uuid4
 
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.domain.constants import OrderStatus, RecurringBillingMode
@@ -47,6 +48,29 @@ class RecurringMonthlyService:
         )
         self.statuses.add(status)
         return status
+
+    def _get_or_create_status(self, contract_id: str, month: str) -> tuple[RecurringMonthlyStatus, bool]:
+        """(status, created)를 반환. 조회 시 없으면 생성한다.
+
+        스케줄러가 없어 GET(list_month)/POST(set_status)에서 lazy 생성하므로, 아직 없는 달을
+        두 요청이 거의 동시에 열면 같은 (contract_id, billing_month)를 둘 다 INSERT해 유니크
+        위반이 난다. 계약 단위 savepoint 안에서 생성하고, 충돌 시 savepoint만 롤백한 뒤 재조회해
+        요청 전체(다른 계약 포함)가 500으로 실패하지 않도록 격리한다.
+        (같은 방어를 RecurringService._generate_month가 begin_nested로 이미 사용한다.)
+        """
+        status = self.statuses.get_by_contract_and_month(contract_id, month)
+        if status is not None:
+            return status, False
+        try:
+            with self.db.begin_nested():
+                status = self._new_status(contract_id, month)
+                self.db.flush()  # 유니크 위반을 여기서 유발 → savepoint만 롤백된다.
+            return status, True
+        except IntegrityError:
+            existing = self.statuses.get_by_contract_and_month(contract_id, month)
+            if existing is None:
+                raise
+            return existing, False
 
     def _to_row(
         self, contract: RecurringContract, month: str, status: RecurringMonthlyStatus
@@ -112,10 +136,8 @@ class RecurringMonthlyService:
         for contract in self.contracts.list_active():
             if not self._active_in_month(contract, first, last):
                 continue
-            status = self.statuses.get_by_contract_and_month(contract.id, month)
-            if status is None:
-                status = self._new_status(contract.id, month)
-                created = True
+            status, was_created = self._get_or_create_status(contract.id, month)
+            created = created or was_created
             rows.append(self._to_row(contract, month, status))
         if created:
             self.db.commit()
@@ -129,9 +151,7 @@ class RecurringMonthlyService:
         contract = self.contracts.get(contract_id)
         if contract is None:
             raise ValueError("recurring_contract_not_found")
-        status = self.statuses.get_by_contract_and_month(contract_id, month)
-        if status is None:
-            status = self._new_status(contract_id, month)
+        status, _ = self._get_or_create_status(contract_id, month)
         if tax_invoice_issued is not None:
             status.tax_invoice_issued = tax_invoice_issued
         if balance_paid is not None:

@@ -1,5 +1,4 @@
 import { Badge, Icon, Sparkline, StatusBadge } from '../../../components/common/ui';
-import { RECENT_PHOTOS, RECENT_SENDS, TODAY_JOBS, TOMORROW_JOBS } from '../../../mocks/cleaningOpsData';
 import { getDashboardRecentActivity, getDashboardSummary, listAdminOrders, type DashboardSummary } from '../../../api/admin';
 import { toApiAssetUrl } from '../../../api/client';
 import { useApiResource } from '../../../api/useApiResource';
@@ -16,10 +15,11 @@ export function Dashboard({ onOpenOrder, onNav, onCreateOrder, userName = undefi
   // 지표는 실데이터만 렌더한다. 로드 전/실패 시 mock 재무 숫자를 진짜처럼 노출하지 않도록 빈 배열 + 로딩/에러 배너로 처리.
   const kpis = summary.data ? toKpis(summary.data) : [];
   const queues = summary.data ? toQueues(summary.data) : [];
-  const todayJobs = orders.data ? toDashJobs(orders.data, 'today') : TODAY_JOBS;
-  const tomorrowJobs = orders.data ? toDashJobs(orders.data, 'tomorrow') : TOMORROW_JOBS;
-  const recentPhotos = recentActivity.data ? toRecentPhotos(recentActivity.data.photos) : RECENT_PHOTOS;
-  const recentSends = recentActivity.data ? toRecentSends(recentActivity.data.messages) : RECENT_SENDS;
+  // 실데이터만 사용한다. 로드 전/실패 시 mock 대신 빈 목록 + 각 섹션의 로딩/에러/빈 상태 처리로 노출.
+  const todayJobs = orders.data ? toDashJobs(orders.data, 'today') : [];
+  const tomorrowJobs = orders.data ? toDashJobs(orders.data, 'tomorrow') : [];
+  const recentPhotos = recentActivity.data ? toRecentPhotos(recentActivity.data.photos) : [];
+  const recentSends = recentActivity.data ? toRecentSends(recentActivity.data.messages) : [];
   const workCount = summary.data ? queues.reduce((sum, item) => sum + Number(item.count || 0), 0) : 0;
 
   return (
