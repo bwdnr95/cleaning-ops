@@ -6,6 +6,8 @@ from uuid import uuid4
 
 from sqlalchemy.orm import Session
 
+from app.domain.constants import RecurringBillingMode
+from app.domain.recurrence import iter_due_dates
 from app.models.recurring_contract import RecurringContract
 from app.models.recurring_monthly_status import RecurringMonthlyStatus
 from app.repositories.order_groups import OrderGroupRepository
@@ -54,10 +56,31 @@ class RecurringMonthlyService:
             customer_name=group.customer_name if group else "",
             schedule_text=self._recurring._schedule_text(contract),
             month=month,
-            amount=float(contract.total_amount) if contract.total_amount is not None else None,
+            amount=self._month_amount(contract, month),
             tax_invoice_issued=status.tax_invoice_issued,
             balance_paid=status.balance_paid,
         )
+
+    def _month_amount(self, contract: RecurringContract, month: str) -> float | None:
+        """월 청구 금액. per_visit=회당 금액×그달 방문 횟수, monthly=월 고정 금액.
+
+        per_visit 방문 횟수는 '계약 스케줄'(iter_due_dates) 기준 — 즉 계약상 청구해야 할 회차 수다.
+        운영자가 개별 회차 주문을 삭제/이동하더라도 이 값은 스케줄대로 계산되므로 트래커 청구액과
+        실제 발생 주문이 어긋날 수 있다(계약 기준 청구가 의도). 실제 살아있는 주문 수로 재정산하려면
+        별도 작업이 필요하다.
+        """
+        if contract.total_amount is None:
+            return None
+        amount = float(contract.total_amount)
+        if contract.billing_mode == RecurringBillingMode.MONTHLY:
+            return amount
+        first, last = _month_bounds(month)
+        visits = sum(
+            1
+            for _seq, due in iter_due_dates(self._recurring._spec(contract), until=last)
+            if first <= due <= last
+        )
+        return amount * visits
 
     def list_month(self, month: str) -> list[RecurringMonthlyRowRead]:
         first, last = _month_bounds(month)

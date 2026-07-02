@@ -3,7 +3,12 @@ from typing import Annotated
 
 from pydantic import Field, model_validator
 
-from app.domain.constants import RecurrenceMode, RecurringContractStatus, VatType
+from app.domain.constants import (
+    RecurrenceMode,
+    RecurringBillingMode,
+    RecurringContractStatus,
+    VatType,
+)
 from app.domain.recurrence import validate_recurrence_fields
 from app.schemas.common import ApiModel
 
@@ -37,6 +42,8 @@ class RecurringContractBase(ApiModel):
     service_detail: str | None = None
     special_request: str | None = None
     requested_time: str | None = None
+    # per_visit: total_amount=회당 금액(월 합산=회당×방문횟수). monthly: total_amount=월 고정 금액.
+    billing_mode: RecurringBillingMode = RecurringBillingMode.PER_VISIT
     total_amount: float | None = None
     discount_amount: float = 0
     deposit_amount: float | None = None
@@ -78,6 +85,7 @@ class RecurringContractUpdate(ApiModel):
     service_detail: str | None = None
     special_request: str | None = None
     requested_time: str | None = None
+    billing_mode: RecurringBillingMode | None = None
     total_amount: float | None = None
     discount_amount: float | None = None
     deposit_amount: float | None = None

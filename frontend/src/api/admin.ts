@@ -81,6 +81,9 @@ export interface AdminOrder extends AdminOrderLineInput {
   partner_settled_at?: string | null;
   broker_settled_at?: string | null;
   recurring_contract_id?: string | null;
+  // AS(사후관리) 요청 상태. 저장 페이로드가 아니라 AS 전송 액션으로만 세팅되는 읽기 필드.
+  as_requested?: boolean;
+  as_memo?: string | null;
 }
 
 export interface AdminOrderGroup {
@@ -297,6 +300,14 @@ export function notifyPartnerUnpaid(
     method: 'POST',
     body: { channel, memo },
   }) as Promise<MessageLog>;
+}
+
+// AS(사후관리) 요청 전송. 주문에 AS 플래그+메모를 남기고 배정 협력사에게 안내를 발송한다.
+export function sendOrderAsRequest(orderId: string, memo: string): Promise<AdminOrder> {
+  return apiRequest(`/admin/orders/${encodeURIComponent(orderId)}/as-request`, {
+    method: 'POST',
+    body: { memo },
+  }) as Promise<AdminOrder>;
 }
 
 export function deleteAdminOrder(orderId) {

@@ -36,6 +36,9 @@ class Order(TimestampMixin, Base):
     size_or_quantity: Mapped[str | None] = mapped_column(String(80))
     service_detail: Mapped[str | None] = mapped_column(Text)
     special_request: Mapped[str | None] = mapped_column(Text)
+    # AS(사후관리) 요청: 컴플레인/AS 건에 체크 + 메모. 협력사링크로 전송된다.
+    as_requested: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    as_memo: Mapped[str | None] = mapped_column(Text)
     # R7 deprecated: see OrderGroup. Drop in R7.5.
     source_channel: Mapped[str | None] = mapped_column(String(120), nullable=True)
     customer_name: Mapped[str | None] = mapped_column(String(80), index=True, nullable=True)

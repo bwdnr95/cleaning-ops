@@ -26,6 +26,16 @@ SCHEDULED_WORKFLOW_STATUSES: tuple[OrderStatus, ...] = (
     OrderStatus.IN_PROGRESS,
 )
 
+# '오늘 작업 예정'(대시보드 today_jobs / 주문목록 'today' 탭)에서 제외하는 상태.
+# 취소 + 확정 이전 상태(상담중/미배정=신규접수·상담중, 협력사확인중)는 날짜가 지정돼 있어도
+# '오늘 확정된 작업'이 아니므로 오늘 작업 예정 집계/목록에서 뺀다.
+TODAY_JOBS_EXCLUDED_STATUSES: tuple[OrderStatus, ...] = (
+    OrderStatus.CANCELLED,
+    OrderStatus.NEW,
+    OrderStatus.CONSULTING,
+    OrderStatus.PARTNER_CONFIRMING,
+)
+
 # 협력사 '진행 중' 작업으로 세는 상태(취소·완료 제외).
 ACTIVE_JOB_STATUSES: tuple[OrderStatus, ...] = (
     OrderStatus.PARTNER_CONFIRMING,

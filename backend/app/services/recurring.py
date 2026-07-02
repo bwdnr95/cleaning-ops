@@ -9,7 +9,13 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.time import business_today, utc_now
-from app.domain.constants import OrderStatus, RecurrenceMode, RecurringContractStatus, VatType
+from app.domain.constants import (
+    OrderStatus,
+    RecurrenceMode,
+    RecurringBillingMode,
+    RecurringContractStatus,
+    VatType,
+)
 from app.domain.phone import normalize_phone
 from app.domain.recurrence import (
     ScheduleSpec,
@@ -309,7 +315,17 @@ class RecurringService:
             size_or_quantity=contract.size_or_quantity,
             service_detail=contract.service_detail,
             special_request=contract.special_request,
-            total_amount=_f(contract.total_amount),
+            # 회당(per_visit): 각 회차 = 회당 금액 → 회차 주문이 정상적으로 매출 집계(월합 = 회당×방문수)에 반영된다.
+            # 월 고정(monthly): 회차별 금액 없음(None). 월 고정 청구는 회차 수와 무관하므로 회차마다 금액을
+            # 실으면 N배 과대계상된다. 그래서 회차에는 금액을 두지 않고, 월 고정 청구/매출은 '월 트래커'
+            # (RecurringMonthlyStatus, 세금계산서/잔금)에서 계약×월 단위로 관리한다. 결과적으로 월 고정 정기분은
+            # 주문 단위 매출 대시보드(dashboard.monthly_revenue)에는 잡히지 않는다 — 의도된 경계(과대계상 방지).
+            # 월 고정 정기 매출을 대시보드로 롤업하려면 월 트래커를 매출 소스로 합류시키는 별도 작업이 필요하다.
+            total_amount=(
+                None
+                if contract.billing_mode == RecurringBillingMode.MONTHLY
+                else _f(contract.total_amount)
+            ),
             discount_amount=_f(contract.discount_amount) or 0,
             deposit_amount=_f(contract.deposit_amount),
             balance_amount=_f(contract.balance_amount),

@@ -40,6 +40,11 @@ class RecurrenceMode(StrEnum):
     WEEKLY = "weekly"     # N주 간격, start_date 요일 기준
 
 
+class RecurringBillingMode(StrEnum):
+    PER_VISIT = "per_visit"  # 회당 금액 × 그달 방문 횟수(월 합산). 월액이 방문 횟수에 따라 변동.
+    MONTHLY = "monthly"      # 월 고정 금액(방문 횟수 무관).
+
+
 class RecurringContractStatus(StrEnum):
     ACTIVE = "active"
     PAUSED = "paused"
@@ -77,6 +82,7 @@ class MessageType(StrEnum):
     CUSTOMER_BALANCE_DUE = "customer_balance_due"
     CUSTOMER_QUOTE = "customer_quote"
     PARTNER_CUSTOMER_INFO = "partner_customer_info"
+    PARTNER_AS_REQUEST = "partner_as_request"
 
 
 class MessageChannel(StrEnum):
@@ -113,6 +119,7 @@ class TimelineEventType(StrEnum):
     PARTNER_SETTLEMENT_REVERTED = "partner_settlement_reverted"
     BROKER_SETTLED = "broker_settled"
     BROKER_SETTLEMENT_REVERTED = "broker_settlement_reverted"
+    AS_REQUESTED = "as_requested"
     QUOTE_SENT = "quote_sent"
     PARTNER_UNPAID_NOTICE_SENT = "partner_unpaid_notice_sent"
 

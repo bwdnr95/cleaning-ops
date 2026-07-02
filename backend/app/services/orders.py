@@ -6,7 +6,15 @@ from uuid import uuid4
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.domain.constants import OrderStatus, ReceiptStatus, ReceiptType, TimelineEventType
+from app.domain.constants import (
+    MessageChannel,
+    MessageType,
+    OrderStatus,
+    ReceiptStatus,
+    ReceiptType,
+    RecipientType,
+    TimelineEventType,
+)
 from app.domain.order_pricing import order_consumer_total
 from app.domain.payment_status import PAYMENT_TRACKED_FIELDS, PaymentStatus
 from app.domain.phone import normalize_phone
@@ -17,7 +25,7 @@ from app.models.timeline import OrderTimeline
 from app.repositories.order_groups import OrderGroupRepository
 from app.repositories.orders import OrderRepository
 from app.repositories.photos import PhotoRepository
-from app.schemas.message import MessageLogRead
+from app.schemas.message import MessageLogRead, MessageSendRequest
 from app.schemas.order import (
     AdminOrderGroupRead,
     AdminOrderDetailRead,
@@ -537,6 +545,63 @@ class OrderService:
         self.db.refresh(order)
         return order
 
+    def request_as(
+        self,
+        order_id: str,
+        *,
+        memo: str,
+        actor_user_id: str,
+    ) -> Order:
+        """AS(사후관리) 요청. 주문에 AS 플래그+메모를 세팅하고 배정 협력사에게 안내를 발송한다.
+
+        협력사 링크에도 AS 요청/메모가 노출된다(PartnerJobRead.as_requested/as_memo).
+        미배정이면 발송은 건너뛰고 플래그/메모/타임라인만 남긴다(추후 배정 시 링크로 확인).
+        """
+        memo = (memo or "").strip()
+        if not memo:
+            raise ValueError("as_memo_required")
+        order = self.orders.get(order_id)
+        if order is None or order.deleted_at is not None:
+            raise ValueError("order_not_found")
+
+        order.as_requested = True
+        order.as_memo = memo
+        self.timeline.record(
+            order_id=order.id,
+            actor_user_id=actor_user_id,
+            event_type=TimelineEventType.AS_REQUESTED,
+            title="AS 요청",
+            description=memo,
+        )
+        self.db.flush()
+
+        # 배정된 협력사가 있으면 AS 안내를 발송한다(발송 실패는 message_logs에 기록되고 예외를 던지지 않음).
+        if order.partner_id:
+            # 지연 import: 순환참조 방지.
+            from app.services.messages import MessageService
+
+            # AS 안내는 자유서식(메모)이라 사전등록 카카오 템플릿에 맞지 않으므로 LMS로 발송한다.
+            try:
+                MessageService(self.db).send(
+                    MessageSendRequest(
+                        order_id=order.id,
+                        message_type=MessageType.PARTNER_AS_REQUEST,
+                        recipient_type=RecipientType.PARTNER,
+                        channel=MessageChannel.LMS,
+                        memo=memo,
+                    ),
+                    actor_user_id=actor_user_id,
+                )
+                # MessageService.send가 내부에서 commit한다(플래그+타임라인+메시지 로그 원자 커밋).
+            except ValueError:
+                # 수신자 해석 실패(예: 댕글링 협력사) 등 발송 자체가 불가해도 AS 플래그/타임라인은 남긴다.
+                self.db.commit()
+        else:
+            self.db.commit()
+
+        self.db.refresh(order)
+        return order
+
     def delete_order(self, *, order_id: str, actor_user_id: str) -> None:
         """주문 1건 soft-delete. 마지막 살아있는 line이면 그룹도 soft-delete한다."""
         order = self.db.execute(
@@ -666,6 +731,8 @@ def to_admin_order_dto(
         size_or_quantity=order.size_or_quantity,
         service_detail=order.service_detail,
         special_request=order.special_request,
+        as_requested=bool(order.as_requested),
+        as_memo=order.as_memo,
         source_channel=source_channel,
         customer_name=customer_name or "",
         customer_phone=customer_phone or "",
@@ -768,6 +835,8 @@ def to_partner_job_dto(
         size_or_quantity=order.size_or_quantity,
         service_detail=order.service_detail,
         special_request=order.special_request,
+        as_requested=bool(order.as_requested),
+        as_memo=order.as_memo,
         customer_name=customer_name or "",
         customer_phone=customer_phone or "",
         customer_address=customer_address or "",

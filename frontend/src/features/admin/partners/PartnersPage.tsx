@@ -825,12 +825,12 @@ export function PartnersPage() {
                       const isPaid = job.partner_payment_status === 'paid';
                       // 취소건은 기록 보존을 위해 목록엔 남기되 정산 건수/금액에선 제외된다.
                       const isCancelled = job.status === '취소';
-                      // 미정산으로 보이더라도 지급완료 처리는 서비스완료 + 미지급 주문만 가능.
-                      const canSettle = job.status === '서비스완료' && !isPaid;
+                      // 1-1: 서비스완료가 아니어도 도급가가 입력된(>0) 미지급 건이면 정산 가능.
+                      const canSettle = !isPaid && !isCancelled && (job.partner_price ?? 0) > 0;
                       return (
                       <React.Fragment key={job.order_id}>
                         <GridCell testId={`partner-settlement-row-${job.order_id}`}>
-                          <input data-testid={`partner-settlement-select-${job.order_id}`} type="checkbox" disabled={!canSettle} title={canSettle ? undefined : '서비스완료 + 미지급 건만 정산 선택할 수 있습니다.'} checked={settlementSelection.has(job.order_id)} onChange={() => toggleSettlementSelection(job.order_id)} />
+                          <input data-testid={`partner-settlement-select-${job.order_id}`} type="checkbox" disabled={!canSettle} title={canSettle ? undefined : '도급가를 입력한 미지급 건만 정산 선택할 수 있습니다.'} checked={settlementSelection.has(job.order_id)} onChange={() => toggleSettlementSelection(job.order_id)} />
                         </GridCell>
                         <GridCell mono>{formatDate(job.scheduled_date)}</GridCell>
                         <GridCell><StatusBadge status={job.status} /></GridCell>
@@ -876,7 +876,7 @@ export function PartnersPage() {
                             {isPaid ? (
                               <button type="button" data-testid={`partner-settlement-revert-${job.order_id}`} className="btn btn--secondary btn--sm" onClick={() => void handleRevertSettlement([job.order_id])}>되돌리기</button>
                             ) : (
-                              <button type="button" data-testid={`partner-settlement-settle-${job.order_id}`} className="btn btn--secondary btn--sm" disabled={!canSettle} title={canSettle ? undefined : '서비스완료 후 정산 가능합니다.'} onClick={() => void handleSettle([job.order_id])}>정산</button>
+                              <button type="button" data-testid={`partner-settlement-settle-${job.order_id}`} className="btn btn--secondary btn--sm" disabled={!canSettle} title={canSettle ? undefined : '도급가를 입력한 미지급 건만 정산할 수 있습니다.'} onClick={() => void handleSettle([job.order_id])}>정산</button>
                             )}
                             <button type="button" data-testid={`partner-settlement-notify-${job.order_id}`} className="btn btn--ghost btn--sm" onClick={() => setNotifyTarget(job)}>고객정보 전송</button>
                           </div>

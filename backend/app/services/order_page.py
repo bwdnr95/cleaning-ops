@@ -23,7 +23,11 @@ from app.domain.order_list import (
     order_workflow_status,
     status_tab_value,
 )
-from app.domain.order_metrics import REVENUE_STATUSES, SCHEDULED_WORKFLOW_STATUSES
+from app.domain.order_metrics import (
+    REVENUE_STATUSES,
+    SCHEDULED_WORKFLOW_STATUSES,
+    TODAY_JOBS_EXCLUDED_STATUSES,
+)
 from app.domain.payment_status import PAYMENT_CHECK_STATUSES
 from app.models.order import Order
 from app.models.order_group import OrderGroup
@@ -374,9 +378,10 @@ class OrderPageService:
     def _matches_status_tab(cls, order: Order, status_key: str | None) -> bool:
         if not status_key or status_key == "all":
             return True
-        # '오늘 작업' KPI = 오늘 방문 예정 전체(취소 제외). 날짜는 visit_preset 가 건다.
+        # 3-2: '오늘 작업 예정'은 확정 이전(상담중/미배정·협력사확인중)을 제외(날짜 있어도).
+        # 대시보드 today_jobs 와 동일 기준. 날짜는 visit_preset 가 건다.
         if status_key == "today":
-            return order.status != OrderStatus.CANCELLED
+            return order.status not in TODAY_JOBS_EXCLUDED_STATUSES
         if status_key == "payment_check":
             # 대시보드 카운트(services/dashboard.py)와 동일 기준: 미납 계열 + 취소 제외 +
             # 방문일이 미래(오늘 이후)면 제외(미배정=방문일 없음은 유지).
@@ -395,9 +400,6 @@ class OrderPageService:
             return workflow == "작업예정"
         if status_key == "done":
             return workflow in ("고객전달필요", "서비스완료")
-        if status_key == "schedule_work_confirmed":
-            # 4-1: '일정 및 작업 확정' 탭에 상담중/미배정(워크플로 '상담중'=신규접수·상담중)도 함께 노출한다.
-            return workflow in ("작업예정", "상담중")
         tab_status = status_tab_value(status_key)
         if tab_status is not None:
             return workflow == tab_status
@@ -416,16 +418,6 @@ class OrderPageService:
             for key, tab_status in ORDER_STATUS_TAB_OPTIONS:
                 if workflow == tab_status:
                     counts[key] += 1
-        # 4-1: '일정 및 작업 확정' 탭 카운트에 상담중/미배정(워크플로 '상담중')을 합산해
-        # 탭을 눌렀을 때의 목록(=_matches_status_tab)과 카운트를 일치시킨다.
-        counts["schedule_work_confirmed"] = (
-            counts.get("schedule_work_confirmed", 0)
-            + sum(
-                1
-                for order in rows
-                if order_workflow_status(order.status, order.payment_status) == "상담중"
-            )
-        )
         return counts
 
     @staticmethod

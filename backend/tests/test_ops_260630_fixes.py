@@ -70,7 +70,8 @@ def test_order_page_payment_check_filter_matches_count_definition(db_session):
 
 
 def test_settlement_item_includes_group_totals(db_session):
-    # 한 그룹(고객)에 2라인: 금액은 라인1에만. 둘 다 DEV_PARTNER에 배정·서비스완료·미정산.
+    # 한 그룹(고객)에 2라인: 금액은 라인1에만. 둘 다 DEV_PARTNER에 배정·서비스완료.
+    # 1-1로 도급가 0원 라인은 '미정산' 목록에선 빠지므로, 그룹 합계 보조표시는 '전체' 뷰로 검증한다.
     group = OrderGroup(
         id=str(uuid4()), customer_token=f"t-{uuid4()}", customer_name="강남",
         customer_phone="01011112222", customer_address="A", customer_visible_payment=False,
@@ -87,7 +88,7 @@ def test_settlement_item_includes_group_totals(db_session):
     db_session.add(Order(id=str(uuid4()), total_amount=0, partner_payment_amount=0, **common))
     db_session.commit()
 
-    result = PartnerSettlementService(db_session).list_settlements(partner_id=DEV_PARTNER_ID, status="unpaid")
+    result = PartnerSettlementService(db_session).list_settlements(partner_id=DEV_PARTNER_ID, status="all")
     items = [i for i in result.items if i.customer_name == "강남"]
     assert len(items) == 2
     for it in items:

@@ -1131,6 +1131,12 @@ def test_dashboard_summary_matches_operational_queue_definitions() -> None:
                     status=OrderStatus.DAY_BEFORE_NOTICE_DONE,
                     scheduled_date=date(2026, 5, 4),
                 ),
+                # 3-2: 오늘 방문이어도 상담중은 '오늘 작업 예정'에서 제외돼야 한다(구 로직이면 today_jobs=5).
+                make_order(
+                    "today-consulting",
+                    status=OrderStatus.CONSULTING,
+                    scheduled_date=date(2026, 5, 4),
+                ),
                 make_order(
                     "today-cancelled",
                     status=OrderStatus.CANCELLED,
@@ -1194,7 +1200,8 @@ def test_dashboard_summary_matches_operational_queue_definitions() -> None:
 
         summary = DashboardService(db).summary(today=date(2026, 5, 4))
 
-    # 오늘(2026-05-04) 방문 예정 전체(취소 제외): scheduled/confirmed/day-before-done/photo-review = 4.
+    # 3-2: 오늘(2026-05-04) 방문 중 확정 이후만: scheduled/confirmed/day-before-done/photo-review = 4.
+    # (오늘 상담중·취소는 제외 — 상담중 미제외 시 5가 된다.)
     assert summary.today_jobs == 4
     assert summary.tomorrow_notice_targets == 1
     assert summary.partner_pending == 1

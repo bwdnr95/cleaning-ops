@@ -283,6 +283,18 @@ export function PartnerJobDetail({ onDetailOpenChange = undefined } = {}) {
           <div className="multiline-text" style={{ padding: 10, background: 'var(--warn-bg)', border: '1px solid var(--warn-border)', borderRadius: 8, fontSize: 12.5, lineHeight: 1.5, color: '#78350f' }}>
             {job.special_request || '별도 요청 사항이 없습니다.'}
           </div>
+          {job.as_requested && (
+            <div style={{ marginTop: 10 }}>
+              <SectionLabel>AS 요청 (재작업)</SectionLabel>
+              <div
+                className="multiline-text"
+                data-testid="partner-as-block"
+                style={{ padding: 10, background: 'var(--danger-bg)', border: '1px solid var(--danger-border)', borderRadius: 8, fontSize: 12.5, lineHeight: 1.5, color: 'var(--danger-fg)', fontWeight: 500 }}
+              >
+                {job.as_memo || 'AS(재작업) 요청이 접수되었습니다. 관리자와 일정을 조율해주세요.'}
+              </div>
+            </div>
+          )}
         </Panel>
 
         <Panel>

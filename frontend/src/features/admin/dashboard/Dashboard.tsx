@@ -360,8 +360,8 @@ function toDashJobs(orders, target) {
       target === 'tomorrow'
         // '내일 안내 대상' KPI = 내일 '일정 및 작업 확정'(작업예정 워크플로) 전체와 동일 정의
         ? ['일정확정', '전날안내필요', '전날안내완료', '작업예정', '작업진행'].includes(order.status)
-        // '오늘 작업 예정' KPI 와 동일 정의(오늘 방문 전체, 취소 제외)
-        : order.status !== '취소'
+        // 3-2: '오늘 작업 예정'은 확정 이전(상담중/미배정·협력사확인중)을 날짜 있어도 제외.
+        : !['취소', '신규접수', '상담중', '협력사확인중'].includes(order.status)
     ))
     .slice(0, 5)
     .map((order) => ({

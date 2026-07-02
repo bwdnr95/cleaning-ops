@@ -801,8 +801,19 @@ export function OrderDetailPage({ orderId, onBack, onEdit, onDuplicate, onNav, o
                       <span style={{ width: 8, height: 8, borderRadius: '50%', background: index === timeline.length - 1 ? 'var(--brand)' : 'var(--border-strong)', marginTop: 4, flexShrink: 0 }}/>
                       <div style={{ flex: 1, fontSize: 11.5 }}>
                         <div style={{ color: 'var(--text-tertiary)', fontSize: 10.5, marginBottom: 1 }}>{formatDateTime(event.created_at)}</div>
-                        <div style={{ color: 'var(--text)', fontWeight: 500 }}>{event.title}</div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'wrap' }}>
+                          <span style={{ color: 'var(--text)', fontWeight: 500 }}>{event.title}</span>
+                          {event.event_metadata?.author_role === 'partner' && (
+                            <span style={{ fontSize: 9.5, fontWeight: 700, color: 'var(--brand)', background: 'var(--brand-bg)', padding: '0 5px', borderRadius: 8 }}>협력사</span>
+                          )}
+                        </div>
                         <div style={{ color: 'var(--text-tertiary)', marginTop: 1 }}>{timelineEventLabel(event.event_type)}</div>
+                        {/* 4: 협력사 현장 메모 등 이벤트 본문(description)을 운영시스템에서 볼 수 있게 노출. */}
+                        {event.description && (
+                          <div className="multiline-text" style={{ marginTop: 3, color: 'var(--text-secondary)', fontSize: 11.5, lineHeight: 1.45, whiteSpace: 'pre-wrap' }}>
+                            {event.description}
+                          </div>
+                        )}
                       </div>
                     </div>
                   ))}

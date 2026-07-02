@@ -19,6 +19,7 @@ const EMPTY: RecurringContractInput = {
   day_of_month: 10,
   start_date: '',
   service_name: '',
+  billing_mode: 'per_visit',
   discount_amount: 0,
 };
 
@@ -336,7 +337,19 @@ export function RecurringContractForm({
               />
             </label>
             <label style={labelStyle}>
-              1주기 금액
+              청구 방식
+              <select
+                style={inputStyle}
+                value={form.billing_mode ?? 'per_visit'}
+                onChange={(e) => set('billing_mode', e.target.value as RecurringContractInput['billing_mode'])}
+                data-testid="rc-billing-mode"
+              >
+                <option value="per_visit">회당 합산 (회당 금액 × 방문 횟수)</option>
+                <option value="monthly">월 고정 (방문 횟수 무관)</option>
+              </select>
+            </label>
+            <label style={labelStyle}>
+              {form.billing_mode === 'monthly' ? '월 고정 금액' : '회당 금액'}
               <input
                 style={inputStyle}
                 type="number"
@@ -344,6 +357,11 @@ export function RecurringContractForm({
                 onChange={(e) => set('total_amount', e.target.value === '' ? null : Number(e.target.value))}
                 data-testid="rc-amount"
               />
+              <span style={{ fontSize: 11, color: 'var(--text-tertiary)', fontWeight: 400 }}>
+                {form.billing_mode === 'monthly'
+                  ? '월 트래커에 이 금액이 매월 고정으로 청구됩니다.'
+                  : '월 트래커에 회당 금액 × 그 달 방문 횟수로 합산됩니다.'}
+              </span>
             </label>
             <label style={labelStyle}>
               계약금(선택)

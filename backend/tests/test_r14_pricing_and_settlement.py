@@ -239,22 +239,30 @@ def test_partner_settlement_marks_paid_reverts_and_records_timeline() -> None:
     assert "partner_settlement_reverted" in timeline_types
 
 
-def test_partner_settlement_rejects_uncompleted_orders() -> None:
+def test_partner_settlement_allows_uncompleted_orders_with_amount() -> None:
+    # 1-1: 서비스완료가 아니어도 도급가가 입력된 취소 아닌 건이면 정산할 수 있다.
     client = make_test_client()
     headers = admin_headers(client)
+
+    # 미완료 상태여도 도급가가 있으면 미정산 목록에 뜬다.
+    unpaid = client.get(
+        f"/api/admin/partners/{DEV_PARTNER_ID}/settlements",
+        params={"status": "unpaid", "from": "2026-01-01", "to": "2026-12-31"},
+        headers=headers,
+    ).json()
+    assert DEV_ORDER_ID in {item["order_id"] for item in unpaid["items"]}
 
     settle_response = client.post(
         f"/api/admin/partners/{DEV_PARTNER_ID}/settlements/settle",
         headers=headers,
         json={"order_ids": [DEV_ORDER_ID]},
     )
-
-    assert settle_response.status_code == 422, settle_response.text
-    assert settle_response.json()["detail"] == "invalid_settlement_order"
+    assert settle_response.status_code == 200, settle_response.text
+    assert settle_response.json()["updated_order_ids"] == [DEV_ORDER_ID]
 
     detail = client.get(f"/api/admin/orders/{DEV_ORDER_ID}", headers=headers).json()
-    assert detail["partner_payment_status"] == PartnerPaymentStatus.UNPAID
-    assert "partner_settled" not in {event["event_type"] for event in detail["timeline"]}
+    assert detail["partner_payment_status"] == PartnerPaymentStatus.PAID
+    assert "partner_settled" in {event["event_type"] for event in detail["timeline"]}
 
 
 def test_quote_and_partner_customer_info_messages_are_scoped_to_allowed_fields() -> None:

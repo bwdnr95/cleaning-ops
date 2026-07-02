@@ -6,6 +6,7 @@ import {
   listBrokers,
   listPartners,
   listServiceCatalog,
+  sendOrderAsRequest,
   updateAdminOrder,
   updateAdminOrderGroup,
 } from '../../../api/admin';
@@ -29,6 +30,11 @@ export function OrderFormPage({ mode = 'create', orderId = null, duplicateFromOr
   const [isSaving, setIsSaving] = React.useState(false);
   const [error, setError] = React.useState(null);
   const [notice, setNotice] = React.useState('');
+  // AS(사후관리) 요청: 저장 페이로드가 아니라 별도 전송 액션(편집 모드 전용).
+  const [asOpen, setAsOpen] = React.useState(false);
+  const [asMemo, setAsMemo] = React.useState('');
+  const [asRequested, setAsRequested] = React.useState(false);
+  const [asBusy, setAsBusy] = React.useState(false);
   const draft = useOrderFormDraft(form, { enabled: mode === 'create' && !isDuplicate });
   const activeServiceCategories = React.useMemo(
     () => (serviceCatalog.data || []).filter((category) => category.is_active),
@@ -52,6 +58,11 @@ export function OrderFormPage({ mode = 'create', orderId = null, duplicateFromOr
       .then((order) => {
         if (isCurrent) {
           setForm(isDuplicate ? toDuplicateForm(order) : toForm(order));
+          if (!isDuplicate) {
+            setAsRequested(Boolean(order.as_requested));
+            setAsMemo(order.as_memo || '');
+            setAsOpen(Boolean(order.as_requested));
+          }
         }
       })
       .catch(() => {
@@ -219,6 +230,28 @@ export function OrderFormPage({ mode = 'create', orderId = null, duplicateFromOr
     }
   };
 
+  const handleSendAs = async () => {
+    if (mode !== 'edit' || !orderId) return;
+    const memo = asMemo.trim();
+    if (!memo) {
+      setError('AS 요청 내용을 입력해주세요.');
+      return;
+    }
+    setAsBusy(true);
+    setError(null);
+    setNotice('');
+    try {
+      const updated = await sendOrderAsRequest(orderId, memo);
+      setAsRequested(Boolean(updated.as_requested));
+      setAsMemo(updated.as_memo || memo);
+      setNotice('AS 요청을 협력사에게 전송했습니다. 협력사 링크에도 표시됩니다.');
+    } catch (requestError) {
+      setError(requestError?.message || 'AS 요청 전송에 실패했습니다.');
+    } finally {
+      setAsBusy(false);
+    }
+  };
+
   const hasPartnerPriceWarning = form.lines.some((line) => {
     // 소비자가 필드는 정가(할인 전)라 도급가와 비교는 할인 적용 후(net)로 한다.
     const net = Math.max((parseMoneyInput(line.total_amount) || 0) - (parseMoneyInput(line.discount_amount) || 0), 0);
@@ -304,6 +337,14 @@ export function OrderFormPage({ mode = 'create', orderId = null, duplicateFromOr
                     onServiceCategoryChange={handleServiceCategoryChange}
                     onServiceItemChange={handleServiceItemChange}
                     onRemove={removeLine}
+                    asEnabled={mode === 'edit'}
+                    asOpen={asOpen}
+                    asMemo={asMemo}
+                    asRequested={asRequested}
+                    asBusy={asBusy}
+                    onAsToggle={setAsOpen}
+                    onAsMemoChange={setAsMemo}
+                    onSendAs={handleSendAs}
                   />
                 ))}
               </div>
@@ -368,8 +409,18 @@ function LineEditor({
   onServiceCategoryChange,
   onServiceItemChange,
   onRemove,
+  asEnabled = false,
+  asOpen = false,
+  asMemo = '',
+  asRequested = false,
+  asBusy = false,
+  onAsToggle,
+  onAsMemoChange,
+  onSendAs,
 }) {
   const serviceItems = getServiceItems(activeServiceCategories, line.service_category_id);
+  // AS 블록은 주문 단위 액션이라 편집 모드의 첫 라인에만 노출한다.
+  const showAs = asEnabled && lineIndex === 0;
 
   return (
     <div style={{ border: '1px solid var(--divider)', borderRadius: 8, background: 'var(--surface-subtle)', overflow: 'hidden' }}>
@@ -457,6 +508,55 @@ function LineEditor({
           <TextField label="상품 상세" span={2} multiline value={line.service_detail} onChange={(value) => onFieldChange(lineIndex, 'service_detail', value)} />
           <TextField label="요청사항" span={2} multiline value={line.special_request} onChange={(value) => onFieldChange(lineIndex, 'special_request', value)} />
         </FieldGrid>
+
+        {showAs && (
+          <div
+            data-testid="order-as-section"
+            style={{ border: '1px solid var(--divider)', borderRadius: 8, background: 'var(--bg-subtle)', padding: 12, display: 'flex', flexDirection: 'column', gap: 8 }}
+          >
+            <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12.5, fontWeight: 700, color: 'var(--text)' }}>
+              <input
+                type="checkbox"
+                data-testid="order-as-checkbox"
+                checked={asOpen}
+                onChange={(event) => onAsToggle?.(event.target.checked)}
+              />
+              AS 요청 (사후관리 · 재작업)
+              {asRequested && (
+                <span style={{ fontSize: 10.5, fontWeight: 700, color: 'var(--warn-fg)', background: 'var(--warn-bg)', borderRadius: 999, padding: '2px 8px' }}>
+                  요청됨
+                </span>
+              )}
+            </label>
+            {asOpen && (
+              <>
+                <textarea
+                  className="input"
+                  data-testid="order-as-memo"
+                  rows={3}
+                  placeholder="재작업이 필요한 위치·증상 등 협력사에 전달할 AS 내용을 입력하세요."
+                  value={asMemo}
+                  onChange={(event) => onAsMemoChange?.(event.target.value)}
+                  style={{ resize: 'vertical', fontSize: 13 }}
+                />
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                  <button
+                    type="button"
+                    data-testid="order-as-send"
+                    className="btn btn--primary btn--sm"
+                    disabled={asBusy || !asMemo.trim()}
+                    onClick={() => onSendAs?.()}
+                  >
+                    <Icon name="send" size={12} /> {asBusy ? '전송 중' : (asRequested ? 'AS 재전송' : 'AS 전송')}
+                  </button>
+                  <span style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>
+                    배정된 협력사에게 알림을 보내고, 협력사 링크에도 AS 요청이 표시됩니다.
+                  </span>
+                </div>
+              </>
+            )}
+          </div>
+        )}
 
         <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-tertiary)' }}>결제 / 정산</div>
         <FieldGrid>

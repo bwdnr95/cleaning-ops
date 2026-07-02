@@ -75,6 +75,35 @@ def test_monthly_api_list_and_set(client, seed_admin_token):
     assert res.status_code == 200 and res.json()["tax_invoice_issued"] is True
 
 
+def _weekly_contract(db, *, billing_mode="per_visit", amount=50000):
+    # 2026-06-01은 월요일 → 매주(간격1) 월요일은 6월에 5회(1,8,15,22,29).
+    g = OrderGroup(id=str(uuid4()), customer_token=f"t-{uuid4()}", customer_name="주간",
+                   customer_phone="01099998888", customer_address="B", customer_visible_payment=False)
+    db.add(g); db.flush()
+    c = RecurringContract(id=str(uuid4()), label="W", order_group_id=g.id,
+                          recurrence_mode=RecurrenceMode.WEEKLY, interval_weeks=1,
+                          start_date=date(2026, 6, 1), status=RecurringContractStatus.ACTIVE,
+                          service_name="청소", total_amount=amount, billing_mode=billing_mode)
+    db.add(c); db.flush()
+    return c
+
+
+def test_month_amount_per_visit_multiplies_by_visits(db_session):
+    # per_visit(회당 합산): 회당 금액 × 그달 방문 횟수. 2026-06 매주 월요일 = 5회.
+    c = _weekly_contract(db_session, billing_mode="per_visit", amount=50000)
+    db_session.commit()
+    row = next(r for r in RecurringMonthlyService(db_session).list_month("2026-06") if r.contract_id == c.id)
+    assert row.amount == 50000 * 5
+
+
+def test_month_amount_monthly_is_fixed(db_session):
+    # monthly(월 고정): 방문 횟수와 무관하게 월 고정 금액.
+    c = _weekly_contract(db_session, billing_mode="monthly", amount=50000)
+    db_session.commit()
+    row = next(r for r in RecurringMonthlyService(db_session).list_month("2026-06") if r.contract_id == c.id)
+    assert row.amount == 50000
+
+
 def test_monthly_api_rejects_invalid_month(client, seed_admin_token):
     # 잘못된 월은 GET 500이 아니라 422, POST는 영속화 없이 422 (검증 일원화).
     h = {"Authorization": f"Bearer {seed_admin_token}"}

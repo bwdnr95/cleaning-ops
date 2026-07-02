@@ -1115,15 +1115,19 @@ class MessageService:
         if payload.message_type in {
             MessageType.PARTNER_ASSIGNMENT,
             MessageType.PARTNER_CUSTOMER_INFO,
+            MessageType.PARTNER_AS_REQUEST,
         }:
             if not order.partner_id:
                 raise ValueError("partner_not_assigned")
             partner = self.partners.get(order.partner_id)
             if partner is None:
                 raise ValueError("partner_not_found")
-            # 정산/고객정보 안내는 담당자 연락처로 우선 발송(없으면 대표 연락처).
+            # 정산/고객정보/AS 안내는 담당자 연락처로 우선 발송(없으면 대표 연락처).
             recipient_phone = partner.phone
-            if payload.message_type == MessageType.PARTNER_CUSTOMER_INFO:
+            if payload.message_type in {
+                MessageType.PARTNER_CUSTOMER_INFO,
+                MessageType.PARTNER_AS_REQUEST,
+            }:
                 recipient_phone = partner.manager_phone or partner.phone
             return RecipientType.PARTNER, partner.manager_name or partner.name, recipient_phone
 
@@ -1403,6 +1407,16 @@ class MessageService:
                 f"주소: {order.customer_address}\n"
                 f"요청사항: {order.special_request or '-'}"
             )
+        if payload.message_type == MessageType.PARTNER_AS_REQUEST:
+            partner_name = partner.manager_name or partner.name if partner else "협력사"
+            as_memo = (order.as_memo or payload.memo or "").strip()
+            return (
+                f"[클린잡] {partner_name}님, AS(재작업) 요청이 접수되었습니다.\n"
+                f"고객: {order.customer_name} ({mask_phone_last4(order.customer_phone)})\n"
+                f"방문지: {order.customer_address}\n"
+                f"AS 내용: {as_memo or '-'}\n"
+                f"확인 후 재방문 일정을 조율해주세요."
+            )
         return f"[클린잡] {payload.message_type.value}: {format_service_name(order)}"
 
     def _build_customer_link(self, customer_token: str | None) -> str:
@@ -1417,6 +1431,7 @@ class MessageService:
             MessageType.CUSTOMER_BALANCE_DUE: "고객 잔금 안내",
             MessageType.CUSTOMER_QUOTE: "고객 견적서",
             MessageType.PARTNER_CUSTOMER_INFO: "협력사 고객정보",
+            MessageType.PARTNER_AS_REQUEST: "협력사 AS 요청",
         }.get(message_type, message_type.value)
         return f"{label} 발송 결과: {status.value}"
 

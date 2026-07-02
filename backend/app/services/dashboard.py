@@ -5,7 +5,11 @@ from sqlalchemy.orm import Session
 
 from app.core.time import business_today
 from app.domain.constants import OrderStatus
-from app.domain.order_metrics import REVENUE_STATUSES, SCHEDULED_WORKFLOW_STATUSES
+from app.domain.order_metrics import (
+    REVENUE_STATUSES,
+    SCHEDULED_WORKFLOW_STATUSES,
+    TODAY_JOBS_EXCLUDED_STATUSES,
+)
 from app.domain.payment_status import PAYMENT_CHECK_STATUSES
 from app.models.message import MessageLog
 from app.models.order import Order
@@ -25,10 +29,11 @@ class DashboardService:
         )
 
         return DashboardSummary(
-            # '오늘 작업'은 오늘 방문 예정 전체(취소 제외)로 센다 — 주문 리스트의 '오늘' 보기와 숫자를 일치시킨다.
+            # 3-2: '오늘 작업 예정'은 확정 이전 상태(상담중/미배정·협력사확인중)를 날짜가 있어도 제외한다.
+            # 주문 리스트 'today' 탭과 동일 기준으로 숫자를 일치시킨다.
             today_jobs=self._count(
                 Order.scheduled_date == current,
-                Order.status != OrderStatus.CANCELLED,
+                Order.status.not_in(TODAY_JOBS_EXCLUDED_STATUSES),
             ),
             # 내일 방문 예정 '일정 및 작업 확정'(작업예정 워크플로) 전체 — 주문목록 같은 탭/카운트와 일치.
             tomorrow_notice_targets=self._count(

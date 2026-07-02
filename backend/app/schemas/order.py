@@ -116,6 +116,10 @@ class OrderUpdate(ApiModel):
 class AdminOrderRead(OrderLineBase):
     id: str
     group_id: str
+    # AS(사후관리) 요청 상태는 읽기 전용으로만 노출한다. 쓰기(주문 생성/수정)로는 바꿀 수 없고
+    # AS 전송 액션(request_as)으로만 세팅되어 AS_REQUESTED 타임라인/협력사 통지를 강제한다.
+    as_requested: bool = False
+    as_memo: str | None = None
     recurring_contract_id: str | None = None
     customer_name: str
     customer_phone: str
@@ -225,6 +229,8 @@ class PartnerJobRead(ApiModel):
     size_or_quantity: str | None = None
     service_detail: str | None = None
     special_request: str | None = None
+    as_requested: bool = False
+    as_memo: str | None = None
     customer_name: str
     customer_phone: str
     customer_address: str

@@ -74,6 +74,10 @@ class OrderMessageSendRequest(BaseModel):
     memo: str | None = None
 
 
+class OrderAsRequestBody(BaseModel):
+    memo: str
+
+
 @router.get("", response_model=list[AdminOrderRead])
 def list_orders(
     sort: str = Query(default="visit_asc", pattern="^(visit_asc|visit_desc|received_asc|received_desc)$"),
@@ -354,6 +358,25 @@ def send_partner_unpaid_notice(
         )
     except ValueError as exc:
         raise order_message_http_error(exc) from exc
+
+
+@router.post("/{order_id}/as-request", response_model=AdminOrderRead)
+def request_as(
+    order_id: str,
+    payload: OrderAsRequestBody,
+    db: Session = Depends(get_session),
+    user: CurrentUser = Depends(require_admin),
+) -> AdminOrderRead:
+    """AS(사후관리) 요청 전송. 주문에 AS 플래그+메모를 세팅하고 배정 협력사에게 안내를 발송한다."""
+    try:
+        order = OrderService(db).request_as(
+            order_id,
+            memo=payload.memo,
+            actor_user_id=user.id,
+        )
+        return to_admin_order_dto(order, group=OrderGroupRepository(db).get(order.group_id))
+    except ValueError as exc:
+        raise order_http_error(exc) from exc
 
 
 @router.get("/{order_id}", response_model=AdminOrderDetailRead)

@@ -9,7 +9,6 @@ from sqlalchemy.orm import Session
 
 from app.core.time import utc_now
 from app.domain.constants import OrderStatus, TimelineEventType
-from app.domain.order_metrics import SETTLEABLE_ORDER_STATUSES
 from app.domain.order_pricing import order_consumer_total
 from app.domain.payment_status import PARTNER_SETTLEMENT_PENDING_STATUSES, PartnerPaymentStatus
 from app.models.order import Order
@@ -23,19 +22,20 @@ from app.schemas.partner import (
 )
 from app.services.timeline import TimelineService
 
-# SETTLEABLE_ORDER_STATUSES 는 domain/order_metrics(단일 출처)에서 import 한다.
-
-
 def unpaid_partner_condition():
     """미정산 SQL 조건(전 화면 공통).
 
-    정책: '서비스완료'된 작업 중 아직 지급완료가 아닌 건만 미정산으로 본다.
-    (완료 전 건은 미정산으로 세지 않는다 → 미정산 목록/합계와 '정산 실행 가능' 집합을 일치시켜
-     "미정산인데 정산 버튼 비활성/총액이 안 줄어듦" 문제를 없앤다. 취소건은 COMPLETED 가 아니라 자연 제외.)
+    1-1 정책: 서비스완료가 아니어도 정산할 수 있게, '도급가가 0보다 크고 아직 지급완료가 아닌'
+    취소 아닌 주문을 미정산으로 본다(완료 요건 제거). 미정산 목록/합계/정산가능 집합 +
+    프론트 canSettle(>0)까지 일치. 도급가 미입력(NULL·0)은 정산할 것이 없으므로 제외.
     """
-    return (Order.status == OrderStatus.COMPLETED) & (
-        Order.partner_payment_status.is_(None)
-        | Order.partner_payment_status.in_(PARTNER_SETTLEMENT_PENDING_STATUSES)
+    return (
+        (Order.status != OrderStatus.CANCELLED)
+        & (Order.partner_payment_amount > 0)
+        & (
+            Order.partner_payment_status.is_(None)
+            | Order.partner_payment_status.in_(PARTNER_SETTLEMENT_PENDING_STATUSES)
+        )
     )
 
 
@@ -195,9 +195,8 @@ class PartnerSettlementService:
         if status == "unpaid":
             stmt = stmt.where(unpaid_partner_condition())
         elif status == "paid":
-            # 정산완료 이력은 기존대로 서비스완료 주문만 본다.
             stmt = stmt.where(
-                Order.status.in_(SETTLEABLE_ORDER_STATUSES),
+                Order.status != OrderStatus.CANCELLED,
                 Order.partner_payment_status == PartnerPaymentStatus.PAID,
             )
         elif status == "all":
@@ -262,11 +261,12 @@ def to_settlement_item(
 
 
 def is_unpaid_partner_order(order: Order) -> bool:
-    # 정산 '실행(지급완료 처리)' 가드. 가시성(unpaid_partner_condition)과 달리,
-    # 미완료 작업을 지급완료로 찍지 못하도록 서비스완료 주문만 허용한다.
+    # 1-1: 미정산 가시성(unpaid_partner_condition)과 동일 기준. 서비스완료 요건 없이
+    # 도급가 > 0 + 미지급 + 취소 아님이면 정산 실행 가능.
     return (
         order.deleted_at is None
-        and order.status in SETTLEABLE_ORDER_STATUSES
+        and order.status != OrderStatus.CANCELLED
+        and (order.partner_payment_amount or 0) > 0
         and (
             order.partner_payment_status is None
             or order.partner_payment_status in PARTNER_SETTLEMENT_PENDING_STATUSES
@@ -277,7 +277,7 @@ def is_unpaid_partner_order(order: Order) -> bool:
 def is_revertible_partner_order(order: Order) -> bool:
     return (
         order.deleted_at is None
-        and order.status in SETTLEABLE_ORDER_STATUSES
+        and order.status != OrderStatus.CANCELLED
         and order.partner_payment_status == PartnerPaymentStatus.PAID
     )
 

@@ -115,8 +115,10 @@ def test_revenue_groups_by_month(db_session, seed_order, make_extra_line):
 
 
 def test_settlement_backlog_only_lists_completed_unsettled(db_session, seed_order):
+    # 1-1: 백로그는 '도급가>0 + 미지급'(취소 아님) 기준. 완료 여부는 요건이 아니다.
     seed_order.status = OrderStatus.COMPLETED
     seed_order.partner_payment_status = PartnerPaymentStatus.UNPAID
+    seed_order.partner_payment_amount = Decimal("100000")
     db_session.flush()
 
     rows = ReportService(db_session).settlements().rows
