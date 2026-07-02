@@ -198,7 +198,9 @@ test('calendar more link opens the selected day order list', async ({ page, requ
   await page.getByTestId('calendar-more-20').click();
 
   const panel = page.getByTestId('calendar-day-panel');
-  await expect(panel).toContainText('2026.06.20');
+  const now = new Date();
+  const expectedPanelDate = `${now.getFullYear()}.${String(now.getMonth() + 1).padStart(2, '0')}.20`;
+  await expect(panel).toContainText(expectedPanelDate);
   await expect(panel).toContainText('4건');
   for (const order of orders) {
     await expect(page.getByTestId(`calendar-panel-order-${order.id}`)).toBeVisible();
@@ -684,14 +686,17 @@ async function createPhotoReviewJob(request) {
 async function createCalendarDayOrders(request) {
   const adminSession = await loginViaApi(request, 'admin');
   const adminHeaders = authHeaders(adminSession.access_token);
+  // 캘린더는 현재 월을 열므로 회차를 '현재 월 20일'로 만든다(하드코딩 월은 현재 시계와 어긋나면 캘린더에 안 보인다).
+  const now = new Date();
+  const scheduledDate = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-20`;
   const created = [];
 
   for (let index = 0; index < 4; index += 1) {
     created.push(await checkedJson(await request.post(`${backendUrl}/api/admin/orders`, {
       headers: adminHeaders,
       data: {
-        received_date: '2026-05-05',
-        scheduled_date: '2026-06-20',
+        received_date: scheduledDate,
+        scheduled_date: scheduledDate,
         requested_time: `${String(9 + index).padStart(2, '0')}:00`,
         partner_id: SEED_PARTNER_ID,
         team_name: 'E2E QA Team',
@@ -885,6 +890,19 @@ async function createDetailActionOrder(request) {
 
 async function pickDate(page, pickerTestId, dateValue) {
   await page.getByTestId(pickerTestId).click();
+  // 피커는 현재 월을 열므로, 대상 월(하드코딩 날짜의 연·월)이 보일 때까지 이동한 뒤 날짜를 클릭한다.
+  // (실제 시계가 어느 달이든 하드코딩된 날짜를 안정적으로 선택 — 날짜 취약성 제거.)
+  const [targetYear, targetMonth] = dateValue.split('-').map(Number);
+  const label = page.getByTestId('date-picker-month-label');
+  for (let i = 0; i < 36; i += 1) {
+    const matched = ((await label.textContent()) ?? '').match(/(\d+)\D+(\d+)/);
+    if (!matched) break;
+    const shownYear = Number(matched[1]);
+    const shownMonth = Number(matched[2]);
+    if (shownYear === targetYear && shownMonth === targetMonth) break;
+    const forward = targetYear * 12 + targetMonth > shownYear * 12 + shownMonth;
+    await page.getByRole('button', { name: forward ? '다음 달' : '이전 달' }).click();
+  }
   await page.getByTestId(`date-picker-day-${dateValue}`).click();
 }
 

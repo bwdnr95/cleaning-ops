@@ -160,7 +160,7 @@ export function DatePicker({ value, onChange, placeholder = '날짜 선택', tes
             <button type="button" aria-label="이전 달" onClick={() => moveMonth(-1)} style={pickerIconButton}>
               <Icon name="chevronLeft" size={13}/>
             </button>
-            <div style={{ flex: 1, textAlign: 'center', fontSize: 13, fontWeight: 700, color: 'var(--text)' }}>{monthLabel}</div>
+            <div data-testid="date-picker-month-label" style={{ flex: 1, textAlign: 'center', fontSize: 13, fontWeight: 700, color: 'var(--text)' }}>{monthLabel}</div>
             <button type="button" aria-label="다음 달" onClick={() => moveMonth(1)} style={pickerIconButton}>
               <Icon name="chevronRight" size={13}/>
             </button>

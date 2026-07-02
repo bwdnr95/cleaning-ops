@@ -56,6 +56,9 @@ test('partner uploads job photos and customer sees auto-published photos except 
 
   await partnerPage.reload();
   await expect(partnerPage.getByTestId('partner-jobs-page')).toBeVisible();
+  // 작업 완료 후 잡은 '완료' 버킷으로 이동한다(협력사 목록 기본 필터는 '예정'이라 완료건이 숨겨진다).
+  // 전체 보기로 전환해 완료된 잡을 다시 연다.
+  await partnerPage.getByRole('button', { name: '전체 보기' }).click();
   await partnerPage.getByTestId(`partner-job-row-${flow.orderId}`).click();
   await expect(partnerPage.getByRole('img', { name: 'before-partner-r2.png' })).toBeVisible();
   await expect(partnerPage.getByRole('img', { name: 'after-partner-r2.png' })).toBeVisible();
