@@ -220,6 +220,7 @@ export interface AdminOrderPageSummary {
   consumer_total: number;
   partner_total: number;
   profit: number;
+  outstanding_total: number;
 }
 
 export interface AdminOrderPageInsight {

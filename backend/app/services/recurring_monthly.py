@@ -8,6 +8,7 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app.core.time import business_today
 from app.domain.constants import OrderStatus, RecurringBillingMode
 from app.domain.recurrence import iter_due_dates
 from app.models.order import Order
@@ -111,7 +112,9 @@ class RecurringMonthlyService:
             )
         ) or 0
         if billable > 0:
-            return amount * billable
+            # 실제 발생 회차 + 아직 생성 안 된 '미래' 예정 슬롯을 더한다. 이동 회차 때문에 billable>0가 된
+            # 미래 달이 자기 예정 방문(N건)을 빠뜨려 과소청구되는 것을 막는다(과거 미생성분은 발생 안 했으니 제외).
+            return amount * (billable + self._ungenerated_upcoming_count(contract, first, last))
         # 살아있는 방문이 0: 그달 회차가 이미 생성됐다면(전부 취소/삭제) 0, 미생성이면 스케줄 예상.
         generated = self.db.scalar(
             select(func.count(Order.id)).where(
@@ -128,6 +131,30 @@ class RecurringMonthlyService:
             if first <= due <= last
         )
         return amount * scheduled_visits
+
+    def _ungenerated_upcoming_count(self, contract: RecurringContract, first: date, last: date) -> int:
+        """그달 예정 방문 중 아직 회차가 생성되지 않은 '미래(오늘 이후)' 슬롯 수.
+
+        과거 달은 예정 슬롯을 예상치로 더하지 않는다(실제 발생분만 청구). 미래/현재 달만,
+        스케줄상 예정이지만 아직 주문이 없는(recurring_planned_date 미존재) 방문을 예상 청구로 더한다.
+        """
+        today = business_today()
+        if last < today:
+            return 0
+        generated_planned = set(
+            self.db.scalars(
+                select(Order.recurring_planned_date).where(
+                    Order.recurring_contract_id == contract.id,
+                    Order.recurring_planned_date >= first,
+                    Order.recurring_planned_date <= last,
+                )
+            )
+        )
+        return sum(
+            1
+            for _seq, due in iter_due_dates(self._recurring._spec(contract), until=last)
+            if first <= due <= last and due >= today and due not in generated_planned
+        )
 
     def list_month(self, month: str) -> list[RecurringMonthlyRowRead]:
         first, last = _month_bounds(month)

@@ -502,3 +502,33 @@ def test_seed_universe_isolation(db_session: Session) -> None:
     assert DEV_ORDER_ID not in ids
     assert len(ids) == TOTAL_ORDERS
     assert str(uuid4()) not in ids
+
+
+def test_insight_month_total_current_month_and_outstanding_basis():
+    # 배치4 리뷰 #4/#3: 인사이트 '이번 달'은 당월 방문만, '미수금'은 잔여(잔금대기=잔금) 기준.
+    from app.services.order_page import OrderPageService
+
+    today = date(2026, 5, 15)
+
+    def mk(oid, *, status, scheduled, total=0, balance=0, payment_status=None):
+        return Order(id=oid, group_id="g", status=status, received_date=date(2026, 5, 1),
+                     scheduled_date=scheduled, service_name="청소", total_amount=total,
+                     balance_amount=balance, payment_status=payment_status)
+
+    orders = [
+        mk("a", status=OrderStatus.CUSTOMER_DELIVERY_DONE, scheduled=date(2026, 5, 10),
+           total=100000, payment_status="unpaid"),            # 당월 + 미납 → 미수 100000
+        mk("b", status=OrderStatus.COMPLETED, scheduled=date(2026, 5, 20),
+           total=200000, balance=50000, payment_status="balance_pending"),  # 당월 + 잔금대기 → 미수 50000
+        mk("c", status=OrderStatus.COMPLETED, scheduled=date(2026, 4, 10),
+           total=300000, payment_status="paid"),              # 지난달 → month_total 제외, 완납 미수 0
+        mk("d", status=OrderStatus.CANCELLED, scheduled=date(2026, 5, 10),
+           total=999, payment_status="unpaid"),               # 취소 → 전부 제외
+    ]
+
+    insight = OrderPageService._compute_insight(orders, today)
+    assert insight.month_total == 300000   # a+b (당월, 취소 제외). c는 4월, d는 취소.
+    assert insight.unpaid_total == 150000  # a(100000) + b(잔금 50000). c 완납 0, d 취소 0.
+
+    summary = OrderPageService._summarize(orders)
+    assert summary.outstanding_total == 150000  # a+b 미수금(취소 d는 _order_outstanding에서 0)

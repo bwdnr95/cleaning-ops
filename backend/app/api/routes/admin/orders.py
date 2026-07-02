@@ -139,6 +139,7 @@ def list_orders_page(
             consumer_total=result.summary.consumer_total,
             partner_total=result.summary.partner_total,
             profit=result.summary.profit,
+            outstanding_total=result.summary.outstanding_total,
         ),
         insight=AdminOrderPageInsight(
             today_jobs=result.insight.today_jobs,

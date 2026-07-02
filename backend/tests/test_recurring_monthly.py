@@ -120,6 +120,33 @@ def test_month_amount_per_visit_counts_actual_live_orders(db_session):
     assert row.amount == 50000 * 2
 
 
+def test_month_amount_per_visit_future_projects_own_plus_moved(db_session):
+    # 배치4 리뷰 #8: 미래 달로 이동해 온 회차로 billable>0가 된 미래 달도, 그 달 자체의 미생성
+    # 예정 방문을 함께 예상한다(과소청구 방지). 월 1회(day10) per_visit 계약 + 미래 달로 이동한 1건.
+    from app.core.time import business_today
+
+    today = business_today()
+    fm = f"{today.year + 1:04d}-{today.month:02d}"  # 약 1년 뒤 → 확실히 미래 달
+    g = OrderGroup(id=str(uuid4()), customer_token=f"t-{uuid4()}", customer_name="미래",
+                   customer_phone="01012340000", customer_address="F", customer_visible_payment=False)
+    db_session.add(g); db_session.flush()
+    c = RecurringContract(id=str(uuid4()), label="F", order_group_id=g.id,
+                          recurrence_mode=RecurrenceMode.MONTHLY, day_of_month=10,
+                          start_date=date(2020, 1, 10), status=RecurringContractStatus.ACTIVE,
+                          service_name="청소", total_amount=70000, billing_mode="per_visit")
+    db_session.add(c); db_session.flush()
+    # 다른(과거) 슬롯에서 이동해 온 회차 1건: 미래 달 5일 방문, planned_date는 과거로 스탬프.
+    db_session.add(Order(
+        id=str(uuid4()), group_id=g.id, status=OrderStatus.SCHEDULED,
+        received_date=date(2020, 1, 1), scheduled_date=date(int(fm[:4]), int(fm[5:7]), 5),
+        service_name="청소", recurring_contract_id=c.id, recurring_planned_date=date(2020, 1, 10),
+    ))
+    db_session.commit()
+    row = next(r for r in RecurringMonthlyService(db_session).list_month(fm) if r.contract_id == c.id)
+    # 이동해 온 1건(billable) + 그 달 자체 예정(day10, 미생성·미래) 1건 = 2회.
+    assert row.amount == 70000 * 2
+
+
 def test_monthly_api_rejects_invalid_month(client, seed_admin_token):
     # 잘못된 월은 GET 500이 아니라 422, POST는 영속화 없이 422 (검증 일원화).
     h = {"Authorization": f"Bearer {seed_admin_token}"}

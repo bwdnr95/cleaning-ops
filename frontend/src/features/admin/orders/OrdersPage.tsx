@@ -594,6 +594,7 @@ export function OrdersPage({ onOpenOrder, onCreateOrder, onEditOrder, initialTab
     consumerTotal: summary?.consumer_total ?? 0,
     partnerTotal: summary?.partner_total ?? 0,
     profitTotal: summary?.profit ?? 0,
+    outstandingTotal: summary?.outstanding_total ?? 0,
   }), [summary]);
   const visibleActiveTabKey = getVisibleStatusTabKey(tab);
   const selectedPartnerName = partnerFilter === 'all'
@@ -1234,6 +1235,8 @@ function FilterSummaryLine({ label, summary }) {
     ['총금액(VAT포함)', formatWon(summary.consumerTotal)],
     ['도급가(VAT 포함)', formatWon(summary.partnerTotal)],
     ['이윤', formatWon(summary.profitTotal)],
+    // 미수금(잔여 기준) — 대시보드 '미정산 금액' 카드와 동일 산식이라 receivable 드릴다운 시 값이 일치.
+    ['미수금', formatWon(summary.outstandingTotal)],
   ];
 
   return (

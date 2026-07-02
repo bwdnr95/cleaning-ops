@@ -28,7 +28,7 @@ from app.domain.order_metrics import (
     SCHEDULED_WORKFLOW_STATUSES,
     WORK_DONE_STATUSES,
 )
-from app.domain.payment_status import PAYMENT_CHECK_STATUSES
+from app.domain.payment_status import PAYMENT_CHECK_STATUSES, PaymentStatus
 from app.models.order import Order
 from app.models.order_group import OrderGroup
 from app.repositories.order_groups import OrderGroupRepository
@@ -45,6 +45,7 @@ class OrderPageSummary:
     consumer_total: float = 0.0
     partner_total: float = 0.0
     profit: float = 0.0
+    outstanding_total: float = 0.0
 
 
 @dataclass
@@ -94,6 +95,18 @@ def _to_float(value) -> float:
     if value is None:
         return 0.0
     return float(value)
+
+
+def _order_outstanding(order: Order) -> float:
+    """고객 미수금(잔여). 취소·완납이면 0. 잔금대기는 잔금만, 그 외 미납은 소비자총액 전액.
+    대시보드 `outstanding_receivable`와 동일 산식이라 '미수금' 숫자가 화면 간 일치한다."""
+    if order.status == OrderStatus.CANCELLED:
+        return 0.0
+    if order.payment_status not in _PAYMENT_CHECK_STATUSES:
+        return 0.0
+    if order.payment_status == PaymentStatus.BALANCE_PENDING:
+        return _to_float(order.balance_amount)
+    return _to_float(order.total_amount) + _to_float(order.onsite_extra_amount)
 
 
 class OrderPageService:
@@ -221,9 +234,11 @@ class OrderPageService:
                 continue
             workflow = order_workflow_status(order.status, order.payment_status)
             amount = _to_float(order.total_amount) + _to_float(order.onsite_extra_amount)
-            month_total += amount
-            if order.payment_status in _PAYMENT_CHECK_STATUSES:
-                unpaid_total += amount
+            # '이번 달'은 당월 방문(scheduled_date) 건만 — 대시보드 '이번 달 계약금액'과 같은 개념.
+            if order.scheduled_date and (order.scheduled_date.year, order.scheduled_date.month) == (today.year, today.month):
+                month_total += amount
+            # 미수금은 잔여(잔금대기=잔금, 그 외 미납=소비자총액) 기준 — 대시보드 미정산 금액과 동일 산식.
+            unpaid_total += _order_outstanding(order)
             if not (order.team_name or "").strip():
                 unassigned += 1
             # '오늘 작업'은 대시보드 today_jobs와 동일하게 오늘 방문 + '일정 및 작업 확정'(작업예정 워크플로)만.
@@ -439,14 +454,18 @@ class OrderPageService:
     def _summarize(rows: list[Order]) -> OrderPageSummary:
         consumer_total = 0.0
         partner_total = 0.0
+        outstanding_total = 0.0
         for order in rows:
             consumer_total += _to_float(order.total_amount) + _to_float(order.onsite_extra_amount)
             partner_total += _to_float(order.partner_payment_amount)
+            outstanding_total += _order_outstanding(order)
         return OrderPageSummary(
             count=len(rows),
             consumer_total=consumer_total,
             partner_total=partner_total,
             profit=consumer_total - partner_total,
+            # 필터된 목록의 고객 미수금 합(잔여 기준). receivable 드릴다운 시 대시보드 '미정산 금액' 카드와 일치.
+            outstanding_total=outstanding_total,
         )
 
     @staticmethod

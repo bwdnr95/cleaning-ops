@@ -144,6 +144,8 @@ class AdminOrderPageSummary(ApiModel):
     consumer_total: float = 0.0
     partner_total: float = 0.0
     profit: float = 0.0
+    # 필터된 목록의 고객 미수금 합(잔여 기준). 대시보드 '미정산 금액'과 동일 산식.
+    outstanding_total: float = 0.0
 
 
 class AdminOrderPageInsight(ApiModel):
