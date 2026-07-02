@@ -35,22 +35,44 @@ class BrokerRead(BrokerBase):
 
 
 class BrokerAdminRead(BrokerRead):
-    # order_count: 취소 제외 소개 주문 수. revenue_total: 앱 표준 매출 집합(고객전달완료·서비스완료)
-    # 기준 실현 매출 — 대시보드/리포트 '매출'과 동일 정의로 화면 간 값이 어긋나지 않게 한다.
+    # order_count: 취소 제외 소개 주문 수. 미정산 수수료 합계·건수는 협력사 미정산 지표와 동형
+    # (중개 수수료가 입력됐고 아직 지급완료가 아닌 건).
     order_count: int = 0
-    revenue_total: float = 0
+    unpaid_broker_amount_total: float = 0
+    unpaid_broker_order_count: int = 0
 
 
-class BrokerAssignedOrderRead(ApiModel):
-    id: str
+class BrokerDetailRead(BrokerAdminRead):
+    pass
+
+
+# --- 중개 수수료 정산 (협력사 정산 스키마 미러) ---
+class BrokerSettlementItemRead(ApiModel):
+    order_id: str
     status: OrderStatus
     scheduled_date: date | None = None
     service_name: str
     customer_name: str
-    customer_address: str
+    address_short: str
+    address_detail: str | None = None
     consumer_price: float | None = None
-    partner_id: str | None = None
+    broker_price: float | None = None
+    broker_payment_status: str | None = None
+    settled_at: datetime | None = None
 
 
-class BrokerDetailRead(BrokerAdminRead):
-    orders: list[BrokerAssignedOrderRead] = Field(default_factory=list)
+class BrokerSettlementListRead(ApiModel):
+    items: list[BrokerSettlementItemRead]
+    total_broker_price: float
+    total_consumer_price: float
+    count: int
+
+
+class BrokerSettlementActionRequest(ApiModel):
+    order_ids: list[str] = Field(min_length=1)
+    memo: str | None = None
+
+
+class BrokerSettlementActionResult(ApiModel):
+    updated_order_ids: list[str]
+    skipped_order_ids: list[str] = Field(default_factory=list)

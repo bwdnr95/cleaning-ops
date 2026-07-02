@@ -5,11 +5,18 @@ import {
   deleteAdminBroker,
   getAdminBroker,
   listAdminBrokers,
+  listBrokerSettlements,
+  revertBrokerOrders,
+  settleBrokerOrders,
   updateAdminBroker,
+  type BrokerSettlementItem,
+  type BrokerSettlementListResponse,
 } from '../../../api/admin';
 import { useApiResource } from '../../../api/useApiResource';
 import { Icon } from '../../../components/common/ui';
 import { formatPhone } from '../../../domain/phone';
+
+type SettlementFilter = 'unpaid' | 'paid' | 'all';
 
 const won = (value) => `${Math.round(Number(value) || 0).toLocaleString('ko-KR')}원`;
 
@@ -22,6 +29,15 @@ function brokerErrorMessage(err) {
   const detail = String(err?.detail || err?.message || '');
   if (detail.includes('broker_in_use')) {
     return '이 중개사로 등록된 주문이 있어 삭제할 수 없습니다. 비활성으로 변경하세요.';
+  }
+  if (detail.includes('broker_inactive')) {
+    return '비활성 중개사입니다. 활성화 후 정산할 수 있습니다.';
+  }
+  if (detail.includes('settlement_order_broker_mismatch')) {
+    return '다른 중개사의 주문은 정산할 수 없습니다.';
+  }
+  if (detail.includes('invalid_settlement_order')) {
+    return '정산할 수 없는 주문입니다(중개 수수료 미입력 또는 상태 확인).';
   }
   return '처리 중 오류가 발생했습니다.';
 }
@@ -38,7 +54,8 @@ function defaultBrokerForm(overrides = {}) {
   };
 }
 
-// 중개사관리 — 협력사관리와 동일한 정보/집계(건수·매출) 관리 화면. 로그인 계정/정산은 없다.
+// 중개사관리 — 협력사관리와 동형. 목록(소개 건수·미정산 수수료) + 상세(정보) + 정산 섹션
+// (그 중개사가 소개한 주문의 중개 수수료를 미정산→정산완료로 처리).
 export function BrokersPage() {
   const loadBrokers = React.useCallback(() => listAdminBrokers({ includeInactive: true }), []);
   const brokersResource = useApiResource(loadBrokers);
@@ -56,6 +73,28 @@ export function BrokersPage() {
   const [error, setError] = React.useState('');
   const [query, setQuery] = React.useState('');
 
+  // 정산 상태
+  const [settleStatus, setSettleStatus] = React.useState<SettlementFilter>('unpaid');
+  const [settlements, setSettlements] = React.useState<BrokerSettlementListResponse | null>(null);
+  const [settleLoading, setSettleLoading] = React.useState(false);
+  const [settleError, setSettleError] = React.useState(false);
+  const [settleMemo, setSettleMemo] = React.useState('');
+  const [isSettling, setIsSettling] = React.useState(false);
+
+  const loadSettlements = React.useCallback(async (brokerId: string, status: SettlementFilter) => {
+    setSettleLoading(true);
+    setSettleError(false);
+    try {
+      setSettlements(await listBrokerSettlements(brokerId, { status }));
+    } catch {
+      // 실패를 삼켜 '없음'으로 오표시하지 않도록 에러 상태를 세운다(로딩/에러/빈 3종 분리).
+      setSettlements(null);
+      setSettleError(true);
+    } finally {
+      setSettleLoading(false);
+    }
+  }, []);
+
   const selectBroker = React.useCallback((brokerId) => {
     setSelectedId(brokerId);
     setDetailLoading(true);
@@ -67,13 +106,66 @@ export function BrokersPage() {
         setForm(defaultBrokerForm(data));
       })
       .catch(() => {
-        // 실패 시 편집 가능한 빈/이전 폼이 에러 배너 아래 남아 혼동을 주지 않도록 선택을 해제한다.
         setError('중개사 정보를 불러오지 못했습니다.');
         setSelectedId(null);
         setDetail(null);
       })
       .finally(() => setDetailLoading(false));
   }, []);
+
+  // 선택/필터 변경 시 정산 목록 로드.
+  React.useEffect(() => {
+    if (!selectedId) {
+      setSettlements(null);
+      return;
+    }
+    void loadSettlements(selectedId, settleStatus);
+  }, [selectedId, settleStatus, loadSettlements]);
+
+  const refreshAfterSettle = () => {
+    if (selectedId) {
+      void loadSettlements(selectedId, settleStatus);
+      selectBroker(selectedId);
+    }
+    brokersResource.reload();
+  };
+
+  const handleSettle = async (orderIds: string[]) => {
+    if (!selectedId || orderIds.length === 0) {
+      return;
+    }
+    setIsSettling(true);
+    setError('');
+    setNotice('');
+    try {
+      await settleBrokerOrders(selectedId, orderIds, settleMemo);
+      setSettleMemo('');
+      setNotice(`${orderIds.length}건 정산 처리했습니다.`);
+      refreshAfterSettle();
+    } catch (err) {
+      setError(brokerErrorMessage(err));
+    } finally {
+      setIsSettling(false);
+    }
+  };
+
+  const handleRevert = async (orderIds: string[]) => {
+    if (!selectedId || orderIds.length === 0) {
+      return;
+    }
+    setIsSettling(true);
+    setError('');
+    setNotice('');
+    try {
+      await revertBrokerOrders(selectedId, orderIds);
+      setNotice('정산을 되돌렸습니다.');
+      refreshAfterSettle();
+    } catch (err) {
+      setError(brokerErrorMessage(err));
+    } finally {
+      setIsSettling(false);
+    }
+  };
 
   const handleCreate = async (event) => {
     event.preventDefault();
@@ -107,10 +199,7 @@ export function BrokersPage() {
   };
 
   const handleSave = async () => {
-    if (!selectedId) {
-      return;
-    }
-    if (!form.name.trim()) {
+    if (!selectedId || !form.name.trim()) {
       setError('중개사명을 입력해주세요.');
       return;
     }
@@ -164,6 +253,11 @@ export function BrokersPage() {
     return brokers.filter((broker) => String(broker.name || '').toLowerCase().includes(keyword));
   }, [brokers, query]);
 
+  const settleableIds = React.useMemo(
+    () => (settlements?.items || []).filter(isSettleable).map((item) => item.order_id),
+    [settlements],
+  );
+
   return (
     <div style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 12, overflowY: 'auto' }}>
       {(notice || error) && (
@@ -216,7 +310,7 @@ export function BrokersPage() {
                     <th style={thLeft}>담당자</th>
                     <th style={thLeft}>연락처</th>
                     <th style={thRight}>소개 건수</th>
-                    <th style={thRight}>매출</th>
+                    <th style={thRight}>미정산 수수료</th>
                     <th style={thCenter}>상태</th>
                   </tr>
                 </thead>
@@ -232,7 +326,12 @@ export function BrokersPage() {
                       <td style={tdLeft}>{broker.manager_name || '—'}</td>
                       <td style={tdLeft} className="mono">{broker.phone ? formatPhone(broker.phone) : '—'}</td>
                       <td style={tdRight}>{broker.order_count ?? 0}건</td>
-                      <td style={tdRight}>{won(broker.revenue_total)}</td>
+                      <td style={tdRight}>
+                        {won(broker.unpaid_broker_amount_total)}
+                        {(broker.unpaid_broker_order_count ?? 0) > 0 && (
+                          <span style={{ fontSize: 10.5, color: 'var(--text-tertiary)' }}> ({broker.unpaid_broker_order_count}건)</span>
+                        )}
+                      </td>
                       <td style={tdCenter}>
                         <span style={{ fontSize: 11, fontWeight: 600, color: broker.is_active ? 'var(--success-fg)' : 'var(--text-tertiary)' }}>
                           {broker.is_active ? '활성' : '비활성'}
@@ -246,13 +345,13 @@ export function BrokersPage() {
           )}
         </section>
 
-        {/* 상세 + 등록 */}
+        {/* 상세 정보 + 등록 */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
           {selectedId && (
             <section className="card" style={{ padding: 0, overflow: 'hidden' }}>
               <div style={headerRow}>
                 <Icon name="star" size={14} color="var(--text-tertiary)" />
-                <strong style={{ fontSize: 13 }}>중개사 상세</strong>
+                <strong style={{ fontSize: 13 }}>중개사 정보</strong>
                 <div style={{ flex: 1 }} />
                 <button className="btn btn--ghost btn--sm" onClick={() => { setSelectedId(null); setDetail(null); }}>닫기</button>
               </div>
@@ -275,27 +374,6 @@ export function BrokersPage() {
                       <Icon name="x" size={12} /> 삭제
                     </button>
                     <button data-testid="broker-detail-save" className="btn btn--primary btn--sm" onClick={handleSave} disabled={isSaving}>저장</button>
-                  </div>
-
-                  <div style={{ marginTop: 4, borderTop: '1px solid var(--divider)', paddingTop: 10 }}>
-                    <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-tertiary)', marginBottom: 6 }}>
-                      소개 주문 {detail?.order_count ?? 0}건 · 매출 {won(detail?.revenue_total)}
-                    </div>
-                    {(detail?.orders || []).length === 0 ? (
-                      <div style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>연결된 주문이 없습니다.</div>
-                    ) : (
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: 4, maxHeight: 260, overflowY: 'auto' }}>
-                        {(detail?.orders || []).map((order) => (
-                          <div key={order.id} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, padding: '4px 0' }}>
-                            <span style={{ color: 'var(--text-tertiary)', width: 82, flexShrink: 0 }}>{order.scheduled_date || '미정'}</span>
-                            <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                              {order.customer_name} · {order.service_name}
-                            </span>
-                            <span className="mono" style={{ flexShrink: 0 }}>{won(order.consumer_price)}</span>
-                          </div>
-                        ))}
-                      </div>
-                    )}
                   </div>
                 </div>
               )}
@@ -324,8 +402,153 @@ export function BrokersPage() {
           </section>
         </div>
       </div>
+
+      {/* 정산 섹션 (전체폭) — 선택한 중개사가 소개한 주문의 중개 수수료 정산 */}
+      {selectedId && (
+        <section className="card" style={{ padding: 0, overflow: 'hidden' }}>
+          <div style={headerRow}>
+            <Icon name="list" size={14} color="var(--text-tertiary)" />
+            <strong style={{ fontSize: 13 }}>배정 주문 / 정산</strong>
+            <span style={{ fontSize: 11.5, color: 'var(--text-tertiary)' }}>
+              미정산 {detail?.unpaid_broker_order_count ?? 0}건 · {won(detail?.unpaid_broker_amount_total)}
+            </span>
+            <div style={{ flex: 1 }} />
+            <select
+              className="input"
+              data-testid="broker-settlement-status"
+              value={settleStatus}
+              onChange={(event) => setSettleStatus(event.target.value as SettlementFilter)}
+              style={{ height: 28, width: 120 }}
+            >
+              <option value="unpaid">미정산</option>
+              <option value="paid">정산완료</option>
+              <option value="all">전체</option>
+            </select>
+          </div>
+
+          {settleLoading ? (
+            <div style={emptyBox}>정산 목록을 불러오는 중…</div>
+          ) : settleError ? (
+            <div style={{ ...emptyBox, color: 'var(--danger-fg)' }}>
+              정산 목록을 불러오지 못했습니다.{' '}
+              <button
+                className="btn btn--ghost btn--sm"
+                onClick={() => selectedId && void loadSettlements(selectedId, settleStatus)}
+              >
+                다시 시도
+              </button>
+            </div>
+          ) : !settlements || settlements.items.length === 0 ? (
+            <div style={emptyBox}>조건에 맞는 소개 주문이 없습니다.</div>
+          ) : (
+            <>
+              <div style={{ overflowX: 'auto' }}>
+                <table style={{ width: '100%', minWidth: 820, borderCollapse: 'collapse', fontSize: 12.5 }}>
+                  <thead>
+                    <tr>
+                      <th style={thLeft}>방문일</th>
+                      <th style={thLeft}>서비스</th>
+                      <th style={thLeft}>고객</th>
+                      <th style={thRight}>소비자가</th>
+                      <th style={thRight}>중개 수수료</th>
+                      <th style={thCenter}>정산</th>
+                      <th style={thCenter}>액션</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {settlements.items.map((job) => {
+                      const isPaid = job.broker_payment_status === 'paid';
+                      const isCancelled = job.status === '취소';
+                      return (
+                        <tr key={job.order_id} data-testid={`broker-settlement-row-${job.order_id}`}>
+                          <td style={tdLeft} className="mono">{job.scheduled_date ?? '미정'}</td>
+                          <td style={tdLeft}>
+                            <div style={{ minWidth: 0 }}>
+                              <div>{job.service_name}</div>
+                              <div style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>{settlementAddress(job)}</div>
+                            </div>
+                          </td>
+                          <td style={tdLeft}>{job.customer_name}</td>
+                          <td style={tdRight} className="mono">{won(job.consumer_price)}</td>
+                          <td style={tdRight} className="mono">{won(job.broker_price)}</td>
+                          <td style={tdCenter}>
+                            {isCancelled ? (
+                              <span style={{ color: 'var(--text-quaternary)', fontSize: 11.5, fontWeight: 600 }}>정산 제외</span>
+                            ) : isPaid ? (
+                              <span style={{ color: 'var(--success-fg)', fontSize: 11.5, fontWeight: 700 }}>정산완료</span>
+                            ) : (
+                              <span style={{ color: 'var(--warn-fg)', fontSize: 11.5, fontWeight: 700 }}>미정산</span>
+                            )}
+                          </td>
+                          <td style={tdCenter}>
+                            {isCancelled ? (
+                              <span style={{ color: 'var(--text-quaternary)', fontSize: 11.5 }}>—</span>
+                            ) : isPaid ? (
+                              <button
+                                type="button"
+                                data-testid={`broker-settlement-revert-${job.order_id}`}
+                                className="btn btn--secondary btn--sm"
+                                disabled={isSettling}
+                                onClick={() => void handleRevert([job.order_id])}
+                              >
+                                되돌리기
+                              </button>
+                            ) : (
+                              <button
+                                type="button"
+                                data-testid={`broker-settlement-settle-${job.order_id}`}
+                                className="btn btn--secondary btn--sm"
+                                disabled={isSettling || !isSettleable(job)}
+                                title={isSettleable(job) ? undefined : '중개 수수료를 입력한 미정산 건만 정산할 수 있습니다.'}
+                                onClick={() => void handleSettle([job.order_id])}
+                              >
+                                정산
+                              </button>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+              <div style={{ padding: 12, borderTop: '1px solid var(--divider)', display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
+                  표시 합계 · 수수료 {won(settlements.total_broker_price)} / 소비자가 {won(settlements.total_consumer_price)}
+                </span>
+                <div style={{ flex: 1 }} />
+                <input
+                  className="input"
+                  placeholder="정산 메모(선택)"
+                  value={settleMemo}
+                  onChange={(event) => setSettleMemo(event.target.value)}
+                  style={{ width: 180, height: 30 }}
+                />
+                <button
+                  type="button"
+                  data-testid="broker-settlement-settle-all"
+                  className="btn btn--primary btn--sm"
+                  disabled={isSettling || settleableIds.length === 0}
+                  onClick={() => void handleSettle(settleableIds)}
+                >
+                  미정산 {settleableIds.length}건 정산
+                </button>
+              </div>
+            </>
+          )}
+        </section>
+      )}
     </div>
   );
+}
+
+function isSettleable(job: BrokerSettlementItem): boolean {
+  // 취소 아님 + 미지급 + 중개 수수료가 입력됨(0 초과). 백엔드 정산 가드와 일치.
+  return job.status !== '취소' && job.broker_payment_status !== 'paid' && (job.broker_price ?? 0) > 0;
+}
+
+function settlementAddress(job: BrokerSettlementItem): string {
+  return [job.address_short, job.address_detail].filter(Boolean).join(' ') || '-';
 }
 
 const headerRow: React.CSSProperties = {
@@ -361,10 +584,10 @@ const thCenter: React.CSSProperties = { ...thLeft, textAlign: 'center' };
 const tdLeft: React.CSSProperties = {
   padding: '8px 12px',
   borderBottom: '1px solid var(--divider)',
-  whiteSpace: 'nowrap',
+  verticalAlign: 'top',
 };
-const tdRight: React.CSSProperties = { ...tdLeft, textAlign: 'right' };
-const tdCenter: React.CSSProperties = { ...tdLeft, textAlign: 'center' };
+const tdRight: React.CSSProperties = { ...tdLeft, textAlign: 'right', whiteSpace: 'nowrap' };
+const tdCenter: React.CSSProperties = { ...tdLeft, textAlign: 'center', whiteSpace: 'nowrap' };
 
 function FormRow({ label, value, onChange, required = false, multiline = false, testId = undefined }) {
   return (

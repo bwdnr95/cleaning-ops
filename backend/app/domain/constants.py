@@ -111,6 +111,8 @@ class TimelineEventType(StrEnum):
     ORDER_DELETED = "order_deleted"
     PARTNER_SETTLED = "partner_settled"
     PARTNER_SETTLEMENT_REVERTED = "partner_settlement_reverted"
+    BROKER_SETTLED = "broker_settled"
+    BROKER_SETTLEMENT_REVERTED = "broker_settlement_reverted"
     QUOTE_SENT = "quote_sent"
     PARTNER_UNPAID_NOTICE_SENT = "partner_unpaid_notice_sent"
 

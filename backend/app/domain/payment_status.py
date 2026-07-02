@@ -47,6 +47,9 @@ PAYMENT_TRACKED_FIELDS: tuple[str, ...] = (
     "partner_payment_amount",
     "partner_payment_status",
     "partner_settled_at",
+    "broker_payment_amount",
+    "broker_payment_status",
+    "broker_settled_at",
     "customer_visible_payment",
 )
 

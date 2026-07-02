@@ -499,6 +499,7 @@ function LineEditor({
               ))}
             </select>
           </Field>
+          <TextField testId={`order-line-${lineIndex}-broker-payment-amount`} label="중개 수수료 (VAT 포함)" inputMode="numeric" value={line.broker_payment_amount} onChange={(value) => onMoneyChange(lineIndex, 'broker_payment_amount', value)} />
         </FieldGrid>
       </div>
     </div>
@@ -614,6 +615,7 @@ function createEmptyLineForm() {
     evidence_memo: '',
     partner_payment_amount: '',
     partner_payment_status: '',
+    broker_payment_amount: '',
     partner_settled_at: null,
     base_unit_price: '',
     partner_unit_price: '',
@@ -681,6 +683,7 @@ function toLineForm(order) {
     evidence_memo: order.evidence_memo || '',
     partner_payment_amount: toInputNumber(order.partner_payment_amount),
     partner_payment_status: order.partner_payment_status || '',
+    broker_payment_amount: toInputNumber(order.broker_payment_amount),
     partner_settled_at: order.partner_settled_at || null,
   };
 }
@@ -731,6 +734,7 @@ function toLinePayload(line) {
     evidence_memo: emptyToNull(line.evidence_memo),
     partner_payment_amount: numberOrNull(line.partner_payment_amount),
     partner_payment_status: emptyToNull(line.partner_payment_status),
+    broker_payment_amount: numberOrNull(line.broker_payment_amount),
   };
 }
 

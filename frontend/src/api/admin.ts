@@ -31,6 +31,8 @@ export interface AdminOrderLineInput {
   receipt_status?: string | null;
   partner_payment_amount?: number | null;
   partner_payment_status?: string | null;
+  broker_payment_amount?: number | null;
+  broker_payment_status?: string | null;
 }
 
 export interface CreateOrderInput extends AdminOrderLineInput {
@@ -75,7 +77,9 @@ export interface AdminOrder extends AdminOrderLineInput {
   customer_token: string;
   consumer_price?: number | null;
   partner_price?: number | null;
+  broker_price?: number | null;
   partner_settled_at?: string | null;
+  broker_settled_at?: string | null;
   recurring_contract_id?: string | null;
 }
 
@@ -480,6 +484,61 @@ export function deleteAdminBroker(brokerId) {
   return apiRequest(`/admin/brokers/${encodeURIComponent(brokerId)}`, {
     method: 'DELETE',
   });
+}
+
+// 중개 수수료 정산 — 협력사 정산과 동형(주문별 중개 수수료 미정산/정산완료 + settle/revert).
+export interface BrokerSettlementItem {
+  order_id: string;
+  status: string;
+  scheduled_date: string | null;
+  service_name: string;
+  customer_name: string;
+  address_short: string;
+  address_detail?: string | null;
+  consumer_price: number | null;
+  broker_price: number | null;
+  broker_payment_status: string | null;
+  settled_at: string | null;
+}
+
+export interface BrokerSettlementListResponse {
+  items: BrokerSettlementItem[];
+  total_broker_price: number;
+  total_consumer_price: number;
+  count: number;
+}
+
+export function listBrokerSettlements(
+  brokerId: string,
+  { status = 'unpaid', from = '', to = '' }: PartnerSettlementListParams = {},
+): Promise<BrokerSettlementListResponse> {
+  const params = new URLSearchParams({ status });
+  if (from) params.set('from', from);
+  if (to) params.set('to', to);
+  return apiRequest(
+    `/admin/brokers/${encodeURIComponent(brokerId)}/settlements?${params.toString()}`,
+  ) as Promise<BrokerSettlementListResponse>;
+}
+
+export function settleBrokerOrders(
+  brokerId: string,
+  orderIds: string[],
+  memo = '',
+): Promise<PartnerSettlementActionResult> {
+  return apiRequest(`/admin/brokers/${encodeURIComponent(brokerId)}/settlements/settle`, {
+    method: 'POST',
+    body: { order_ids: orderIds, memo },
+  }) as Promise<PartnerSettlementActionResult>;
+}
+
+export function revertBrokerOrders(
+  brokerId: string,
+  orderIds: string[],
+): Promise<PartnerSettlementActionResult> {
+  return apiRequest(`/admin/brokers/${encodeURIComponent(brokerId)}/settlements/revert`, {
+    method: 'POST',
+    body: { order_ids: orderIds },
+  }) as Promise<PartnerSettlementActionResult>;
 }
 
 export function listServiceCatalog({ includeInactive = false } = {}) {

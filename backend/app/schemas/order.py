@@ -62,6 +62,8 @@ class OrderLineBase(ApiModel):
     receipt_status: ReceiptStatus | None = None
     partner_payment_amount: float | None = Field(default=None, ge=0)
     partner_payment_status: str | None = None
+    broker_payment_amount: float | None = Field(default=None, ge=0)
+    broker_payment_status: str | None = None
 
 
 class OrderLineCreate(OrderLineBase):
@@ -107,6 +109,8 @@ class OrderUpdate(ApiModel):
     receipt_status: ReceiptStatus | None = None
     partner_payment_amount: float | None = Field(default=None, ge=0)
     partner_payment_status: str | None = None
+    broker_payment_amount: float | None = Field(default=None, ge=0)
+    broker_payment_status: str | None = None
 
 
 class AdminOrderRead(OrderLineBase):
@@ -123,7 +127,9 @@ class AdminOrderRead(OrderLineBase):
     customer_token: str
     consumer_price: float | None = None
     partner_price: float | None = None
+    broker_price: float | None = None
     partner_settled_at: datetime | None = None
+    broker_settled_at: datetime | None = None
     created_at: datetime | None = None
     updated_at: datetime | None = None
     timeline: list[TimelineEventRead] = Field(default_factory=list)

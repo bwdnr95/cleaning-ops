@@ -33,6 +33,7 @@ def _create_line_order(
     broker_id: str | None,
     total_amount: float,
     status: str = "신규접수",
+    broker_payment_amount: float | None = None,
     customer_name: str = "고객",
 ) -> dict:
     payload = {
@@ -46,6 +47,7 @@ def _create_line_order(
                 "service_name": "입주청소",
                 "broker_id": broker_id,
                 "total_amount": total_amount,
+                "broker_payment_amount": broker_payment_amount,
             }
         ],
     }
@@ -66,13 +68,13 @@ def test_broker_crud_roundtrip() -> None:
     listed = {item["id"]: item for item in list_response.json()}
     assert broker_id in listed
     assert listed[broker_id]["order_count"] == 0
-    assert listed[broker_id]["revenue_total"] == 0
+    assert listed[broker_id]["unpaid_broker_amount_total"] == 0
 
     # 상세 조회.
     detail = client.get(f"/api/admin/brokers/{broker_id}", headers=headers)
     assert detail.status_code == 200, detail.text
     assert detail.json()["name"] == "스타중개"
-    assert detail.json()["orders"] == []
+    assert detail.json()["unpaid_broker_amount_total"] == 0
 
     # 수정.
     patched = client.patch(
@@ -92,28 +94,31 @@ def test_broker_not_found_returns_404() -> None:
     assert response.status_code == 404
 
 
-def test_broker_aggregation_counts_and_revenue() -> None:
+def test_broker_aggregation_counts_and_unpaid_commission() -> None:
     client = make_test_client()
     headers = admin_headers(client)
     broker_id = _create_broker(client, headers)
 
-    # 매출은 앱 표준 매출 집합(서비스완료·고객전달완료)만 합산한다. 건수는 취소 제외 전체.
-    _create_line_order(client, headers, broker_id=broker_id, total_amount=100000, status="서비스완료")
-    _create_line_order(client, headers, broker_id=broker_id, total_amount=50000, status="신규접수")
-    # 취소 건은 건수·매출 모두 제외.
-    _create_line_order(client, headers, broker_id=broker_id, total_amount=300000, status="취소")
+    # 소개 건수 = 취소 제외 전체. 미정산 수수료 = 수수료가 입력됐고 미지급인 취소 아닌 건.
+    _create_line_order(client, headers, broker_id=broker_id, total_amount=100000, broker_payment_amount=10000)
+    _create_line_order(client, headers, broker_id=broker_id, total_amount=50000, broker_payment_amount=5000)
+    # 수수료 미입력(None) → 미정산 수수료에는 안 잡히지만 소개 건수에는 포함.
+    _create_line_order(client, headers, broker_id=broker_id, total_amount=70000)
+    # 수수료 0원 → 정산할 것이 없으므로 미정산에서 제외(프론트 isSettleable>0과 동일 기준). 건수엔 포함.
+    _create_line_order(client, headers, broker_id=broker_id, total_amount=80000, broker_payment_amount=0)
+    # 취소 건은 건수·미정산 모두 제외.
+    _create_line_order(client, headers, broker_id=broker_id, total_amount=300000, broker_payment_amount=30000, status="취소")
     # 다른 중개사 없이(=없음) 생성된 주문은 이 중개사 집계에 포함되지 않는다.
-    _create_line_order(client, headers, broker_id=None, total_amount=999000, status="서비스완료")
+    _create_line_order(client, headers, broker_id=None, total_amount=999000, broker_payment_amount=99000)
 
     listed = {item["id"]: item for item in client.get("/api/admin/brokers", headers=headers).json()}
-    assert listed[broker_id]["order_count"] == 2  # 서비스완료 + 신규접수 (취소 제외)
-    assert listed[broker_id]["revenue_total"] == 100000  # 서비스완료만
+    assert listed[broker_id]["order_count"] == 4  # 취소 제외 (수수료 유무·0원 무관)
+    assert listed[broker_id]["unpaid_broker_amount_total"] == 15000  # 10000 + 5000 (0원·None 제외)
+    assert listed[broker_id]["unpaid_broker_order_count"] == 2
 
     detail = client.get(f"/api/admin/brokers/{broker_id}", headers=headers).json()
-    assert detail["order_count"] == 2
-    assert detail["revenue_total"] == 100000
-    # 드릴다운 목록은 취소 제외 소개 주문(=order_count와 동일 집합).
-    assert len(detail["orders"]) == 2
+    assert detail["order_count"] == 4
+    assert detail["unpaid_broker_amount_total"] == 15000
 
 
 def test_broker_delete_guard_when_in_use() -> None:
@@ -164,3 +169,62 @@ def test_order_line_persists_broker_id() -> None:
 
     order = _create_line_order(client, headers, broker_id=broker_id, total_amount=100000)
     assert order["lines"][0]["broker_id"] == broker_id
+
+
+def test_broker_settlement_flow() -> None:
+    # 중개사 클릭 → 그 업체 주문(수수료) 정산: 미정산 → 정산완료 → 되돌리기.
+    client = make_test_client()
+    headers = admin_headers(client)
+    broker_id = _create_broker(client, headers)
+    order = _create_line_order(
+        client, headers, broker_id=broker_id, total_amount=100000, broker_payment_amount=10000
+    )
+    order_id = order["lines"][0]["id"]
+
+    unpaid = client.get(f"/api/admin/brokers/{broker_id}/settlements?status=unpaid", headers=headers)
+    assert unpaid.status_code == 200, unpaid.text
+    assert {i["order_id"] for i in unpaid.json()["items"]} == {order_id}
+    assert unpaid.json()["total_broker_price"] == 10000
+
+    settle = client.post(
+        f"/api/admin/brokers/{broker_id}/settlements/settle",
+        headers=headers,
+        json={"order_ids": [order_id], "memo": "7월 수수료 지급"},
+    )
+    assert settle.status_code == 200, settle.text
+    assert settle.json()["updated_order_ids"] == [order_id]
+
+    # 정산 후: 미정산에서 사라지고 정산완료 목록에 노출.
+    after_unpaid = client.get(f"/api/admin/brokers/{broker_id}/settlements?status=unpaid", headers=headers)
+    assert [i["order_id"] for i in after_unpaid.json()["items"]] == []
+    paid = client.get(f"/api/admin/brokers/{broker_id}/settlements?status=paid", headers=headers).json()
+    assert {i["order_id"] for i in paid["items"]} == {order_id}
+    assert paid["items"][0]["broker_payment_status"] == "paid"
+
+    # 되돌리기 → 다시 미정산.
+    revert = client.post(
+        f"/api/admin/brokers/{broker_id}/settlements/revert",
+        headers=headers,
+        json={"order_ids": [order_id]},
+    )
+    assert revert.status_code == 200, revert.text
+    back = client.get(f"/api/admin/brokers/{broker_id}/settlements?status=unpaid", headers=headers)
+    assert {i["order_id"] for i in back.json()["items"]} == {order_id}
+
+
+def test_broker_settlement_rejects_cross_broker_order() -> None:
+    # 다른 중개사의 주문을 정산하려 하면 422로 막는다(테넌트/소유 검증).
+    client = make_test_client()
+    headers = admin_headers(client)
+    broker_a = _create_broker(client, headers, name="A중개")
+    broker_b = _create_broker(client, headers, name="B중개")
+    order = _create_line_order(
+        client, headers, broker_id=broker_a, total_amount=100000, broker_payment_amount=10000
+    )
+    order_id = order["lines"][0]["id"]
+    resp = client.post(
+        f"/api/admin/brokers/{broker_b}/settlements/settle",
+        headers=headers,
+        json={"order_ids": [order_id]},
+    )
+    assert resp.status_code == 422

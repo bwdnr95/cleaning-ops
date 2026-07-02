@@ -6,19 +6,12 @@ from sqlalchemy import case, func, select
 from sqlalchemy.orm import Session
 
 from app.domain.constants import OrderStatus
-from app.domain.order_metrics import REVENUE_STATUSES
-from app.domain.order_pricing import order_consumer_total
 from app.domain.phone import normalize_phone
 from app.models.broker import Broker
 from app.models.order import Order
 from app.repositories.brokers import BrokerRepository
-from app.schemas.broker import (
-    BrokerAdminRead,
-    BrokerAssignedOrderRead,
-    BrokerCreate,
-    BrokerDetailRead,
-    BrokerUpdate,
-)
+from app.schemas.broker import BrokerAdminRead, BrokerCreate, BrokerDetailRead, BrokerUpdate
+from app.services.broker_settlements import unpaid_broker_condition
 
 
 @dataclass(frozen=True)
@@ -40,11 +33,8 @@ class BrokerService:
         broker = self.brokers.get(broker_id)
         if broker is None:
             raise ValueError("broker_not_found")
-        base = self.to_admin_dto(broker)
-        return BrokerDetailRead(
-            **base.model_dump(),
-            orders=[_to_assigned_order_dto(order) for order in self._list_recent_orders(broker_id)],
-        )
+        # 소개 주문 목록/정산은 별도 정산 엔드포인트(/settlements)가 제공한다(협력사와 동형).
+        return BrokerDetailRead(**self.to_admin_dto(broker).model_dump())
 
     def create(self, payload: BrokerCreate) -> BrokerDetailRead:
         broker = Broker(
@@ -90,10 +80,7 @@ class BrokerService:
         self.db.commit()
 
     def to_admin_dto(
-        self,
-        broker: Broker,
-        *,
-        context: BrokerAdminContext | None = None,
+        self, broker: Broker, *, context: BrokerAdminContext | None = None
     ) -> BrokerAdminRead:
         stats = (
             context.stats.get(broker.id, _empty_stats())
@@ -111,7 +98,25 @@ class BrokerService:
             created_at=broker.created_at,
             updated_at=broker.updated_at,
             order_count=int(stats["count"]),
-            revenue_total=float(stats["revenue"]),
+            unpaid_broker_amount_total=float(stats["unpaid_amount"]),
+            unpaid_broker_order_count=int(stats["unpaid_count"]),
+        )
+
+    @staticmethod
+    def _agg_columns() -> tuple:
+        # 소개 건수(취소 제외) / 미정산 수수료 건수·합계(unpaid_broker_condition 기준).
+        return (
+            func.coalesce(func.sum(case((Order.status != OrderStatus.CANCELLED, 1), else_=0)), 0),
+            func.coalesce(func.sum(case((unpaid_broker_condition(), 1), else_=0)), 0),
+            func.coalesce(
+                func.sum(
+                    case(
+                        (unpaid_broker_condition(), func.coalesce(Order.broker_payment_amount, 0)),
+                        else_=0,
+                    )
+                ),
+                0,
+            ),
         )
 
     def _build_admin_context(self, brokers: list[Broker]) -> BrokerAdminContext:
@@ -119,68 +124,32 @@ class BrokerService:
         if not broker_ids:
             return BrokerAdminContext()
         stats = {broker_id: _empty_stats() for broker_id in broker_ids}
-        consumer = func.coalesce(Order.total_amount, 0) + func.coalesce(Order.onsite_extra_amount, 0)
         stmt = (
-            select(
-                Order.broker_id,
-                # 건수: 취소 제외 소개 주문 수. 매출: 앱 표준 매출 집합(REVENUE_STATUSES)만 합산해
-                # 대시보드/리포트 '매출'과 정의를 일치시킨다(미완료 파이프라인 금액 제외).
-                func.coalesce(func.sum(case((Order.status != OrderStatus.CANCELLED, 1), else_=0)), 0),
-                func.coalesce(
-                    func.sum(case((Order.status.in_(REVENUE_STATUSES), consumer), else_=0)),
-                    0,
-                ),
-            )
+            select(Order.broker_id, *self._agg_columns())
             .where(Order.deleted_at.is_(None), Order.broker_id.in_(broker_ids))
             .group_by(Order.broker_id)
         )
-        for broker_id, count, revenue in self.db.execute(stmt):
+        for broker_id, count, unpaid_count, unpaid_amount in self.db.execute(stmt):
             if broker_id is None:
                 continue
             stats[broker_id] = {
                 "count": int(count or 0),
-                "revenue": float(Decimal(str(revenue or 0))),
+                "unpaid_count": int(unpaid_count or 0),
+                "unpaid_amount": float(Decimal(str(unpaid_amount or 0))),
             }
         return BrokerAdminContext(stats=stats)
 
     def _stats(self, broker_id: str) -> dict[str, float | int]:
-        consumer = func.coalesce(Order.total_amount, 0) + func.coalesce(Order.onsite_extra_amount, 0)
-        stmt = select(
-            func.coalesce(func.sum(case((Order.status != OrderStatus.CANCELLED, 1), else_=0)), 0),
-            func.coalesce(
-                func.sum(case((Order.status.in_(REVENUE_STATUSES), consumer), else_=0)),
-                0,
-            ),
-        ).where(Order.deleted_at.is_(None), Order.broker_id == broker_id)
-        count, revenue = self.db.execute(stmt).one()
-        return {"count": int(count or 0), "revenue": float(Decimal(str(revenue or 0)))}
-
-    def _list_recent_orders(self, broker_id: str) -> list[Order]:
-        stmt = (
-            select(Order)
-            .where(
-                Order.broker_id == broker_id,
-                Order.deleted_at.is_(None),
-                Order.status != OrderStatus.CANCELLED,
-            )
-            .order_by(Order.scheduled_date.desc().nulls_last(), Order.id.desc())
-            .limit(50)
+        stmt = select(*self._agg_columns()).where(
+            Order.deleted_at.is_(None), Order.broker_id == broker_id
         )
-        return list(self.db.scalars(stmt))
+        count, unpaid_count, unpaid_amount = self.db.execute(stmt).one()
+        return {
+            "count": int(count or 0),
+            "unpaid_count": int(unpaid_count or 0),
+            "unpaid_amount": float(Decimal(str(unpaid_amount or 0))),
+        }
 
 
 def _empty_stats() -> dict[str, float | int]:
-    return {"count": 0, "revenue": 0.0}
-
-
-def _to_assigned_order_dto(order: Order) -> BrokerAssignedOrderRead:
-    return BrokerAssignedOrderRead(
-        id=order.id,
-        status=order.status,
-        scheduled_date=order.scheduled_date,
-        service_name=order.service_name,
-        customer_name=order.customer_name or "",
-        customer_address=order.customer_address or "",
-        consumer_price=float(order_consumer_total(order)),
-        partner_id=order.partner_id,
-    )
+    return {"count": 0, "unpaid_count": 0, "unpaid_amount": 0.0}
