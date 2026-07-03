@@ -1293,6 +1293,10 @@ class MessageService:
             "vat_label": format_vat_label(order.vat_type),
             "company_name": settings.app_name,
             "masked_customer_phone": mask_phone_last4(order.customer_phone),
+            # SOLAPI 클린잡 템플릿 변수용: #{연락처}(고객 실번호 — 협력사가 연락/고객 본인 확인),
+            # #{대수}는 size_or_quantity가 단일 필드라 별도 값이 없어 "-"로 채운다(#{평수}=size_or_quantity).
+            "customer_phone": order.customer_phone or "-",
+            "unit_count": "-",
         }
 
     def _build_kakao_template(
