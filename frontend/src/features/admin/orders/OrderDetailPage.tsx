@@ -228,11 +228,14 @@ export function OrderDetailPage({ orderId, onBack, onEdit, onDuplicate, onNav, o
     setError(null);
     setNotice(null);
     setMessageDraft(draft);
-    setMessagePreviewChannel('sms');
+    // 알림톡 발송 준비가 끝났으면(PF ID·자격증명·템플릿 전부 설정) 기본 채널을 알림톡으로 연다.
+    // 준비 전이면 SMS. (알림톡 실패 시 서버가 SMS로 대체발송하므로 발송 자체는 항상 가능)
+    const initialChannel = messageSettingsResource.data?.can_send_alimtalk ? 'alimtalk' : 'sms';
+    setMessagePreviewChannel(initialChannel);
     setMessagePreviewData(null);
     setMessagePreviewError(null);
     try {
-      await fetchMessagePreview(draft, 'sms');
+      await fetchMessagePreview(draft, initialChannel);
       return true;
     } catch (requestError) {
       setMessageDraft(null);

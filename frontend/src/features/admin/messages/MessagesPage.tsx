@@ -61,7 +61,13 @@ export function MessagesPage({ onOpenOrder }) {
     setError(null);
     setIsResending(true);
     try {
-      const resent = await sendAdminMessage(message.order_id, message.message_type, message.recipient_type);
+      // 재발송은 원본 발송 채널을 보존한다(원본이 알림톡이면 알림톡으로). 채널이 비면 SMS 기본값.
+      const resent = await sendAdminMessage(
+        message.order_id,
+        message.message_type,
+        message.recipient_type,
+        message.channel || 'sms',
+      );
       const reason = isMessageFailure(resent.status) ? ` (${providerErrorText(resent)})` : '';
       setNotice(`${shortOrderId(message.order_id)} ${messageTypeLabel(message.message_type)} 재발송 결과: ${messageStatusLabel(resent.status)}${reason}`);
       messagesResource.reload();
