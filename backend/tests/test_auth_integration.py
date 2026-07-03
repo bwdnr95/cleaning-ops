@@ -2310,6 +2310,8 @@ def test_solapi_webhook_requires_configured_secret(monkeypatch) -> None:
 
 
 def test_admin_can_preview_alimtalk_template_variables(monkeypatch) -> None:
+    # PF ID 미설정 경로를 검증하는 테스트라 ambient(.env) 값에 의존하지 않도록 명시 고정한다.
+    monkeypatch.setattr(settings, "solapi_kakao_pf_id", "")
     monkeypatch.setattr(settings, "solapi_kakao_template_customer_day_before", "KA_DAY_BEFORE")
     client = make_test_client()
     admin_session = login(client, "/api/auth/admin/login", DEV_ADMIN_EMAIL, DEV_ADMIN_PASSWORD)

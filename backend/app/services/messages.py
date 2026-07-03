@@ -1282,6 +1282,10 @@ class MessageService:
             "schedule": format_schedule(order),
             "customer_address": order.customer_address,
             "customer_link": customer_link,
+            # 사진/전날/잔금 알림톡의 고객링크는 '버튼 웹링크' 변수(#{고객링크})다. 버튼 URL은
+            # 템플릿에 `https://#{고객링크}` 로 등록돼 프로토콜이 고정영역이므로, 변수값에는
+            # scheme(https://)을 빼고 도메인+경로만 넣어야 이중 프로토콜이 되지 않는다.
+            "customer_link_button": customer_link.split("://", 1)[-1],
             "partner_name": partner.name if partner else "",
             "partner_manager_name": partner.manager_name or partner.name if partner else "",
             "special_request": order.special_request or "-",

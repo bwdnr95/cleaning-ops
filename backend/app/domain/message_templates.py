@@ -20,7 +20,10 @@ class KakaoTemplateDefinition:
 # ⚠️ 아래 변수(solapi_key)는 SOLAPI 콘솔에 실제 등록·검수된 '주식회사클린잡' 알림톡 템플릿의
 # 치환문자와 1:1로 맞춰져 있다(2026-07 대조). 템플릿을 수정하면 여기 solapi_key도 함께 바꿔야
 # 발송이 실패하지 않는다. context_key는 _build_template_context(services/messages.py)가 채운다.
-# 참고: 사진/잔금/전날 템플릿의 고객 링크는 '변수'가 아니라 알림톡 '버튼'이라 여기 변수에 없다.
+# 참고: 사진/잔금/전날 템플릿의 고객 링크는 알림톡 '버튼'의 웹링크(#{고객링크})다. 버튼 URL이
+# `https://#{고객링크}` 로 등록돼 있어 이 변수 역시 kakaoOptions.variables 로 반드시 넘겨야 하며
+# (안 넘기면 필수변수 누락으로 발송 실패), 값은 scheme 없는 customer_link_button 을 쓴다.
+# 일정확정은 #{고객링크}가 '본문' 변수라 풀 URL(customer_link)을 그대로 쓴다.
 KAKAO_TEMPLATE_DEFINITIONS: dict[MessageType, KakaoTemplateDefinition] = {
     # 일정 확정 안내 (KA01TP260625095558697f6OQqqhxjqb)
     MessageType.CUSTOMER_SCHEDULE_CONFIRMED: KakaoTemplateDefinition(
@@ -41,7 +44,7 @@ KAKAO_TEMPLATE_DEFINITIONS: dict[MessageType, KakaoTemplateDefinition] = {
             KakaoTemplateVariable("#{고객링크}", "customer_link"),
         ),
     ),
-    # 전날 안내 (KA01TP260625095745441foLkYjPPfnS) — 고객 링크는 버튼.
+    # 전날 안내 (KA01TP260625095745441foLkYjPPfnS) — 고객 링크는 버튼 웹링크(#{고객링크}).
     MessageType.CUSTOMER_DAY_BEFORE: KakaoTemplateDefinition(
         message_type=MessageType.CUSTOMER_DAY_BEFORE,
         template_id_setting="solapi_kakao_template_customer_day_before",
@@ -53,6 +56,7 @@ KAKAO_TEMPLATE_DEFINITIONS: dict[MessageType, KakaoTemplateDefinition] = {
             KakaoTemplateVariable("#{대수}", "unit_count"),
             KakaoTemplateVariable("#{주소}", "customer_address"),
             KakaoTemplateVariable("#{연락처}", "customer_phone"),
+            KakaoTemplateVariable("#{고객링크}", "customer_link_button"),
         ),
     ),
     # 협력사 배정 안내 (KA01TP2606250958458291cETifwPnXY)
@@ -73,16 +77,17 @@ KAKAO_TEMPLATE_DEFINITIONS: dict[MessageType, KakaoTemplateDefinition] = {
             KakaoTemplateVariable("#{요청사항}", "special_request"),
         ),
     ),
-    # 사진 링크 발송 (KA01TP260625095950577Dxz0dLAs9aH) — 고객 링크는 버튼.
+    # 사진 링크 발송 (KA01TP260625095950577Dxz0dLAs9aH) — 고객 링크는 버튼 웹링크(#{고객링크}).
     MessageType.CUSTOMER_PHOTO_READY: KakaoTemplateDefinition(
         message_type=MessageType.CUSTOMER_PHOTO_READY,
         template_id_setting="solapi_kakao_template_customer_photo_ready",
         variables=(
             KakaoTemplateVariable("#{고객명}", "customer_name"),
             KakaoTemplateVariable("#{서비스명}", "service_name"),
+            KakaoTemplateVariable("#{고객링크}", "customer_link_button"),
         ),
     ),
-    # 잔금 안내 (KA01TP260625100057110pUAJaMeQ99G) — 고객 링크는 버튼.
+    # 잔금 안내 (KA01TP260625100057110pUAJaMeQ99G) — 고객 링크는 버튼 웹링크(#{고객링크}).
     MessageType.CUSTOMER_BALANCE_DUE: KakaoTemplateDefinition(
         message_type=MessageType.CUSTOMER_BALANCE_DUE,
         template_id_setting="solapi_kakao_template_customer_balance_due",
@@ -90,6 +95,7 @@ KAKAO_TEMPLATE_DEFINITIONS: dict[MessageType, KakaoTemplateDefinition] = {
             KakaoTemplateVariable("#{고객명}", "customer_name"),
             KakaoTemplateVariable("#{서비스명}", "service_name"),
             KakaoTemplateVariable("#{잔금}", "balance_amount"),
+            KakaoTemplateVariable("#{고객링크}", "customer_link_button"),
         ),
     ),
     # 견적 안내 (KA01TP260625100150149r4XMoHWve1R)
