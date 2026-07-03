@@ -958,7 +958,7 @@ export function PartnersPage() {
                 <div>주소: {settlementFullAddress(notifyTarget) || notifyTarget.address_short}</div>
                 <div>미수금: {formatWon(notifyTarget.consumer_price)}</div>
                 <div style={{ marginTop: 8, color: 'var(--warn-fg)' }}>
-                  연락처는 백엔드 템플릿에서 마지막 4자리만 남기고 마스킹합니다.
+                  협력사가 고객에게 직접 연락(미수금 회수)할 수 있도록 고객 실번호가 전송됩니다.
                 </div>
               </div>
               <div style={{ marginTop: 10 }}>

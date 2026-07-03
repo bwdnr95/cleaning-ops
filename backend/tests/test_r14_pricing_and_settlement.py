@@ -293,9 +293,9 @@ def test_quote_and_partner_customer_info_messages_are_scoped_to_allowed_fields()
     partner_log = partner_response.json()
     assert partner_log["message_type"] == "partner_customer_info"
     assert partner_log["recipient_type"] == "partner"
-    assert "***-****-5432" in partner_log["content"]
+    # 운영자 결정(2026-07-03): 미입금 고객정보 안내는 협력사가 직접 연락해야 하므로 실번호를 전달한다.
+    assert "01098765432" in partner_log["content"]
     assert "R14 고객정보 전송" not in partner_log["content"]
-    assert "01098765432" not in partner_log["content"]
     assert "180,000원" not in partner_log["content"]
     assert "230,000원" not in partner_log["content"]
     assert "미수금" not in partner_log["content"]

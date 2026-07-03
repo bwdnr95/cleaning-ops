@@ -1408,9 +1408,11 @@ class MessageService:
             )
         if payload.message_type == MessageType.PARTNER_CUSTOMER_INFO:
             partner_name = partner.manager_name or partner.name if partner else "협력사"
+            # 미입금 고객정보 안내는 협력사가 고객에게 직접 연락(미수금 회수)해야 하므로
+            # 고객 실번호를 그대로 전달한다(알림톡 #{연락처} 변수와 동일 기준). 운영자 결정(2026-07-03).
             return (
                 f"[클린잡] {partner_name}님, 미입금 고객 정보를 전달드립니다.\n"
-                f"고객: {order.customer_name} ({mask_phone_last4(order.customer_phone)})\n"
+                f"고객: {order.customer_name} ({order.customer_phone or '-'})\n"
                 f"방문: {schedule}\n"
                 f"주소: {order.customer_address}\n"
                 f"요청사항: {order.special_request or '-'}"
