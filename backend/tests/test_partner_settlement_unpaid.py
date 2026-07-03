@@ -118,6 +118,37 @@ def test_unpaid_summary_amount_and_count(db_session: Session) -> None:
     assert detail.unpaid_partner_amount_total == 300000  # 100000 + 200000
 
 
+def test_unpaid_list_with_date_range_keeps_undated(db_session: Session) -> None:
+    """A: 방문일 미정(scheduled_date NULL) 미정산 건은 날짜 범위 조회에서도 목록에 남아야 한다.
+
+    기존엔 `scheduled_date >= from AND <= to` 가 NULL 을 무조건 탈락시켜, 날짜와 무관한
+    미정산 합계/배지(전체)와 날짜로 거르는 목록이 어긋났다(전체 5건 vs 목록 4건).
+    """
+    from app.models.order import Order as OrderModel
+
+    pid = _make_partner(db_session)
+    undated = _add_line(db_session, pid, status=OrderStatus.CONSULTING, pps=None, amount=330000)
+    in_range = _add_line(db_session, pid, status=OrderStatus.COMPLETED, pps=None, amount=100000)
+    out_range = _add_line(db_session, pid, status=OrderStatus.COMPLETED, pps=None, amount=200000)
+    db_session.get(OrderModel, undated).scheduled_date = None
+    db_session.get(OrderModel, in_range).scheduled_date = date(2026, 6, 15)
+    db_session.get(OrderModel, out_range).scheduled_date = date(2020, 1, 1)
+    db_session.flush()
+
+    result = PartnerSettlementService(db_session).list_settlements(
+        partner_id=pid,
+        status="unpaid",
+        from_date=date(2026, 6, 1),
+        to_date=date(2026, 6, 30),
+    )
+    ids = {item.order_id for item in result.items}
+    assert undated in ids       # A: 방문일 미정도 목록에 남는다
+    assert in_range in ids       # 범위 안은 포함
+    assert out_range not in ids  # 범위 밖(실제 날짜)은 여전히 제외
+    assert result.count == 2
+    assert result.total_partner_price == 430000  # 330000 + 100000
+
+
 def test_settle_allowed_before_completion(db_session: Session) -> None:
     # 1-1: 완료 전 주문도 도급가>0면 정산 실행이 가능하다.
     pid = _make_partner(db_session)
