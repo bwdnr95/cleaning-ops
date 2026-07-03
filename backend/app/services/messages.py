@@ -1420,9 +1420,11 @@ class MessageService:
         if payload.message_type == MessageType.PARTNER_AS_REQUEST:
             partner_name = partner.manager_name or partner.name if partner else "협력사"
             as_memo = (order.as_memo or payload.memo or "").strip()
+            # 미입금 고객정보 안내와 동일 기준: 협력사가 고객에게 직접 재방문 일정을 조율해야 하므로
+            # 고객 실번호를 그대로 전달한다. 운영자 결정(2026-07-03).
             return (
                 f"[클린잡] {partner_name}님, AS(재작업) 요청이 접수되었습니다.\n"
-                f"고객: {order.customer_name} ({mask_phone_last4(order.customer_phone)})\n"
+                f"고객: {order.customer_name} ({order.customer_phone or '-'})\n"
                 f"방문지: {order.customer_address}\n"
                 f"AS 내용: {as_memo or '-'}\n"
                 f"확인 후 재방문 일정을 조율해주세요."

@@ -34,6 +34,16 @@ def test_as_request_sets_flags_notifies_and_shows_on_partner_link(
         for log in detail["message_logs"]
     )
 
+    # 운영자 결정(2026-07-03): AS 안내도 협력사가 고객에게 직접 재방문 조율하도록 실번호를 전달한다.
+    messages = client.get("/api/admin/messages", headers=admin_h).json()
+    as_log = next(
+        m for m in messages
+        if m["order_id"] == DEV_ORDER_ID
+        and m["message_type"] == MessageType.PARTNER_AS_REQUEST.value
+    )
+    assert "01098765432" in as_log["content"]
+    assert "***-****-" not in as_log["content"]
+
     # 협력사 링크(잡 상세)에도 AS 요청/메모가 노출된다.
     partner_h = {"Authorization": f"Bearer {seed_partner_token}"}
     job = client.get(f"/api/partner/jobs/{DEV_ORDER_ID}", headers=partner_h).json()
