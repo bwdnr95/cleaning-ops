@@ -533,6 +533,7 @@ def test_customer_balance_due_auto_message_skips_paid_partner_completion(
 
     logs = db_session.scalars(select(MessageLog).where(MessageLog.order_id == oid)).all()
     assert all(log.message_type != MessageType.CUSTOMER_BALANCE_DUE for log in logs)
+    assert db_session.get(Order, oid).status == OrderStatus.CUSTOMER_DELIVERY_NEEDED
 
 
 def test_customer_balance_due_auto_message_skips_zero_balance_partner_completion(

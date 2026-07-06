@@ -41,23 +41,16 @@ def _setup_delivery_needed(client: TestClient, partner_token: str, order_id: str
     return before_photo_id, after_photo_id
 
 
-def test_admin_revoke_returns_to_in_progress_when_no_photos_left(
+def test_admin_revoke_returns_to_in_progress_when_required_photo_pair_breaks(
     client: TestClient,
     seed_partner_token: str,
     seed_admin_token: str,
     seed_order_id: str,
 ) -> None:
-    before_photo_id, after_photo_id = _setup_delivery_needed(
-        client, seed_partner_token, seed_order_id
-    )
-    first_revoke = client.post(
-        f"/api/admin/photos/{before_photo_id}/revoke",
-        headers={"Authorization": f"Bearer {seed_admin_token}"},
-    )
-    assert first_revoke.status_code == 200
+    before_photo_id, _ = _setup_delivery_needed(client, seed_partner_token, seed_order_id)
 
     response = client.post(
-        f"/api/admin/photos/{after_photo_id}/revoke",
+        f"/api/admin/photos/{before_photo_id}/revoke",
         headers={"Authorization": f"Bearer {seed_admin_token}"},
     )
 
@@ -72,7 +65,7 @@ def test_admin_revoke_returns_to_in_progress_when_no_photos_left(
     assert detail["status"] == OrderStatus.IN_PROGRESS.value
 
 
-def test_revoke_keeps_status_when_other_visible_photos_exist(
+def test_revoke_returns_to_in_progress_even_when_other_visible_photos_exist(
     client: TestClient,
     seed_partner_token: str,
     seed_admin_token: str,
@@ -102,7 +95,7 @@ def test_revoke_keeps_status_when_other_visible_photos_exist(
         f"/api/admin/orders/{seed_order_id}",
         headers={"Authorization": f"Bearer {seed_admin_token}"},
     ).json()
-    assert detail["status"] == OrderStatus.CUSTOMER_DELIVERY_NEEDED.value
+    assert detail["status"] == OrderStatus.IN_PROGRESS.value
     assert after_photo_id
 
 

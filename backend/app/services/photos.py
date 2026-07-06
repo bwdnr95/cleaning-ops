@@ -2,7 +2,7 @@ from uuid import uuid4
 
 from sqlalchemy.orm import Session
 
-from app.domain.constants import OrderStatus, TimelineEventType
+from app.domain.constants import OrderStatus, PhotoType, TimelineEventType
 from app.models.photo import OrderPhoto
 from app.repositories.orders import OrderRepository
 from app.repositories.photos import PhotoRepository
@@ -108,10 +108,9 @@ class PhotoService:
         return photo
 
     def revoke_visibility(self, photo_id: str, *, actor_user_id: str | None = None) -> OrderPhoto:
-        from sqlalchemy import func, select
+        from sqlalchemy import select
 
         from app.models.order import Order
-        from app.models.photo import OrderPhoto as OrderPhotoModel
 
         photo = self.photos.get(photo_id)
         if photo is None:
@@ -137,21 +136,25 @@ class PhotoService:
 
         if order is not None:
             old_status = order.status
-            remaining_visible = self.db.execute(
-                select(func.count(OrderPhotoModel.id)).where(
-                    OrderPhotoModel.order_id == order.id,
-                    OrderPhotoModel.is_customer_visible.is_(True),
-                )
-            ).scalar_one()
+            has_required_visible_photos = self.photos.has_visible_type(
+                order.id,
+                PhotoType.BEFORE.value,
+            ) and self.photos.has_visible_type(
+                order.id,
+                PhotoType.AFTER.value,
+            )
 
-            if remaining_visible == 0 and order.status == OrderStatus.CUSTOMER_DELIVERY_NEEDED:
+            if (
+                not has_required_visible_photos
+                and order.status == OrderStatus.CUSTOMER_DELIVERY_NEEDED
+            ):
                 order.status = OrderStatus.IN_PROGRESS
                 self.timeline.record(
                     order_id=photo.order_id,
                     actor_user_id=actor_user_id,
                     event_type=TimelineEventType.STATUS_CHANGED,
                     title="작업 진행으로 되돌림",
-                    description="공개 사진이 모두 비공개로 처리되어 작업 진행 상태로 되돌렸습니다.",
+                    description="고객 전달에 필요한 공개 비포/애프터 사진 쌍이 깨져 작업 진행 상태로 되돌렸습니다.",
                     metadata={"from": old_status, "to": order.status},
                 )
 

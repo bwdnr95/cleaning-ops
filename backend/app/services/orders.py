@@ -659,7 +659,7 @@ class OrderService:
             was_as_requested = bool(order.as_requested)
             next_status = (
                 OrderStatus.COMPLETED
-                if order.payment_status == PaymentStatus.PAID
+                if was_as_requested and order.payment_status == PaymentStatus.PAID
                 else OrderStatus.CUSTOMER_DELIVERY_NEEDED
             )
             order.as_requested = False
