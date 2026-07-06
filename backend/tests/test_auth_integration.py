@@ -1302,12 +1302,15 @@ def test_dashboard_new_cards_260702() -> None:
 
 def test_admin_dashboard_recent_activity_returns_photos_and_messages() -> None:
     def seed_recent_activity(db: Session) -> None:
+        order = db.get(Order, "seed-order-2450")
+        assert order is not None
+        order.status = OrderStatus.CUSTOMER_DELIVERY_NEEDED
         db.add(
             OrderPhoto(
                 id="recent-photo-01",
                 order_id="seed-order-2450",
                 uploaded_by_user_id="seed-partner-user",
-                photo_type=PhotoType.AFTER,
+                photo_type=PhotoType.BEFORE,
                 storage_key="photos/recent-photo-01.jpg",
                 file_url="/uploads/photos/recent-photo-01.jpg",
                 file_name="recent-photo-01.jpg",
@@ -1830,16 +1833,30 @@ def test_customer_photo_ready_message_includes_customer_link_and_timeline() -> N
 
     with TestingSessionLocal() as db:
         seed_dev_data(db)
-        db.add(
-            OrderPhoto(
-                id="message-ready-photo",
-                order_id="seed-order-2450",
-                uploaded_by_user_id="seed-partner-user",
-                photo_type=PhotoType.AFTER,
-                file_url="https://cdn.example.com/message-ready.jpg",
-                file_name="message-ready.jpg",
-                is_customer_visible=True,
-            )
+        order = db.get(Order, "seed-order-2450")
+        assert order is not None
+        order.status = OrderStatus.CUSTOMER_DELIVERY_NEEDED
+        db.add_all(
+            [
+                OrderPhoto(
+                    id="message-ready-before",
+                    order_id="seed-order-2450",
+                    uploaded_by_user_id="seed-partner-user",
+                    photo_type=PhotoType.BEFORE,
+                    file_url="https://cdn.example.com/message-ready-before.jpg",
+                    file_name="message-ready-before.jpg",
+                    is_customer_visible=True,
+                ),
+                OrderPhoto(
+                    id="message-ready-after",
+                    order_id="seed-order-2450",
+                    uploaded_by_user_id="seed-partner-user",
+                    photo_type=PhotoType.AFTER,
+                    file_url="https://cdn.example.com/message-ready-after.jpg",
+                    file_name="message-ready-after.jpg",
+                    is_customer_visible=True,
+                ),
+            ]
         )
         db.flush()
         log = MessageService(db).send(
@@ -1855,7 +1872,7 @@ def test_customer_photo_ready_message_includes_customer_link_and_timeline() -> N
 
     assert log.status == "sent"
     assert "http://localhost:5173/c/seed-customer-token-2450" in log.content
-    assert order.status == OrderStatus.SCHEDULE_CONFIRMED
+    assert order.status == OrderStatus.CUSTOMER_DELIVERY_NEEDED
     assert TimelineEventType.MESSAGE_SENT in {event.event_type for event in events}
     assert TimelineEventType.STATUS_CHANGED not in {event.event_type for event in events}
     assert TimelineEventType.CUSTOMER_LINK_SENT in {event.event_type for event in events}
@@ -2168,16 +2185,30 @@ def test_message_preview_without_channel_prefers_ready_alimtalk(monkeypatch) -> 
 
 def test_admin_can_send_customer_photo_ready_message() -> None:
     def seed_visible_photo(db: Session) -> None:
-        db.add(
-            OrderPhoto(
-                id="admin-message-photo",
-                order_id="seed-order-2450",
-                uploaded_by_user_id="seed-partner-user",
-                photo_type=PhotoType.AFTER,
-                file_url="https://cdn.example.com/admin-message.jpg",
-                file_name="admin-message.jpg",
-                is_customer_visible=True,
-            )
+        order = db.get(Order, "seed-order-2450")
+        assert order is not None
+        order.status = OrderStatus.CUSTOMER_DELIVERY_NEEDED
+        db.add_all(
+            [
+                OrderPhoto(
+                    id="admin-message-before",
+                    order_id="seed-order-2450",
+                    uploaded_by_user_id="seed-partner-user",
+                    photo_type=PhotoType.BEFORE,
+                    file_url="https://cdn.example.com/admin-message-before.jpg",
+                    file_name="admin-message-before.jpg",
+                    is_customer_visible=True,
+                ),
+                OrderPhoto(
+                    id="admin-message-after",
+                    order_id="seed-order-2450",
+                    uploaded_by_user_id="seed-partner-user",
+                    photo_type=PhotoType.AFTER,
+                    file_url="https://cdn.example.com/admin-message-after.jpg",
+                    file_name="admin-message-after.jpg",
+                    is_customer_visible=True,
+                ),
+            ]
         )
 
     client = make_test_client(seed_visible_photo)
@@ -2205,7 +2236,7 @@ def test_admin_can_send_customer_photo_ready_message() -> None:
     detail_response = client.get("/api/admin/orders/seed-order-2450", headers=headers)
     assert detail_response.status_code == 200
     detail = detail_response.json()
-    assert detail["status"] == "일정확정"
+    assert detail["status"] == "고객전달필요"
     assert detail["message_logs"][0]["message_type"] == "customer_photo_ready"
     assert detail["message_logs"][0]["provider"] == "mock"
     assert "message_sent" in {event["event_type"] for event in detail["timeline"]}
@@ -2556,7 +2587,12 @@ def test_partner_assignment_message_requires_assigned_partner() -> None:
 
 
 def test_admin_cannot_send_photo_ready_without_customer_visible_photo() -> None:
-    client = make_test_client()
+    def seed_delivery_needed(db: Session) -> None:
+        order = db.get(Order, "seed-order-2450")
+        assert order is not None
+        order.status = OrderStatus.CUSTOMER_DELIVERY_NEEDED
+
+    client = make_test_client(seed_delivery_needed)
     admin_session = login(client, "/api/auth/admin/login", DEV_ADMIN_EMAIL, DEV_ADMIN_PASSWORD)
     headers = {"Authorization": f"Bearer {admin_session['access_token']}"}
 
@@ -2573,3 +2609,39 @@ def test_admin_cannot_send_photo_ready_without_customer_visible_photo() -> None:
 
     assert response.status_code == 400
     assert response.json()["detail"] == "no_customer_visible_photos"
+
+
+def test_admin_cannot_send_photo_ready_without_required_photo_pair() -> None:
+    def seed_after_only(db: Session) -> None:
+        order = db.get(Order, "seed-order-2450")
+        assert order is not None
+        order.status = OrderStatus.CUSTOMER_DELIVERY_NEEDED
+        db.add(
+            OrderPhoto(
+                id="photo-ready-after-only",
+                order_id="seed-order-2450",
+                uploaded_by_user_id="seed-partner-user",
+                photo_type=PhotoType.AFTER,
+                file_url="https://cdn.example.com/after-only.jpg",
+                file_name="after-only.jpg",
+                is_customer_visible=True,
+            )
+        )
+
+    client = make_test_client(seed_after_only)
+    admin_session = login(client, "/api/auth/admin/login", DEV_ADMIN_EMAIL, DEV_ADMIN_PASSWORD)
+    headers = {"Authorization": f"Bearer {admin_session['access_token']}"}
+
+    response = client.post(
+        "/api/admin/messages/send",
+        headers=headers,
+        json={
+            "order_id": "seed-order-2450",
+            "message_type": "customer_photo_ready",
+            "recipient_type": "customer",
+            "channel": "sms",
+        },
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "customer_photo_evidence_incomplete"

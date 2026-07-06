@@ -3,7 +3,7 @@ from datetime import datetime
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
-from app.domain.constants import OrderStatus
+from app.domain.constants import OrderStatus, PhotoType
 from app.models.order import Order
 from app.models.photo import OrderPhoto
 from app.repositories.base import Repository
@@ -43,6 +43,15 @@ class PhotoRepository(Repository[OrderPhoto]):
         if created_after is not None:
             stmt = stmt.where(OrderPhoto.created_at >= created_after)
         return bool(self.db.execute(stmt).scalar_one())
+
+    def has_customer_delivery_evidence(self, order_id: str) -> bool:
+        return self.has_visible_type(
+            order_id,
+            PhotoType.BEFORE.value,
+        ) and self.has_visible_type(
+            order_id,
+            PhotoType.AFTER.value,
+        )
 
     def list_review_queue(self) -> list[tuple[Order, list[OrderPhoto], int]]:
         stmt = (

@@ -99,6 +99,41 @@ def test_revoke_returns_to_in_progress_even_when_other_visible_photos_exist(
     assert after_photo_id
 
 
+def test_revoke_blocks_customer_photo_ready_link_when_required_pair_breaks(
+    client: TestClient,
+    seed_partner_token: str,
+    seed_admin_token: str,
+    seed_order_id: str,
+) -> None:
+    before_photo_id, _ = _setup_delivery_needed(client, seed_partner_token, seed_order_id)
+
+    revoke_response = client.post(
+        f"/api/admin/photos/{before_photo_id}/revoke",
+        headers={"Authorization": f"Bearer {seed_admin_token}"},
+    )
+    queue_response = client.get(
+        "/api/admin/photos/review-queue",
+        headers={"Authorization": f"Bearer {seed_admin_token}"},
+    )
+    send_response = client.post(
+        "/api/admin/messages/send",
+        headers={"Authorization": f"Bearer {seed_admin_token}"},
+        json={
+            "order_id": seed_order_id,
+            "message_type": "customer_photo_ready",
+            "recipient_type": "customer",
+            "channel": "sms",
+        },
+    )
+
+    assert revoke_response.status_code == 200
+    assert queue_response.status_code == 200
+    queue_item = next(item for item in queue_response.json() if item["order_id"] == seed_order_id)
+    assert queue_item["can_send_customer_link"] is False
+    assert send_response.status_code == 400
+    assert send_response.json()["detail"] == "customer_photo_ready_not_allowed"
+
+
 def test_revoke_keeps_delivery_done_status(
     client: TestClient,
     seed_partner_token: str,

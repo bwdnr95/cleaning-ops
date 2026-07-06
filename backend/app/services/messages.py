@@ -796,10 +796,6 @@ class MessageService:
         if order is None:
             raise ValueError("order_not_found")
         self._validate_message_preconditions(order, payload)
-        if payload.message_type == MessageType.CUSTOMER_PHOTO_READY:
-            visible_photos = self.photos.list_for_order(order.id, customer_visible_only=True)
-            if not visible_photos:
-                raise ValueError("no_customer_visible_photos")
 
         recipient_type, recipient_name, recipient_phone = self._resolve_recipient(order, payload)
         partner = self.partners.get(order.partner_id) if order.partner_id else None
@@ -842,10 +838,6 @@ class MessageService:
         if order is None:
             raise ValueError("order_not_found")
         self._validate_message_preconditions(order, payload)
-        if payload.message_type == MessageType.CUSTOMER_PHOTO_READY:
-            visible_photos = self.photos.list_for_order(order.id, customer_visible_only=True)
-            if not visible_photos:
-                raise ValueError("no_customer_visible_photos")
 
         recipient_type, recipient_name, recipient_phone = self._resolve_recipient(order, payload)
         partner = self.partners.get(order.partner_id) if order.partner_id else None
@@ -982,6 +974,13 @@ class MessageService:
     def _validate_message_preconditions(self, order: Order, payload: MessageSendRequest) -> None:
         if payload.message_type == MessageType.CUSTOMER_BALANCE_DUE and not has_customer_balance_due(order):
             raise ValueError("customer_balance_not_due")
+        if payload.message_type == MessageType.CUSTOMER_PHOTO_READY:
+            if order.status != OrderStatus.CUSTOMER_DELIVERY_NEEDED:
+                raise ValueError("customer_photo_ready_not_allowed")
+            if self.photos.count_visible_for_order(order.id) == 0:
+                raise ValueError("no_customer_visible_photos")
+            if not self.photos.has_customer_delivery_evidence(order.id):
+                raise ValueError("customer_photo_evidence_incomplete")
         if (
             payload.message_type in {MessageType.PARTNER_AS_REQUEST, MessageType.CUSTOMER_AS_NOTICE}
             and not order.as_requested

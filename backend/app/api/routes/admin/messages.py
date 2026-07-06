@@ -55,8 +55,12 @@ def send_message(
     except ValueError as exc:
         if str(exc) == "order_not_found":
             raise HTTPException(status_code=404, detail="order_not_found") from exc
-        if str(exc) == "no_customer_visible_photos":
-            raise HTTPException(status_code=400, detail="no_customer_visible_photos") from exc
+        if str(exc) in {
+            "no_customer_visible_photos",
+            "customer_photo_evidence_incomplete",
+            "customer_photo_ready_not_allowed",
+        }:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
         if str(exc) == "customer_balance_not_due":
             raise HTTPException(status_code=400, detail="customer_balance_not_due") from exc
         if str(exc) == "as_request_required":
@@ -77,8 +81,12 @@ def preview_message(
     except ValueError as exc:
         if str(exc) == "order_not_found":
             raise HTTPException(status_code=404, detail="order_not_found") from exc
-        if str(exc) == "no_customer_visible_photos":
-            raise HTTPException(status_code=400, detail="no_customer_visible_photos") from exc
+        if str(exc) in {
+            "no_customer_visible_photos",
+            "customer_photo_evidence_incomplete",
+            "customer_photo_ready_not_allowed",
+        }:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
         if str(exc) == "customer_balance_not_due":
             raise HTTPException(status_code=400, detail="customer_balance_not_due") from exc
         if str(exc) == "as_request_required":

@@ -2,7 +2,7 @@ from uuid import uuid4
 
 from sqlalchemy.orm import Session
 
-from app.domain.constants import OrderStatus, PhotoType, TimelineEventType
+from app.domain.constants import OrderStatus, TimelineEventType
 from app.models.photo import OrderPhoto
 from app.repositories.orders import OrderRepository
 from app.repositories.photos import PhotoRepository
@@ -136,13 +136,7 @@ class PhotoService:
 
         if order is not None:
             old_status = order.status
-            has_required_visible_photos = self.photos.has_visible_type(
-                order.id,
-                PhotoType.BEFORE.value,
-            ) and self.photos.has_visible_type(
-                order.id,
-                PhotoType.AFTER.value,
-            )
+            has_required_visible_photos = self.photos.has_customer_delivery_evidence(order.id)
 
             if (
                 not has_required_visible_photos

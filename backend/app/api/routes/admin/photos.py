@@ -17,8 +17,9 @@ def list_photo_review_queue(
     _: CurrentUser = Depends(require_admin),
 ) -> list[AdminPhotoReviewItem]:
     message_repo = MessageRepository(db)
+    photo_repo = PhotoRepository(db)
     items = []
-    for order, photos, approved_count in PhotoRepository(db).list_review_queue():
+    for order, photos, approved_count in photo_repo.list_review_queue():
         pending_count = len([photo for photo in photos if not photo.is_customer_visible])
         items.append(
             AdminPhotoReviewItem(
@@ -33,7 +34,8 @@ def list_photo_review_queue(
                 pending_photo_count=pending_count,
                 approved_photo_count=approved_count,
                 can_send_customer_link=(
-                    approved_count > 0 and order.status != OrderStatus.CANCELLED
+                    order.status == OrderStatus.CUSTOMER_DELIVERY_NEEDED
+                    and photo_repo.has_customer_delivery_evidence(order.id)
                 ),
                 last_customer_link_sent_at=message_repo.last_sent_at(
                     order_id=order.id,
