@@ -2,11 +2,12 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from app.api.deps import CurrentUser, get_session, require_admin
-from app.domain.constants import MessageType, OrderStatus
+from app.domain.constants import MessageType, OrderStatus, TimelineEventType
 from app.repositories.messages import MessageRepository
 from app.repositories.photos import PhotoRepository
 from app.schemas.photo import AdminPhotoReviewItem, PhotoRead
 from app.services.photos import PhotoService
+from app.services.timeline import TimelineService
 
 router = APIRouter()
 
@@ -18,9 +19,14 @@ def list_photo_review_queue(
 ) -> list[AdminPhotoReviewItem]:
     message_repo = MessageRepository(db)
     photo_repo = PhotoRepository(db)
+    timeline = TimelineService(db)
     items = []
     for order, photos, approved_count in photo_repo.list_review_queue():
         pending_count = len([photo for photo in photos if not photo.is_customer_visible])
+        evidence_created_after = timeline.latest_created_at(
+            order_id=order.id,
+            event_type=TimelineEventType.AS_REQUESTED,
+        )
         items.append(
             AdminPhotoReviewItem(
                 order_id=order.id,
@@ -35,7 +41,10 @@ def list_photo_review_queue(
                 approved_photo_count=approved_count,
                 can_send_customer_link=(
                     order.status == OrderStatus.CUSTOMER_DELIVERY_NEEDED
-                    and photo_repo.has_customer_delivery_evidence(order.id)
+                    and photo_repo.has_customer_delivery_evidence(
+                        order.id,
+                        created_after=evidence_created_after,
+                    )
                 ),
                 last_customer_link_sent_at=message_repo.last_sent_at(
                     order_id=order.id,

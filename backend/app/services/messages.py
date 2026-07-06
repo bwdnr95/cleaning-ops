@@ -979,7 +979,14 @@ class MessageService:
                 raise ValueError("customer_photo_ready_not_allowed")
             if self.photos.count_visible_for_order(order.id) == 0:
                 raise ValueError("no_customer_visible_photos")
-            if not self.photos.has_customer_delivery_evidence(order.id):
+            evidence_created_after = self.timeline.latest_created_at(
+                order_id=order.id,
+                event_type=TimelineEventType.AS_REQUESTED,
+            )
+            if not self.photos.has_customer_delivery_evidence(
+                order.id,
+                created_after=evidence_created_after,
+            ):
                 raise ValueError("customer_photo_evidence_incomplete")
         if (
             payload.message_type in {MessageType.PARTNER_AS_REQUEST, MessageType.CUSTOMER_AS_NOTICE}

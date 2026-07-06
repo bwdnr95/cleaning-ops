@@ -136,7 +136,14 @@ class PhotoService:
 
         if order is not None:
             old_status = order.status
-            has_required_visible_photos = self.photos.has_customer_delivery_evidence(order.id)
+            evidence_created_after = self.timeline.latest_created_at(
+                order_id=order.id,
+                event_type=TimelineEventType.AS_REQUESTED,
+            )
+            has_required_visible_photos = self.photos.has_customer_delivery_evidence(
+                order.id,
+                created_after=evidence_created_after,
+            )
 
             if (
                 not has_required_visible_photos

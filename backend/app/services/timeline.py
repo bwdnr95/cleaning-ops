@@ -1,3 +1,4 @@
+from datetime import datetime
 from uuid import uuid4
 
 from sqlalchemy.orm import Session
@@ -31,3 +32,11 @@ class TimelineService:
             event_metadata=metadata,
         )
         return self.repo.add(event)
+
+    def latest_created_at(
+        self,
+        *,
+        order_id: str,
+        event_type: TimelineEventType,
+    ) -> datetime | None:
+        return self.repo.latest_created_at(order_id=order_id, event_type=event_type)

@@ -43,6 +43,7 @@ from app.services.order_page import OrderPageService
 from app.services.orders import OrderService
 from app.services.partner_settlements import PartnerSettlementService
 from app.services.partners import PartnerService
+from app.services.photos import PhotoService
 
 
 def _clean_universe(db: Session) -> None:
@@ -776,6 +777,90 @@ def test_as_job_can_restart_and_complete_to_final_when_paid(db_session: Session)
     assert completed.as_requested is False
     logs = db_session.scalars(select(MessageLog).where(MessageLog.order_id == oid)).all()
     assert all(log.message_type != MessageType.CUSTOMER_BALANCE_DUE for log in logs)
+
+
+def test_as_photo_ready_evidence_ignores_old_photos_after_revoke(db_session: Session) -> None:
+    pid = _partner(db_session)
+    oid = _add(
+        db_session,
+        status=OrderStatus.COMPLETED,
+        scheduled_date=date(2026, 7, 1),
+        partner_id=pid,
+        payment_status=PaymentStatus.DEPOSIT_PAID,
+        balance_amount=50000,
+    )
+    old_photo_time = datetime(2026, 6, 30, 9, 0, tzinfo=UTC)
+    for photo_type in (PhotoType.BEFORE, PhotoType.AFTER):
+        db_session.add(
+            OrderPhoto(
+                id=f"p-old-as-gate-{photo_type}-{oid}",
+                order_id=oid,
+                uploaded_by_user_id=DEV_PARTNER_USER_ID,
+                photo_type=photo_type,
+                file_url=f"https://cdn.example.com/old-as-gate-{photo_type}.jpg",
+                file_name=f"old-as-gate-{photo_type}.jpg",
+                is_customer_visible=True,
+                created_at=old_photo_time,
+            )
+        )
+    db_session.flush()
+
+    OrderService(db_session).request_as(
+        oid,
+        memo="AS 재방문 필요",
+        actor_user_id=DEV_PARTNER_USER_ID,
+    )
+    as_requested_at = TimelineRepository(db_session).latest_created_at(
+        order_id=oid,
+        event_type=TimelineEventType.AS_REQUESTED,
+    )
+    assert as_requested_at is not None
+    new_photo_time = as_requested_at + timedelta(seconds=1)
+    for photo_type in (PhotoType.BEFORE, PhotoType.AFTER):
+        db_session.add(
+            OrderPhoto(
+                id=f"p-new-as-gate-{photo_type}-{oid}",
+                order_id=oid,
+                uploaded_by_user_id=DEV_PARTNER_USER_ID,
+                photo_type=photo_type,
+                file_url=f"https://cdn.example.com/new-as-gate-{photo_type}.jpg",
+                file_name=f"new-as-gate-{photo_type}.jpg",
+                is_customer_visible=True,
+                created_at=new_photo_time,
+            )
+        )
+    db_session.flush()
+
+    OrderService(db_session).start_partner_job(
+        oid,
+        actor_user_id=DEV_PARTNER_USER_ID,
+        partner_id=pid,
+    )
+    completed = OrderService(db_session).complete_partner_job(
+        oid,
+        actor_user_id=DEV_PARTNER_USER_ID,
+        partner_id=pid,
+        customer_signature_data_url=SIGNATURE_DATA_URL,
+    )
+    assert completed.status == OrderStatus.CUSTOMER_DELIVERY_NEEDED
+
+    PhotoService(db_session).revoke_visibility(
+        f"p-new-as-gate-{PhotoType.AFTER}-{oid}",
+        actor_user_id=DEV_PARTNER_USER_ID,
+    )
+    order = db_session.get(Order, oid)
+    assert order is not None
+    assert order.status == OrderStatus.IN_PROGRESS
+
+    with pytest.raises(ValueError, match="customer_photo_ready_not_allowed"):
+        MessageService(db_session).send(
+            MessageSendRequest(
+                order_id=oid,
+                message_type=MessageType.CUSTOMER_PHOTO_READY,
+                recipient_type=RecipientType.CUSTOMER,
+            ),
+            actor_user_id=DEV_PARTNER_USER_ID,
+        )
 
 
 # --------------------------------------------------------------------------

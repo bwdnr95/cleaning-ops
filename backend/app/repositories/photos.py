@@ -44,13 +44,20 @@ class PhotoRepository(Repository[OrderPhoto]):
             stmt = stmt.where(OrderPhoto.created_at >= created_after)
         return bool(self.db.execute(stmt).scalar_one())
 
-    def has_customer_delivery_evidence(self, order_id: str) -> bool:
+    def has_customer_delivery_evidence(
+        self,
+        order_id: str,
+        *,
+        created_after: datetime | None = None,
+    ) -> bool:
         return self.has_visible_type(
             order_id,
             PhotoType.BEFORE.value,
+            created_after=created_after,
         ) and self.has_visible_type(
             order_id,
             PhotoType.AFTER.value,
+            created_after=created_after,
         )
 
     def list_review_queue(self) -> list[tuple[Order, list[OrderPhoto], int]]:
