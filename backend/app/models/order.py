@@ -39,6 +39,10 @@ class Order(TimestampMixin, Base):
     # AS(사후관리) 요청: 컴플레인/AS 건에 체크 + 메모. 협력사링크로 전송된다.
     as_requested: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
     as_memo: Mapped[str | None] = mapped_column(Text)
+    work_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    work_completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    customer_signature_storage_key: Mapped[str | None] = mapped_column(String(500))
+    customer_signature_file_url: Mapped[str | None] = mapped_column(String(1000))
     # R7 deprecated: see OrderGroup. Drop in R7.5.
     source_channel: Mapped[str | None] = mapped_column(String(120), nullable=True)
     customer_name: Mapped[str | None] = mapped_column(String(80), index=True, nullable=True)

@@ -10,8 +10,11 @@ class RecurringMonthlyRowRead(ApiModel):
     schedule_text: str
     month: str
     amount: float | None = None
+    partner_amount: float | None = None
+    partner_billing_mode: str
     tax_invoice_issued: bool
     balance_paid: bool
+    partner_payment_paid: bool
 
 
 class SetMonthlyStatusRequest(ApiModel):
@@ -19,3 +22,4 @@ class SetMonthlyStatusRequest(ApiModel):
     month: str = Field(pattern=r"^\d{4}-(0[1-9]|1[0-2])$")
     tax_invoice_issued: bool | None = None
     balance_paid: bool | None = None
+    partner_payment_paid: bool | None = None

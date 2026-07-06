@@ -46,6 +46,23 @@ export interface ServicePopularityReport {
   rows: ServicePopularityRow[];
 }
 
+export interface SourceChannelRow {
+  source_channel: string;
+  order_count: number;
+  completed_count: number;
+  revenue: string;
+  revenue_share_pct: number;
+}
+
+export interface SourceChannelReport {
+  start_date: string;
+  end_date: string;
+  rows: SourceChannelRow[];
+  total_orders: number;
+  total_completed: number;
+  total_revenue: string;
+}
+
 export interface SettlementBacklogRow {
   order_id: string;
   scheduled_date: string | null;
@@ -55,6 +72,7 @@ export interface SettlementBacklogRow {
   total_amount: string;
   expected_settlement_amount: string;
   status: string;
+  source: 'order' | 'recurring_monthly';
 }
 
 export interface SettlementBacklogReport {
@@ -76,12 +94,17 @@ export function fetchServices(params: Record<string, string>): Promise<ServicePo
   return apiRequest(`/admin/reports/services?${qs}`);
 }
 
+export function fetchSourceChannels(params: Record<string, string>): Promise<SourceChannelReport> {
+  const qs = new URLSearchParams(params).toString();
+  return apiRequest(`/admin/reports/source-channels?${qs}`);
+}
+
 export function fetchSettlements(): Promise<SettlementBacklogReport> {
   return apiRequest('/admin/reports/settlements');
 }
 
 export function exportReport(
-  name: 'revenue' | 'partners' | 'services' | 'settlements',
+  name: 'revenue' | 'partners' | 'services' | 'source-channels' | 'settlements',
   params: Record<string, string>,
   format: 'csv' | 'xlsx',
 ): Promise<void> {

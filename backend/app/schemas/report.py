@@ -5,9 +5,6 @@ from decimal import Decimal
 
 from pydantic import BaseModel, Field
 
-from app.domain.constants import OrderStatus
-
-
 class RevenueBucket(BaseModel):
     period: date
     completed_count: int = Field(..., ge=0)
@@ -54,6 +51,23 @@ class ServicePopularityReport(BaseModel):
     rows: list[ServicePopularityRow]
 
 
+class SourceChannelRow(BaseModel):
+    source_channel: str
+    order_count: int = Field(..., ge=0)
+    completed_count: int = Field(..., ge=0)
+    revenue: Decimal
+    revenue_share_pct: float
+
+
+class SourceChannelReport(BaseModel):
+    start_date: date
+    end_date: date
+    rows: list[SourceChannelRow]
+    total_orders: int = Field(..., ge=0)
+    total_completed: int = Field(..., ge=0)
+    total_revenue: Decimal
+
+
 class SettlementBacklogRow(BaseModel):
     order_id: str
     scheduled_date: date | None
@@ -62,7 +76,8 @@ class SettlementBacklogRow(BaseModel):
     partner_name: str | None
     total_amount: Decimal
     expected_settlement_amount: Decimal
-    status: OrderStatus
+    status: str
+    source: str = "order"
 
 
 class SettlementBacklogReport(BaseModel):

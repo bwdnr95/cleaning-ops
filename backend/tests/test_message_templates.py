@@ -20,7 +20,7 @@ EXPECTED_SOLAPI_KEYS = {
     },
     MessageType.PARTNER_ASSIGNMENT: {
         "#{고객명}", "#{서비스명}", "#{협력사명}", "#{방문일정}", "#{평수}", "#{대수}",
-        "#{주소}", "#{연락처}", "#{요청사항}",
+        "#{주소}", "#{연락처}", "#{요청사항}", "#{협력사링크}",
     },
     MessageType.CUSTOMER_PHOTO_READY: {"#{고객명}", "#{서비스명}", "#{고객링크}"},
     MessageType.CUSTOMER_BALANCE_DUE: {"#{고객명}", "#{서비스명}", "#{잔금}", "#{고객링크}"},
@@ -30,6 +30,12 @@ EXPECTED_SOLAPI_KEYS = {
     },
     MessageType.PARTNER_CUSTOMER_INFO: {
         "#{담당자}", "#{고객명}", "#{연락처}", "#{주소}", "#{요청사항}",
+    },
+    MessageType.PARTNER_AS_REQUEST: {
+        "#{담당자}", "#{고객명}", "#{연락처}", "#{주소}", "#{요청사항}", "#{협력사링크}",
+    },
+    MessageType.CUSTOMER_AS_NOTICE: {
+        "#{고객명}", "#{서비스명}", "#{방문일정}", "#{요청사항}", "#{고객링크}",
     },
 }
 
@@ -51,6 +57,8 @@ def test_kakao_render_fills_every_variable_without_blank():
         "discount_amount": "0원", "customer_link": "https://x.kr/c/tok",
         "customer_link_button": "x.kr/c/tok", "partner_name": "청소왕",
         "partner_manager_name": "김담당", "special_request": "현관 비번 1234",
+        "partner_login_link": "https://x.kr/partner", "partner_login_link_button": "x.kr/partner",
+        "as_memo": "욕실 코너 AS 요청",
     }
     for mtype in EXPECTED_SOLAPI_KEYS:
         rendered = render_kakao_variables(get_kakao_template_definition(mtype), context)
@@ -66,12 +74,19 @@ def test_kakao_render_fills_every_variable_without_blank():
     assert schedule["#{고객링크}"] == "https://x.kr/c/tok"
     assert schedule["#{대수}"] == "-"  # size_or_quantity가 단일 필드라 대수는 "-"
 
+    partner = render_kakao_variables(
+        get_kakao_template_definition(MessageType.PARTNER_ASSIGNMENT), context
+    )
+    assert partner["#{협력사링크}"] == "x.kr/partner"
+    assert "://" not in partner["#{협력사링크}"]
+
     # 사진/전날/잔금의 #{고객링크}는 '버튼 웹링크' 변수 → 템플릿이 https:// 를 붙이므로
     # 값에는 scheme 이 없어야 한다(이중 프로토콜 방지).
     for mtype in (
         MessageType.CUSTOMER_PHOTO_READY,
         MessageType.CUSTOMER_DAY_BEFORE,
         MessageType.CUSTOMER_BALANCE_DUE,
+        MessageType.CUSTOMER_AS_NOTICE,
     ):
         rendered = render_kakao_variables(get_kakao_template_definition(mtype), context)
         assert rendered["#{고객링크}"] == "x.kr/c/tok", mtype

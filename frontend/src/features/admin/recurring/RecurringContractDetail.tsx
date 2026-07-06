@@ -167,7 +167,10 @@ export function RecurringContractDetail({
           <Term label="주기" value={formatScheduleText(contract)} />
           <Term label="시작일" value={contract.start_date} />
           <Term label="서비스" value={contract.service_name} />
-          <Term label="1주기 금액" value={formatAmount(contract.total_amount ?? null)} />
+          <Term label="고객 청구 방식" value={formatBillingMode(contract.billing_mode)} />
+          <Term label="고객 금액" value={formatAmount(contract.total_amount ?? null)} />
+          <Term label="협력사 정산 방식" value={formatBillingMode(contract.partner_billing_mode)} />
+          <Term label="협력사 도급가" value={formatAmount(contract.partner_payment_amount ?? null)} />
           <Term label="다음 회차" value={contract.next_due_date ?? '-'} />
           <Term label="고객 링크" value={`/c/${contract.customer_token}`} mono />
         </dl>
@@ -237,4 +240,8 @@ function Term({ label, value, mono = false }: { label: string; value: string; mo
       </dd>
     </>
   );
+}
+
+function formatBillingMode(mode?: string | null): string {
+  return mode === 'monthly' ? '월결제' : '회당결제';
 }

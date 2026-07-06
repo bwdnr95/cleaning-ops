@@ -4,6 +4,7 @@ from typing import Any
 
 from sqlalchemy.sql import Select
 
+from app.core.config import settings
 from app.domain.constants import OrderStatus, PhotoType
 from app.models.order import Order
 from app.models.photo import OrderPhoto
@@ -37,7 +38,8 @@ class _FakeSession:
         self.is_refreshed = True
 
 
-def test_complete_partner_job_locks_order_before_photo_count() -> None:
+def test_complete_partner_job_locks_order_before_photo_count(monkeypatch) -> None:
+    monkeypatch.setattr(settings, "automation_send_customer_balance_due", False)
     order = Order(
         id="order-1",
         group_id="group-1",
@@ -56,13 +58,17 @@ def test_complete_partner_job_locks_order_before_photo_count() -> None:
     )
     session = _FakeSession(order)
     service = OrderService(session)  # type: ignore[arg-type]
-    service.photos.count_visible_for_order = lambda _order_id: 1  # type: ignore[method-assign]
+    service.photos.has_visible_type = lambda _order_id, _photo_type, **_kwargs: True  # type: ignore[method-assign]
     service.timeline.record = lambda **_kwargs: None  # type: ignore[method-assign]
 
     service.complete_partner_job(
         "order-1",
         actor_user_id="partner-user-1",
         partner_id="partner-1",
+        customer_signature_data_url=(
+            "data:image/png;base64,"
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII="
+        ),
     )
 
     assert session.statements[0]._for_update_arg is not None

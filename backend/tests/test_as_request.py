@@ -6,14 +6,23 @@
 
 from __future__ import annotations
 
-from app.db.seed import DEV_ORDER_ID
-from app.domain.constants import MessageType, TimelineEventType
+import pytest
+
+from app.db.seed import DEV_ORDER_ID, DEV_PARTNER_ID
+from app.domain.constants import MessageType, OrderStatus, TimelineEventType
 
 
 def test_as_request_sets_flags_notifies_and_shows_on_partner_link(
     client, seed_admin_token, seed_partner_token
 ):
     admin_h = {"Authorization": f"Bearer {seed_admin_token}"}
+    status_res = client.patch(
+        f"/api/admin/orders/{DEV_ORDER_ID}",
+        json={"status": OrderStatus.CUSTOMER_DELIVERY_DONE.value},
+        headers=admin_h,
+    )
+    assert status_res.status_code == 200, status_res.text
+
     res = client.post(
         f"/api/admin/orders/{DEV_ORDER_ID}/as-request",
         json={"memo": "화장실 코너 재시공 필요"},
@@ -23,6 +32,7 @@ def test_as_request_sets_flags_notifies_and_shows_on_partner_link(
     body = res.json()
     assert body["as_requested"] is True
     assert body["as_memo"] == "화장실 코너 재시공 필요"
+    assert body["status"] == OrderStatus.CUSTOMER_CHECK_NEEDED.value
 
     detail = client.get(f"/api/admin/orders/{DEV_ORDER_ID}", headers=admin_h).json()
     assert any(
@@ -31,6 +41,10 @@ def test_as_request_sets_flags_notifies_and_shows_on_partner_link(
     # 배정 협력사가 있는 시드 주문이라 AS 안내 메시지가 기록된다(Mock 발송/실패 무관하게 로그 존재).
     assert any(
         log["message_type"] == MessageType.PARTNER_AS_REQUEST.value
+        for log in detail["message_logs"]
+    )
+    assert any(
+        log["message_type"] == MessageType.CUSTOMER_AS_NOTICE.value
         for log in detail["message_logs"]
     )
 
@@ -69,8 +83,7 @@ def test_as_request_requires_admin(client):
     assert res.status_code == 401
 
 
-def test_as_request_without_partner_sets_flags_only(db_session):
-    # 미배정 주문도 AS 플래그/메모/타임라인은 남기되, 협력사 안내 메시지는 발송하지 않는다.
+def test_as_request_without_partner_is_rejected(db_session):
     from datetime import date
 
     from app.repositories.messages import MessageRepository
@@ -89,12 +102,42 @@ def test_as_request_without_partner_sets_flags_only(db_session):
     )
     order_id = OrderGroupRepository(db_session).list_lines(group.id)[0].id
 
-    order = osvc.request_as(order_id, memo="재작업 필요", actor_user_id=None)
-    assert order.as_requested is True
-    assert order.as_memo == "재작업 필요"
+    with pytest.raises(ValueError, match="partner_not_assigned"):
+        osvc.request_as(order_id, memo="재작업 필요", actor_user_id=None)
 
     logs = MessageRepository(db_session).list_for_order(order_id)
     assert all(log.message_type != MessageType.PARTNER_AS_REQUEST.value for log in logs)
+    assert all(log.message_type != MessageType.CUSTOMER_AS_NOTICE.value for log in logs)
+
+
+def test_as_request_rejects_pre_work_order_even_when_partner_assigned(db_session):
+    from datetime import date
+
+    from app.repositories.order_groups import OrderGroupRepository
+    from app.schemas.order import OrderGroupCreate, OrderLineCreate
+    from app.services.orders import OrderService
+
+    osvc = OrderService(db_session)
+    group = osvc.create_group(
+        OrderGroupCreate(
+            customer_name="작업전",
+            customer_phone="01000002222",
+            customer_address="서울특별시 강남구 테스트로 4",
+            lines=[
+                OrderLineCreate(
+                    status=OrderStatus.PARTNER_CONFIRMING,
+                    received_date=date(2026, 6, 1),
+                    partner_id=DEV_PARTNER_ID,
+                    team_name="강남 1팀",
+                    service_name="청소",
+                )
+            ],
+        )
+    )
+    order_id = OrderGroupRepository(db_session).list_lines(group.id)[0].id
+
+    with pytest.raises(ValueError, match="invalid_as_request_status"):
+        osvc.request_as(order_id, memo="재작업 필요", actor_user_id=None)
 
 
 def test_customer_dto_excludes_as_fields():

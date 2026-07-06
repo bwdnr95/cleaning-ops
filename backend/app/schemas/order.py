@@ -120,6 +120,9 @@ class AdminOrderRead(OrderLineBase):
     # AS 전송 액션(request_as)으로만 세팅되어 AS_REQUESTED 타임라인/협력사 통지를 강제한다.
     as_requested: bool = False
     as_memo: str | None = None
+    work_started_at: datetime | None = None
+    work_completed_at: datetime | None = None
+    customer_signature_file_url: str | None = None
     recurring_contract_id: str | None = None
     customer_name: str
     customer_phone: str
@@ -222,6 +225,10 @@ class PartnerMemoRead(ApiModel):
     created_at: datetime | None = None
 
 
+class PartnerJobCompleteRequest(ApiModel):
+    customer_signature_data_url: str = ""
+
+
 class PartnerJobRead(ApiModel):
     id: str
     status: OrderStatus
@@ -233,6 +240,10 @@ class PartnerJobRead(ApiModel):
     special_request: str | None = None
     as_requested: bool = False
     as_memo: str | None = None
+    as_requested_at: datetime | None = None
+    work_started_at: datetime | None = None
+    work_completed_at: datetime | None = None
+    has_recorded_customer_signature: bool = False
     customer_name: str
     customer_phone: str
     customer_address: str

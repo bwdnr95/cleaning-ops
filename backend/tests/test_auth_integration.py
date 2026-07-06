@@ -40,6 +40,10 @@ from app.services.dashboard import DashboardService
 from app.services.messages import MessageSendResult, MessageService
 
 PNG_BYTES = b"\x89PNG\r\n\x1a\ncleanops-test-image"
+SIGNATURE_DATA_URL = (
+    "data:image/png;base64,"
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII="
+)
 
 
 def make_test_client(seed_callback=None) -> TestClient:
@@ -153,6 +157,12 @@ def test_partner_can_open_start_and_complete_own_job_with_timeline() -> None:
 
     detail_response = client.get("/api/partner/jobs/seed-order-2450", headers=headers)
     early_complete_response = client.post("/api/partner/jobs/seed-order-2450/complete", headers=headers)
+    before_upload_response = client.post(
+        "/api/partner/jobs/seed-order-2450/photos",
+        headers=headers,
+        data={"photo_type": "before"},
+        files={"file": ("complete-before.png", PNG_BYTES, "image/png")},
+    )
     start_response = client.post("/api/partner/jobs/seed-order-2450/start", headers=headers)
     upload_response = client.post(
         "/api/partner/jobs/seed-order-2450/photos",
@@ -160,7 +170,11 @@ def test_partner_can_open_start_and_complete_own_job_with_timeline() -> None:
         data={"photo_type": "after"},
         files={"file": ("complete-after.png", PNG_BYTES, "image/png")},
     )
-    complete_response = client.post("/api/partner/jobs/seed-order-2450/complete", headers=headers)
+    complete_response = client.post(
+        "/api/partner/jobs/seed-order-2450/complete",
+        headers=headers,
+        json={"customer_signature_data_url": SIGNATURE_DATA_URL},
+    )
     restart_response = client.post("/api/partner/jobs/seed-order-2450/start", headers=headers)
     recomplete_response = client.post("/api/partner/jobs/seed-order-2450/complete", headers=headers)
 
@@ -173,6 +187,7 @@ def test_partner_can_open_start_and_complete_own_job_with_timeline() -> None:
 
     assert early_complete_response.status_code == 409
     assert early_complete_response.json()["detail"] == "invalid_status_transition"
+    assert before_upload_response.status_code == 200
     assert start_response.status_code == 200
     assert start_response.json()["status"] == "작업진행"
     assert upload_response.status_code == 200
@@ -1532,11 +1547,20 @@ def test_partner_upload_auto_visible_customer_delivery_flow(tmp_path, monkeypatc
     assert "photo_approved" in event_types
 
     start_response = client.post("/api/partner/jobs/seed-order-2450/start", headers=partner_headers)
+    after_upload_response = client.post(
+        "/api/partner/jobs/seed-order-2450/photos",
+        headers=partner_headers,
+        data={"photo_type": "after"},
+        files={"file": ("upload-after.png", PNG_BYTES, "image/png")},
+    )
     complete_response = client.post(
         "/api/partner/jobs/seed-order-2450/complete",
         headers=partner_headers,
+        json={"customer_signature_data_url": SIGNATURE_DATA_URL},
     )
     assert start_response.status_code == 200
+    assert after_upload_response.status_code == 200
+    after_uploaded = after_upload_response.json()
     assert complete_response.status_code == 200
     assert complete_response.json()["status"] == "고객전달필요"
 
@@ -1548,11 +1572,12 @@ def test_partner_upload_auto_visible_customer_delivery_flow(tmp_path, monkeypatc
     delivery_item = delivery_queue.json()[0]
     assert delivery_item["order_id"] == "seed-order-2450"
     assert delivery_item["pending_photo_count"] == 0
-    assert delivery_item["approved_photo_count"] == 1
+    assert delivery_item["approved_photo_count"] == 2
     assert delivery_item["can_send_customer_link"] is True
     assert delivery_item["last_customer_link_sent_at"] is None
-    assert delivery_item["photos"][0]["id"] == uploaded["id"]
-    assert delivery_item["photos"][0]["is_customer_visible"] is True
+    queue_photos = {photo["id"]: photo for photo in delivery_item["photos"]}
+    assert set(queue_photos) == {uploaded["id"], after_uploaded["id"]}
+    assert all(photo["is_customer_visible"] is True for photo in queue_photos.values())
 
     send_response = client.post(
         "/api/admin/messages/send",
@@ -1696,6 +1721,12 @@ def test_admin_e2e_order_to_customer_delivery_flow(tmp_path, monkeypatch) -> Non
     assert "total_amount" not in partner_detail.json()
     assert "payment_memo" not in partner_detail.json()
 
+    before_upload_response = client.post(
+        f"/api/partner/jobs/{order_id}/photos",
+        headers=partner_headers,
+        data={"photo_type": "before"},
+        files={"file": ("e2e-before.png", PNG_BYTES, "image/png")},
+    )
     start_response = client.post(f"/api/partner/jobs/{order_id}/start", headers=partner_headers)
     upload_response = client.post(
         f"/api/partner/jobs/{order_id}/photos",
@@ -1704,8 +1735,10 @@ def test_admin_e2e_order_to_customer_delivery_flow(tmp_path, monkeypatch) -> Non
         files={"file": ("e2e-after.png", PNG_BYTES, "image/png")},
     )
 
+    assert before_upload_response.status_code == 200
     assert start_response.status_code == 200
     assert upload_response.status_code == 200
+    before_uploaded = before_upload_response.json()
     uploaded = upload_response.json()
     assert uploaded["is_customer_visible"] is True
 
@@ -1714,16 +1747,30 @@ def test_admin_e2e_order_to_customer_delivery_flow(tmp_path, monkeypatch) -> Non
         json={"phone_suffix": "2222"},
     )
     assert auto_visible.status_code == 200
-    assert auto_visible.json()["lines"][0]["photos"] == [
-        {
+    auto_photos = {
+        photo["photo_type"]: photo
+        for photo in auto_visible.json()["lines"][0]["photos"]
+    }
+    assert auto_photos == {
+        "before": {
+            "id": before_uploaded["id"],
+            "photo_type": "before",
+            "file_url": before_uploaded["file_url"],
+            "file_name": "e2e-before.png",
+        },
+        "after": {
             "id": uploaded["id"],
             "photo_type": "after",
             "file_url": uploaded["file_url"],
             "file_name": "e2e-after.png",
-        }
-    ]
+        },
+    }
 
-    complete_response = client.post(f"/api/partner/jobs/{order_id}/complete", headers=partner_headers)
+    complete_response = client.post(
+        f"/api/partner/jobs/{order_id}/complete",
+        headers=partner_headers,
+        json={"customer_signature_data_url": SIGNATURE_DATA_URL},
+    )
     send_photo_response = client.post(
         "/api/admin/messages/send",
         headers=admin_headers,
@@ -1750,14 +1797,11 @@ def test_admin_e2e_order_to_customer_delivery_flow(tmp_path, monkeypatch) -> Non
     assert customer["lines"][0]["total_amount"] is None
     assert "payment_memo" not in customer
     assert "partner_payment_amount" not in customer
-    assert customer["lines"][0]["photos"] == [
-        {
-            "id": uploaded["id"],
-            "photo_type": "after",
-            "file_url": uploaded["file_url"],
-            "file_name": "e2e-after.png",
-        }
-    ]
+    customer_photos = {
+        photo["photo_type"]: photo
+        for photo in customer["lines"][0]["photos"]
+    }
+    assert customer_photos == auto_photos
 
     admin_detail = client.get(f"/api/admin/orders/{order_id}", headers=admin_headers)
     assert admin_detail.status_code == 200
@@ -1993,14 +2037,16 @@ def test_admin_message_settings_reports_solapi_readiness_without_secret_values(m
     monkeypatch.setattr(settings, "solapi_api_secret", "api-secret")
     monkeypatch.setattr(settings, "solapi_sender_number", "010-1111-2222")
     monkeypatch.setattr(settings, "solapi_webhook_secret", "webhook-secret")
-    monkeypatch.setattr(settings, "solapi_kakao_pf_id", "pf-id")
+    monkeypatch.setattr(settings, "solapi_kakao_channel_id", "channel-id")
     monkeypatch.setattr(settings, "solapi_kakao_template_customer_schedule_confirmed", "KA_SCHEDULE")
     monkeypatch.setattr(settings, "solapi_kakao_template_customer_day_before", "KA_DAY_BEFORE")
-    monkeypatch.setattr(settings, "solapi_kakao_template_partner_assignment", "KA_PARTNER")
+    monkeypatch.setattr(settings, "solapi_kakao_template_partner_job_assignment", "KA_PARTNER")
     monkeypatch.setattr(settings, "solapi_kakao_template_customer_photo_ready", "KA_PHOTO")
     monkeypatch.setattr(settings, "solapi_kakao_template_customer_quote", "KA_QUOTE")
     monkeypatch.setattr(settings, "solapi_kakao_template_partner_customer_info", "KA_PARTNER_CUSTOMER")
     monkeypatch.setattr(settings, "solapi_kakao_template_customer_balance_due", "KA_BALANCE")
+    monkeypatch.setattr(settings, "solapi_kakao_template_partner_as_request", "KA_PARTNER_AS")
+    monkeypatch.setattr(settings, "solapi_kakao_template_customer_as_notice", "KA_CUSTOMER_AS")
     monkeypatch.setattr(settings, "kakao_channel_url", "https://pf.kakao.com/_cleanjob")
 
     client = make_test_client()
@@ -2016,7 +2062,7 @@ def test_admin_message_settings_reports_solapi_readiness_without_secret_values(m
     assert body["solapi_credentials_configured"] is True
     assert body["solapi_sender_configured"] is True
     assert body["solapi_webhook_configured"] is True
-    assert body["kakao_pf_id_configured"] is True
+    assert body["kakao_channel_id_configured"] is True
     assert body["can_send_sms"] is True
     assert body["can_send_alimtalk"] is True
     assert body["warnings"] == []
@@ -2031,13 +2077,15 @@ def test_admin_message_settings_warns_for_unready_solapi(monkeypatch) -> None:
     monkeypatch.setattr(settings, "solapi_api_secret", "")
     monkeypatch.setattr(settings, "solapi_sender_number", "")
     monkeypatch.setattr(settings, "solapi_webhook_secret", "")
-    monkeypatch.setattr(settings, "solapi_kakao_pf_id", "")
+    monkeypatch.setattr(settings, "solapi_kakao_channel_id", "")
     monkeypatch.setattr(settings, "solapi_kakao_template_customer_schedule_confirmed", "")
     monkeypatch.setattr(settings, "solapi_kakao_template_customer_day_before", "")
-    monkeypatch.setattr(settings, "solapi_kakao_template_partner_assignment", "")
+    monkeypatch.setattr(settings, "solapi_kakao_template_partner_job_assignment", "")
     monkeypatch.setattr(settings, "solapi_kakao_template_customer_photo_ready", "")
     monkeypatch.setattr(settings, "solapi_kakao_template_customer_quote", "")
     monkeypatch.setattr(settings, "solapi_kakao_template_partner_customer_info", "")
+    monkeypatch.setattr(settings, "solapi_kakao_template_partner_as_request", "")
+    monkeypatch.setattr(settings, "solapi_kakao_template_customer_as_notice", "")
     monkeypatch.setattr(settings, "kakao_channel_url", "")
 
     client = make_test_client()
@@ -2054,8 +2102,68 @@ def test_admin_message_settings_warns_for_unready_solapi(monkeypatch) -> None:
     assert "solapi_missing_credentials" in body["warnings"]
     assert "solapi_missing_sender_number" in body["warnings"]
     assert "solapi_missing_webhook_secret" in body["warnings"]
-    assert "solapi_missing_kakao_pf_id" in body["warnings"]
+    assert "solapi_missing_kakao_channel_id" in body["warnings"]
     assert "solapi_missing_kakao_template_ids" in body["warnings"]
+
+
+def test_partner_assignment_alimtalk_requires_partner_job_template(monkeypatch) -> None:
+    monkeypatch.setattr(settings, "message_provider", "solapi")
+    monkeypatch.setattr(settings, "solapi_api_key", "api-key")
+    monkeypatch.setattr(settings, "solapi_api_secret", "api-secret")
+    monkeypatch.setattr(settings, "solapi_sender_number", "010-1111-2222")
+    monkeypatch.setattr(settings, "solapi_kakao_channel_id", "channel-id")
+    monkeypatch.setattr(settings, "solapi_kakao_template_partner_job_assignment", "")
+    monkeypatch.setattr(settings, "solapi_alimtalk_fallback_sms", False)
+    assert not hasattr(settings, "solapi_kakao_template_partner_assignment")
+
+    client = make_test_client()
+    admin_session = login(client, "/api/auth/admin/login", DEV_ADMIN_EMAIL, DEV_ADMIN_PASSWORD)
+    headers = {"Authorization": f"Bearer {admin_session['access_token']}"}
+
+    response = client.post(
+        "/api/admin/messages/preview",
+        headers=headers,
+        json={
+            "order_id": "seed-order-2450",
+            "message_type": "partner_assignment",
+            "recipient_type": "partner",
+            "channel": "alimtalk",
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["kakao_template_configured"] is False
+    assert body["can_send"] is False
+    assert body["warnings"] == ["solapi_missing_kakao_template_id"]
+
+
+def test_message_preview_without_channel_prefers_ready_alimtalk(monkeypatch) -> None:
+    monkeypatch.setattr(settings, "message_provider", "solapi")
+    monkeypatch.setattr(settings, "solapi_api_key", "api-key")
+    monkeypatch.setattr(settings, "solapi_api_secret", "api-secret")
+    monkeypatch.setattr(settings, "solapi_sender_number", "010-1111-2222")
+    monkeypatch.setattr(settings, "solapi_kakao_channel_id", "channel-id")
+    monkeypatch.setattr(settings, "solapi_kakao_template_partner_job_assignment", "KA_PARTNER_JOB")
+
+    client = make_test_client()
+    admin_session = login(client, "/api/auth/admin/login", DEV_ADMIN_EMAIL, DEV_ADMIN_PASSWORD)
+    headers = {"Authorization": f"Bearer {admin_session['access_token']}"}
+
+    response = client.post(
+        "/api/admin/messages/preview",
+        headers=headers,
+        json={
+            "order_id": "seed-order-2450",
+            "message_type": "partner_assignment",
+            "recipient_type": "partner",
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["channel"] == "alimtalk"
+    assert body["kakao_template_configured"] is True
 
 
 def test_admin_can_send_customer_photo_ready_message() -> None:
@@ -2310,8 +2418,7 @@ def test_solapi_webhook_requires_configured_secret(monkeypatch) -> None:
 
 
 def test_admin_can_preview_alimtalk_template_variables(monkeypatch) -> None:
-    # PF ID 미설정 경로를 검증하는 테스트라 ambient(.env) 값에 의존하지 않도록 명시 고정한다.
-    monkeypatch.setattr(settings, "solapi_kakao_pf_id", "")
+    monkeypatch.setattr(settings, "solapi_kakao_channel_id", "")
     monkeypatch.setattr(settings, "solapi_kakao_template_customer_day_before", "KA_DAY_BEFORE")
     client = make_test_client()
     admin_session = login(client, "/api/auth/admin/login", DEV_ADMIN_EMAIL, DEV_ADMIN_PASSWORD)
@@ -2333,17 +2440,17 @@ def test_admin_can_preview_alimtalk_template_variables(monkeypatch) -> None:
     assert body["channel"] == "alimtalk"
     assert body["kakao_template_id"] == "KA_DAY_BEFORE"
     assert body["kakao_template_configured"] is True
-    assert body["kakao_pf_id_configured"] is False
+    assert body["kakao_channel_id_configured"] is False
     assert body["fallback_sms_enabled"] is True
     assert body["can_send"] is True
-    assert "solapi_missing_kakao_pf_id" in body["warnings"]
+    assert "solapi_missing_kakao_channel_id" in body["warnings"]
     assert "alimtalk_fallback_sms_enabled" in body["warnings"]
     assert body["kakao_variables"]["#{고객명}"] == "박고객"
     assert "http://localhost:5173/c/seed-customer-token-2450" in body["fallback_sms_content"]
 
 
 def test_admin_alimtalk_preview_blocks_when_template_missing_without_fallback(monkeypatch) -> None:
-    monkeypatch.setattr(settings, "solapi_kakao_pf_id", "pf-id")
+    monkeypatch.setattr(settings, "solapi_kakao_channel_id", "channel-id")
     monkeypatch.setattr(settings, "solapi_kakao_template_customer_day_before", "")
     monkeypatch.setattr(settings, "solapi_alimtalk_fallback_sms", False)
     client = make_test_client()
@@ -2363,7 +2470,7 @@ def test_admin_alimtalk_preview_blocks_when_template_missing_without_fallback(mo
 
     assert response.status_code == 200
     body = response.json()
-    assert body["kakao_pf_id_configured"] is True
+    assert body["kakao_channel_id_configured"] is True
     assert body["kakao_template_configured"] is False
     assert body["fallback_sms_enabled"] is False
     assert body["can_send"] is False

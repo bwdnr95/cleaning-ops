@@ -40,6 +40,7 @@ class RecurringContract(TimestampMixin, Base):
     requested_time: Mapped[str | None] = mapped_column(String(80))
     # 청구방식: per_visit(회당 금액×방문횟수 합산) / monthly(월 고정). total_amount 해석이 달라진다.
     billing_mode: Mapped[str] = mapped_column(String(20), default="per_visit", server_default="per_visit")
+    partner_billing_mode: Mapped[str] = mapped_column(String(20), default="per_visit", server_default="per_visit")
     total_amount: Mapped[Decimal | None] = mapped_column(Numeric(12, 2))
     discount_amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False, default=0, server_default="0")
     deposit_amount: Mapped[Decimal | None] = mapped_column(Numeric(12, 2))

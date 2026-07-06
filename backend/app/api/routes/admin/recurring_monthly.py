@@ -26,7 +26,9 @@ def set_monthly(
     try:
         return RecurringMonthlyService(db).set_status(
             payload.contract_id, payload.month,
-            tax_invoice_issued=payload.tax_invoice_issued, balance_paid=payload.balance_paid,
+            tax_invoice_issued=payload.tax_invoice_issued,
+            balance_paid=payload.balance_paid,
+            partner_payment_paid=payload.partner_payment_paid,
         )
     except ValueError as exc:
         raise HTTPException(

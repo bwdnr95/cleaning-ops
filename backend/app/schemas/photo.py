@@ -35,6 +35,7 @@ class PartnerPhotoRead(ApiModel):
     file_size: int | None = None
     content_type: str | None = None
     is_customer_visible: bool
+    created_at: datetime | None = None
 
 
 class PhotoApprove(ApiModel):

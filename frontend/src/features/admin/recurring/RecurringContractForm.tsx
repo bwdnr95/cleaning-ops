@@ -20,6 +20,7 @@ const EMPTY: RecurringContractInput = {
   start_date: '',
   service_name: '',
   billing_mode: 'per_visit',
+  partner_billing_mode: 'per_visit',
   discount_amount: 0,
 };
 
@@ -107,7 +108,7 @@ export function RecurringContractForm({
       }
       onDone();
     } catch (e) {
-      setError(e instanceof Error ? e.message : '저장에 실패했습니다.');
+      setError(errorMessage(e));
     } finally {
       setSaving(false);
     }
@@ -373,6 +374,37 @@ export function RecurringContractForm({
               />
             </label>
             <label style={labelStyle}>
+              협력사 정산 방식
+              <select
+                style={inputStyle}
+                value={form.partner_billing_mode ?? 'per_visit'}
+                onChange={(e) =>
+                  set('partner_billing_mode', e.target.value as RecurringContractInput['partner_billing_mode'])
+                }
+                data-testid="rc-partner-billing-mode"
+              >
+                <option value="per_visit">회당 정산 (정기 주문별 정산)</option>
+                <option value="monthly">월 정산 (월별 트래커 지급)</option>
+              </select>
+            </label>
+            <label style={labelStyle}>
+              {form.partner_billing_mode === 'monthly' ? '협력사 월 도급가' : '협력사 회당 도급가'}
+              <input
+                style={inputStyle}
+                type="number"
+                value={form.partner_payment_amount ?? ''}
+                onChange={(e) =>
+                  set('partner_payment_amount', e.target.value === '' ? null : Number(e.target.value))
+                }
+                data-testid="rc-partner-payment-amount"
+              />
+              <span style={{ fontSize: 11, color: 'var(--text-tertiary)', fontWeight: 400 }}>
+                {form.partner_billing_mode === 'monthly'
+                  ? '월별 트래커에서 협력사 지급 여부를 체크합니다.'
+                  : '생성된 정기 주문의 도급가로 내려가 정산 탭에 반영됩니다.'}
+              </span>
+            </label>
+            <label style={labelStyle}>
               요청 시간(선택)
               <input
                 style={inputStyle}
@@ -464,4 +496,14 @@ function FormSection({ title, children }: { title: string; children: React.React
       {children}
     </section>
   );
+}
+
+function errorMessage(error: unknown): string {
+  if (!(error instanceof Error)) {
+    return '저장에 실패했습니다.';
+  }
+  if (error.message === 'recurring_partner_billing_mode_locked') {
+    return '이미 정기 주문 또는 월정산 기록이 있어 협력사 정산 방식은 변경할 수 없습니다.';
+  }
+  return error.message;
 }

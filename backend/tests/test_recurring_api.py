@@ -104,6 +104,104 @@ def test_recurring_orders_generated_for_current_month(client, seed_admin_token):
     assert len([o for o in again.json() if o["recurring_contract_id"] == cid]) == 1
 
 
+def test_recurring_per_visit_partner_payment_flows_to_generated_order(client, seed_admin_token):
+    created = client.post(
+        "/api/admin/recurring/contracts",
+        json=_contract_body(
+            default_partner_id=DEV_PARTNER_ID,
+            start_date=_cur_month_start(),
+            day_of_month=15,
+            partner_payment_amount=70000,
+            partner_billing_mode="per_visit",
+        ),
+        headers=_auth(seed_admin_token),
+    )
+    assert created.status_code == 201, created.text
+    cid = created.json()["id"]
+
+    month = _cur_month()
+    generated = client.get(f"/api/admin/recurring/orders?month={month}", headers=_auth(seed_admin_token))
+    assert generated.status_code == 200, generated.text
+    mine = [o for o in generated.json() if o["recurring_contract_id"] == cid]
+    assert len(mine) == 1
+    assert mine[0]["partner_payment_amount"] == 70000
+
+    monthly = client.get(f"/api/admin/recurring/monthly?month={month}", headers=_auth(seed_admin_token))
+    assert monthly.status_code == 200, monthly.text
+    row = next(r for r in monthly.json() if r["contract_id"] == cid)
+    assert row["partner_billing_mode"] == "per_visit"
+    assert row["partner_amount"] == 70000
+
+
+def test_recurring_monthly_partner_payment_uses_monthly_tracker(client, seed_admin_token):
+    created = client.post(
+        "/api/admin/recurring/contracts",
+        json=_contract_body(
+            default_partner_id=DEV_PARTNER_ID,
+            start_date=_cur_month_start(),
+            day_of_month=15,
+            partner_payment_amount=300000,
+            partner_billing_mode="monthly",
+        ),
+        headers=_auth(seed_admin_token),
+    )
+    assert created.status_code == 201, created.text
+    cid = created.json()["id"]
+
+    month = _cur_month()
+    generated = client.get(f"/api/admin/recurring/orders?month={month}", headers=_auth(seed_admin_token))
+    assert generated.status_code == 200, generated.text
+    mine = [o for o in generated.json() if o["recurring_contract_id"] == cid]
+    assert len(mine) == 1
+    assert mine[0]["partner_payment_amount"] is None
+
+    monthly = client.get(f"/api/admin/recurring/monthly?month={month}", headers=_auth(seed_admin_token))
+    assert monthly.status_code == 200, monthly.text
+    row = next(r for r in monthly.json() if r["contract_id"] == cid)
+    assert row["partner_billing_mode"] == "monthly"
+    assert row["partner_amount"] == 300000
+    assert row["partner_payment_paid"] is False
+
+    patched = client.post(
+        "/api/admin/recurring/monthly/set",
+        json={"contract_id": cid, "month": month, "partner_payment_paid": True},
+        headers=_auth(seed_admin_token),
+    )
+    assert patched.status_code == 200, patched.text
+    assert patched.json()["partner_payment_paid"] is True
+
+
+def test_recurring_partner_billing_mode_locked_after_order_generation(client, seed_admin_token):
+    created = client.post(
+        "/api/admin/recurring/contracts",
+        json=_contract_body(
+            default_partner_id=DEV_PARTNER_ID,
+            start_date=_cur_month_start(),
+            day_of_month=15,
+            partner_payment_amount=70000,
+            partner_billing_mode="per_visit",
+        ),
+        headers=_auth(seed_admin_token),
+    )
+    assert created.status_code == 201, created.text
+    cid = created.json()["id"]
+
+    generated = client.get(
+        f"/api/admin/recurring/orders?month={_cur_month()}",
+        headers=_auth(seed_admin_token),
+    )
+    assert generated.status_code == 200, generated.text
+    assert any(o["recurring_contract_id"] == cid for o in generated.json())
+
+    patched = client.patch(
+        f"/api/admin/recurring/contracts/{cid}",
+        json={"partner_billing_mode": "monthly"},
+        headers=_auth(seed_admin_token),
+    )
+    assert patched.status_code == 400, patched.text
+    assert patched.json()["detail"] == "recurring_partner_billing_mode_locked"
+
+
 def test_recurring_future_month_browse_does_not_generate(client, seed_admin_token):
     # 프론트 리뷰 심각2 대응: 미래 달을 넘겨봐도 주문이 생성되지 않는다(생성은 현재 달에서만).
     t = business_today()

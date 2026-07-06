@@ -12,6 +12,7 @@ export function SettlementBacklogTable({ rows }: Props) {
           <th>방문일</th>
           <th>서비스</th>
           <th>협력사</th>
+          <th>구분</th>
           <th>매출</th>
           <th>정산 예정액</th>
           <th>상태</th>
@@ -23,6 +24,7 @@ export function SettlementBacklogTable({ rows }: Props) {
             <td>{row.scheduled_date ?? '-'}</td>
             <td>{row.service_name}</td>
             <td>{row.partner_name ?? '-'}</td>
+            <td>{row.source === 'recurring_monthly' ? '정기 월정산' : '주문 정산'}</td>
             <td>{formatWon(row.total_amount)}</td>
             <td>{formatWon(row.expected_settlement_amount)}</td>
             <td>{row.status}</td>

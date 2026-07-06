@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
@@ -25,6 +27,22 @@ class PhotoRepository(Repository[OrderPhoto]):
                 OrderPhoto.is_customer_visible.is_(True),
             )
         ).scalar_one()
+
+    def has_visible_type(
+        self,
+        order_id: str,
+        photo_type: str,
+        *,
+        created_after: datetime | None = None,
+    ) -> bool:
+        stmt = select(func.count(OrderPhoto.id)).where(
+            OrderPhoto.order_id == order_id,
+            OrderPhoto.photo_type == photo_type,
+            OrderPhoto.is_customer_visible.is_(True),
+        )
+        if created_after is not None:
+            stmt = stmt.where(OrderPhoto.created_at >= created_after)
+        return bool(self.db.execute(stmt).scalar_one())
 
     def list_review_queue(self) -> list[tuple[Order, list[OrderPhoto], int]]:
         stmt = (

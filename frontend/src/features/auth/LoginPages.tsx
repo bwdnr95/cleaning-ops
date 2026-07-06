@@ -1,7 +1,7 @@
 import React from 'react';
 
 import { ApiError } from '../../api/client';
-import { Icon } from '../../components/common/ui';
+import { BrandLogo } from '../../components/common/BrandLogo';
 import { useAuth } from '../../store/authStore';
 
 const LOGIN_META = {
@@ -56,8 +56,8 @@ function LoginPage({ role }) {
   return (
     <div className={`auth-page auth-page--${role}`}>
       <form className="auth-panel" data-testid={`${role}-login-form`} onSubmit={handleSubmit}>
-        <div className="auth-mark">
-          <Icon name={role === 'admin' ? 'shield' : 'truck'} size={18} />
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-start', marginBottom: 2 }}>
+          <BrandLogo size={role === 'partner' ? 'lg' : 'md'} caption={role === 'partner' ? '협력사 작업센터' : '운영 시스템'} />
         </div>
         <div className="app-eyebrow">{meta.eyebrow}</div>
         <h2>{meta.title}</h2>

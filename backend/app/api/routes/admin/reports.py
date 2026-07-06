@@ -9,9 +9,11 @@ from app.schemas.report import (
     RevenueReport,
     ServicePopularityReport,
     SettlementBacklogReport,
+    SourceChannelReport,
 )
 from app.services.exporters import to_csv_bytes, to_xlsx_bytes
 from app.services.reports import ReportService
+from app.services.source_channels import SourceChannelReportService
 
 router = APIRouter()
 
@@ -147,6 +149,49 @@ def services_export(
     return _export_response(
         "services",
         ["service_item_id", "service_name", "job_count", "revenue", "revenue_share_pct"],
+        rows,
+        format,
+    )
+
+
+@router.get("/source-channels", response_model=SourceChannelReport)
+def source_channel_report(
+    start_date: date = Query(...),
+    end_date: date = Query(...),
+    db: Session = Depends(get_session),
+    _: CurrentUser = Depends(require_admin),
+) -> SourceChannelReport:
+    try:
+        return SourceChannelReportService(db).source_channels(start_date=start_date, end_date=end_date)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/source-channels/export")
+def source_channels_export(
+    start_date: date = Query(...),
+    end_date: date = Query(...),
+    format: str = Query("csv", pattern="^(csv|xlsx)$"),
+    db: Session = Depends(get_session),
+    _: CurrentUser = Depends(require_admin),
+) -> Response:
+    try:
+        report = SourceChannelReportService(db).source_channels(start_date=start_date, end_date=end_date)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    rows = [
+        [
+            row.source_channel,
+            row.order_count,
+            row.completed_count,
+            row.revenue,
+            round(row.revenue_share_pct, 2),
+        ]
+        for row in report.rows
+    ]
+    return _export_response(
+        "source-channels",
+        ["source_channel", "order_count", "completed_count", "revenue", "revenue_share_pct"],
         rows,
         format,
     )

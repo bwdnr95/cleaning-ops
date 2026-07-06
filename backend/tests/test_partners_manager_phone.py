@@ -80,9 +80,8 @@ def test_customer_info_falls_back_to_rep_phone(db_session: Session) -> None:
     assert phone == "01011112222"
 
 
-def test_assignment_uses_rep_phone(db_session: Session) -> None:
+def test_assignment_prefers_manager_phone(db_session: Session) -> None:
     detail = _partner(PartnerService(db_session), manager_phone="010-3333-4444")
     order = _order_for_partner(db_session, detail.id)
     _, _, phone = _recipient(db_session, order, MessageType.PARTNER_ASSIGNMENT)
-    # 배정 안내는 담당자 연락처가 있어도 대표 연락처로 발송.
-    assert phone == "01011112222"
+    assert phone == "01033334444"

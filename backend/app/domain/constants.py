@@ -83,6 +83,7 @@ class MessageType(StrEnum):
     CUSTOMER_QUOTE = "customer_quote"
     PARTNER_CUSTOMER_INFO = "partner_customer_info"
     PARTNER_AS_REQUEST = "partner_as_request"
+    CUSTOMER_AS_NOTICE = "customer_as_notice"
 
 
 class MessageChannel(StrEnum):

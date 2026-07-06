@@ -2,6 +2,7 @@
 
 import { verifyCustomerOrder } from '../../api/customer';
 import { ApiError, toApiAssetUrl } from '../../api/client';
+import { BrandLogo } from '../../components/common/BrandLogo';
 import { Badge, Icon } from '../../components/common/ui';
 import { paymentStatusLabel } from '../../domain/paymentStatus';
 import { formatQuantity } from '../../domain/format';
@@ -59,11 +60,7 @@ export function CustomerReservation() {
 function CustomerHeader() {
   return (
     <header style={headerStyle}>
-      <img
-        src="/cleanjob-logo.png"
-        alt="클린잡"
-        style={{ height: 38, width: 'auto', display: 'block' }}
-      />
+      <BrandLogo size="md" />
       <div style={{ marginLeft: 'auto', fontSize: 10.5, color: '#94a3b8', fontWeight: 600, letterSpacing: '0.04em' }}>
         예약 확인센터
       </div>

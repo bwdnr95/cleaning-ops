@@ -59,12 +59,9 @@ KAKAO_TEMPLATE_DEFINITIONS: dict[MessageType, KakaoTemplateDefinition] = {
             KakaoTemplateVariable("#{고객링크}", "customer_link_button"),
         ),
     ),
-    # 협력사 배정 안내 (KA01TP2606250958458291cETifwPnXY)
-    # ⚠️ 이 템플릿은 문구가 '고객 대상'이다(안녕하세요 #{고객명}님 … 배정되었습니다). 코드는
-    # PARTNER_ASSIGNMENT를 협력사에게 보낸다 — 수신자/문구 정합은 운영 확인 필요(변수는 아래로 충족).
     MessageType.PARTNER_ASSIGNMENT: KakaoTemplateDefinition(
         message_type=MessageType.PARTNER_ASSIGNMENT,
-        template_id_setting="solapi_kakao_template_partner_assignment",
+        template_id_setting="solapi_kakao_template_partner_job_assignment",
         variables=(
             KakaoTemplateVariable("#{고객명}", "customer_name"),
             KakaoTemplateVariable("#{서비스명}", "service_name"),
@@ -75,6 +72,7 @@ KAKAO_TEMPLATE_DEFINITIONS: dict[MessageType, KakaoTemplateDefinition] = {
             KakaoTemplateVariable("#{주소}", "customer_address"),
             KakaoTemplateVariable("#{연락처}", "customer_phone"),
             KakaoTemplateVariable("#{요청사항}", "special_request"),
+            KakaoTemplateVariable("#{협력사링크}", "partner_login_link_button"),
         ),
     ),
     # 사진 링크 발송 (KA01TP260625095950577Dxz0dLAs9aH) — 고객 링크는 버튼 웹링크(#{고객링크}).
@@ -127,6 +125,29 @@ KAKAO_TEMPLATE_DEFINITIONS: dict[MessageType, KakaoTemplateDefinition] = {
             KakaoTemplateVariable("#{연락처}", "customer_phone"),
             KakaoTemplateVariable("#{주소}", "customer_address"),
             KakaoTemplateVariable("#{요청사항}", "special_request"),
+        ),
+    ),
+    MessageType.PARTNER_AS_REQUEST: KakaoTemplateDefinition(
+        message_type=MessageType.PARTNER_AS_REQUEST,
+        template_id_setting="solapi_kakao_template_partner_as_request",
+        variables=(
+            KakaoTemplateVariable("#{담당자}", "partner_manager_name"),
+            KakaoTemplateVariable("#{고객명}", "customer_name"),
+            KakaoTemplateVariable("#{연락처}", "customer_phone"),
+            KakaoTemplateVariable("#{주소}", "customer_address"),
+            KakaoTemplateVariable("#{요청사항}", "as_memo"),
+            KakaoTemplateVariable("#{협력사링크}", "partner_login_link_button"),
+        ),
+    ),
+    MessageType.CUSTOMER_AS_NOTICE: KakaoTemplateDefinition(
+        message_type=MessageType.CUSTOMER_AS_NOTICE,
+        template_id_setting="solapi_kakao_template_customer_as_notice",
+        variables=(
+            KakaoTemplateVariable("#{고객명}", "customer_name"),
+            KakaoTemplateVariable("#{서비스명}", "service_name"),
+            KakaoTemplateVariable("#{방문일정}", "schedule"),
+            KakaoTemplateVariable("#{요청사항}", "as_memo"),
+            KakaoTemplateVariable("#{고객링크}", "customer_link_button"),
         ),
     ),
 }

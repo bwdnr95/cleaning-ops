@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import date, datetime
 
 from pydantic import Field
 
@@ -10,7 +10,7 @@ class MessageSendRequest(ApiModel):
     order_id: str
     message_type: MessageType
     recipient_type: RecipientType
-    channel: MessageChannel = MessageChannel.SMS
+    channel: MessageChannel | None = None
     memo: str | None = None
 
 
@@ -61,7 +61,7 @@ class MessagePreviewRead(ApiModel):
     kakao_template_id: str | None = None
     kakao_variables: dict[str, str] | None = None
     fallback_sms_content: str | None = None
-    kakao_pf_id_configured: bool = False
+    kakao_channel_id_configured: bool = False
     kakao_template_configured: bool = False
     fallback_sms_enabled: bool = False
     can_send: bool = True
@@ -74,9 +74,20 @@ class MessageSettingsRead(ApiModel):
     solapi_credentials_configured: bool
     solapi_sender_configured: bool
     solapi_webhook_configured: bool
-    kakao_pf_id_configured: bool
+    kakao_channel_id_configured: bool
     kakao_templates_configured: dict[str, bool] = Field(default_factory=dict)
     alimtalk_fallback_sms: bool
     can_send_sms: bool
     can_send_alimtalk: bool
     warnings: list[str] = Field(default_factory=list)
+
+
+class DayBeforeNoticeRunRead(ApiModel):
+    target_date: date
+    scanned: int
+    sent: int
+    skipped_already_sent: int
+    failed: int
+    sent_order_ids: list[str] = Field(default_factory=list)
+    skipped_order_ids: list[str] = Field(default_factory=list)
+    failed_order_ids: list[str] = Field(default_factory=list)

@@ -127,7 +127,7 @@ def test_solapi_provider_posts_approved_kakao_template(monkeypatch) -> None:
         return FakeResponse()
 
     monkeypatch.setattr(messages_module, "urlopen", fake_urlopen)
-    monkeypatch.setattr(settings, "solapi_kakao_pf_id", "pf-id")
+    monkeypatch.setattr(settings, "solapi_kakao_channel_id", "channel-id")
 
     provider = SolapiMessageProvider(
         api_key="api-key",
@@ -158,9 +158,12 @@ def test_solapi_provider_posts_approved_kakao_template(monkeypatch) -> None:
             {
                 "to": "01012345678",
                 "from": "021234567",
+                "text": "fallback sms",
+                "type": "ATA",
                 "kakaoOptions": {
-                    "pfId": "pf-id",
+                    "channelId": "channel-id",
                     "templateId": "KA01",
+                    "disableSms": False,
                     "variables": {"#{고객명}": "홍길동"},
                 },
             }
@@ -193,7 +196,7 @@ def test_solapi_provider_falls_back_to_sms_when_alimtalk_fails(monkeypatch) -> N
         return FakeResponse(responses.pop(0))
 
     monkeypatch.setattr(messages_module, "urlopen", fake_urlopen)
-    monkeypatch.setattr(settings, "solapi_kakao_pf_id", "pf-id")
+    monkeypatch.setattr(settings, "solapi_kakao_channel_id", "channel-id")
 
     provider = SolapiMessageProvider(
         api_key="api-key",

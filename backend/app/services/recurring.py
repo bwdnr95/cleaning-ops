@@ -26,6 +26,7 @@ from app.domain.recurrence import (
 )
 from app.models.order import Order
 from app.models.recurring_contract import RecurringContract
+from app.models.recurring_monthly_status import RecurringMonthlyStatus
 from app.repositories.order_groups import OrderGroupRepository
 from app.repositories.partners import PartnerRepository
 from app.repositories.recurring import RecurringContractRepository
@@ -111,6 +112,12 @@ class RecurringService:
         if changes.get("default_partner_id") is not None:
             if PartnerRepository(self.db).get(changes["default_partner_id"]) is None:
                 raise ValueError("partner_not_found")
+        if (
+            "partner_billing_mode" in changes
+            and changes["partner_billing_mode"] != contract.partner_billing_mode
+            and self._has_partner_billing_history(contract.id)
+        ):
+            raise ValueError("recurring_partner_billing_mode_locked")
 
         group = self.groups.get(contract.order_group_id)
         for field in list(changes.keys()):
@@ -137,6 +144,19 @@ class RecurringService:
         self.db.commit()
         self.db.refresh(contract)
         return contract
+
+    def _has_partner_billing_history(self, contract_id: str) -> bool:
+        generated_order_id = self.db.scalar(
+            select(Order.id).where(Order.recurring_contract_id == contract_id).limit(1)
+        )
+        if generated_order_id is not None:
+            return True
+        monthly_status_id = self.db.scalar(
+            select(RecurringMonthlyStatus.id)
+            .where(RecurringMonthlyStatus.contract_id == contract_id)
+            .limit(1)
+        )
+        return monthly_status_id is not None
 
     def set_status(self, contract_id: str, status: RecurringContractStatus) -> RecurringContract:
         contract = self.contracts.get(contract_id)
@@ -301,6 +321,9 @@ class RecurringService:
         # 배정 협력사의 링크/일정에 바로 노출한다(협력사 미지정이면 미배정 상태로 확정).
         def _f(value: Decimal | None) -> float | None:
             return float(value) if value is not None else None
+        is_partner_per_visit = (
+            contract.partner_billing_mode or RecurringBillingMode.PER_VISIT
+        ) == RecurringBillingMode.PER_VISIT
 
         return OrderLineCreate(
             status=OrderStatus.SCHEDULE_CONFIRMED,
@@ -330,5 +353,7 @@ class RecurringService:
             deposit_amount=_f(contract.deposit_amount),
             balance_amount=_f(contract.balance_amount),
             vat_type=contract.vat_type or VatType.INCLUDED,
-            partner_payment_amount=_f(contract.partner_payment_amount),
+            partner_payment_amount=(
+                _f(contract.partner_payment_amount) if is_partner_per_visit else None
+            ),
         )

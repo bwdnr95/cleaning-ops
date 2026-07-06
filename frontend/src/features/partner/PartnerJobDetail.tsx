@@ -3,11 +3,13 @@ import { Avatar, Badge, Icon } from '../../components/common/ui';
 import {
   addPartnerJobMemo,
   completePartnerJob,
+  confirmPartnerJob,
   getPartnerJob,
   getPartnerJobMessages,
   listPartnerJobs,
   startPartnerJob,
 } from '../../api/partner';
+import { PartnerSignaturePad } from './PartnerSignaturePad';
 import { uploadPartnerJobPhoto } from '../../api/photos';
 import { ApiError, toApiAssetUrl } from '../../api/client';
 import { useApiResource } from '../../api/useApiResource';
@@ -19,6 +21,7 @@ import { parseDateValue } from '../../domain/time';
 const PARTNER_MESSAGE_TYPE_LABELS = {
   partner_assignment: '작업 배정 안내',
   partner_customer_info: '고객 정보 안내',
+  partner_as_request: 'AS 요청 안내',
 };
 
 const PHOTO_UPLOAD_ERROR_MESSAGES = {
@@ -28,14 +31,15 @@ const PHOTO_UPLOAD_ERROR_MESSAGES = {
   invalid_status_for_upload: '현재 작업 상태에서는 사진을 업로드할 수 없습니다.',
 };
 
-const STARTABLE_JOB_STATUSES = ['일정확정', '전날안내필요', '전날안내완료', '작업예정'];
+const CONFIRMABLE_JOB_STATUSES = ['협력사확인중'];
+const STARTABLE_JOB_STATUSES = ['일정확정', '전날안내필요', '전날안내완료', '작업예정', '고객확인필요'];
 const COMPLETABLE_JOB_STATUSES = ['작업진행'];
 // 사진 업로드 허용 상태(백엔드 PARTNER_PHOTO_UPLOADABLE_STATUSES와 일치).
 // 활성 작업 구간(시작 가능 상태 + 작업진행)에서만 업로드 버튼을 활성화한다.
 const PHOTO_UPLOADABLE_JOB_STATUSES = [...STARTABLE_JOB_STATUSES, ...COMPLETABLE_JOB_STATUSES];
 
 export function PartnerJobDetail({ onDetailOpenChange = undefined } = {}) {
-  const [selectedJobId, setSelectedJobId] = React.useState(null);
+  const [selectedJobId, setSelectedJobId] = React.useState(() => readInitialPartnerJobId());
   const [uploadError, setUploadError] = React.useState(null);
   const [uploadNotice, setUploadNotice] = React.useState(null);
   const [uploadingPhotoType, setUploadingPhotoType] = React.useState(null);
@@ -47,6 +51,7 @@ export function PartnerJobDetail({ onDetailOpenChange = undefined } = {}) {
   const [memoError, setMemoError] = React.useState(null);
   const [memoNotice, setMemoNotice] = React.useState(null);
   const [isSavingMemo, setIsSavingMemo] = React.useState(false);
+  const [signatureDataUrl, setSignatureDataUrl] = React.useState('');
   const beforeInputRef = React.useRef<HTMLInputElement | null>(null);
   const afterInputRef = React.useRef<HTMLInputElement | null>(null);
   const etcInputRef = React.useRef<HTMLInputElement | null>(null);
@@ -66,6 +71,10 @@ export function PartnerJobDetail({ onDetailOpenChange = undefined } = {}) {
   const selectedFromList = jobs.data?.find((item) => item.id === selectedJobId);
   const job = detail.data || selectedFromList;
   const photoGroups = React.useMemo(() => groupJobPhotos(job?.photos || []), [job?.photos]);
+  const currentEvidencePhotoGroups = React.useMemo(
+    () => groupJobPhotos(filterCurrentEvidencePhotos(job)),
+    [job],
+  );
 
   React.useEffect(() => {
     setUploadError(null);
@@ -76,6 +85,7 @@ export function PartnerJobDetail({ onDetailOpenChange = undefined } = {}) {
     setMemoDraft('');
     setMemoError(null);
     setMemoNotice(null);
+    setSignatureDataUrl('');
   }, [selectedJobId]);
 
   const refreshFlow = () => {
@@ -171,16 +181,17 @@ export function PartnerJobDetail({ onDetailOpenChange = undefined } = {}) {
     try {
       if (action === 'start') {
         await startPartnerJob(job.id);
+      } else if (action === 'confirm') {
+        await confirmPartnerJob(job.id);
       } else {
-        await completePartnerJob(job.id);
+        await completePartnerJob(job.id, signatureDataUrl);
       }
       refreshFlow();
     } catch (requestError) {
-      if (
-        requestError instanceof ApiError
-        && requestError.detail === 'photo_required_for_completion'
-      ) {
-        setStatusError('사진을 1장 이상 업로드한 뒤 완료 처리해주세요.');
+      if (requestError instanceof ApiError && requestError.detail === 'before_photo_required_for_start') {
+        setStatusError('비포 사진을 1장 이상 업로드한 뒤 작업을 시작해주세요.');
+      } else if (requestError instanceof ApiError && requestError.detail === 'completion_evidence_required') {
+        setStatusError('비포/애프터 사진과 고객 서명을 모두 준비한 뒤 완료 처리해주세요.');
       } else {
         setStatusError('작업 상태를 변경하지 못했습니다.');
       }
@@ -226,12 +237,21 @@ export function PartnerJobDetail({ onDetailOpenChange = undefined } = {}) {
     );
   }
 
+  const canConfirm = CONFIRMABLE_JOB_STATUSES.includes(job.status);
   const canStart = STARTABLE_JOB_STATUSES.includes(job.status);
   const canComplete = COMPLETABLE_JOB_STATUSES.includes(job.status);
   const canUploadPhotos = PHOTO_UPLOADABLE_JOB_STATUSES.includes(job.status);
   const photoUploadDisabled = isUploading || !canUploadPhotos;
   const statusLock = getPartnerStatusLock(job.status);
   const jobAddress = formatJobAddress(job);
+  const hasBeforePhoto = currentEvidencePhotoGroups.before.length > 0;
+  const hasAfterPhoto = currentEvidencePhotoGroups.after.length > 0;
+  const hasCurrentSignature = Boolean(signatureDataUrl);
+  const hasRecordedSignature = hasCurrentSignature || Boolean(job.has_recorded_customer_signature);
+  const hasChecklistSignature = canComplete ? hasCurrentSignature : hasRecordedSignature;
+  const canSubmitStart = canStart && hasBeforePhoto;
+  const canSubmitComplete = canComplete && hasBeforePhoto && hasAfterPhoto && hasCurrentSignature;
+  const footerHelpText = partnerFooterHelpText(job.status);
 
   return (
     <div data-testid="partner-job-detail-page" style={{ height: '100%', display: 'flex', flexDirection: 'column', background: '#f4f6f8', overflow: 'hidden' }}>
@@ -349,6 +369,7 @@ export function PartnerJobDetail({ onDetailOpenChange = undefined } = {}) {
           photos={photoGroups.before}
           onAdd={() => beforeInputRef.current?.click()}
           disabled={photoUploadDisabled}
+          isUploading={isUploading}
         />
         <input ref={beforeInputRef} data-testid="partner-before-photo-input" type="file" accept="image/jpeg,image/png,image/webp" capture="environment" multiple style={{ display: 'none' }} onChange={(event) => void handlePhotoSelected('before', event)} />
 
@@ -358,6 +379,7 @@ export function PartnerJobDetail({ onDetailOpenChange = undefined } = {}) {
           photos={photoGroups.after}
           onAdd={() => afterInputRef.current?.click()}
           disabled={photoUploadDisabled}
+          isUploading={isUploading}
         />
         <input ref={afterInputRef} data-testid="partner-after-photo-input" type="file" accept="image/jpeg,image/png,image/webp" capture="environment" multiple style={{ display: 'none' }} onChange={(event) => void handlePhotoSelected('after', event)} />
         <PhotoPanel
@@ -366,6 +388,7 @@ export function PartnerJobDetail({ onDetailOpenChange = undefined } = {}) {
           photos={photoGroups.etc}
           onAdd={() => etcInputRef.current?.click()}
           disabled={photoUploadDisabled}
+          isUploading={isUploading}
         />
         <input ref={etcInputRef} data-testid="partner-etc-photo-input" type="file" accept="image/jpeg,image/png,image/webp" capture="environment" multiple style={{ display: 'none' }} onChange={(event) => void handlePhotoSelected('etc', event)} />
         {isUploading && (
@@ -379,18 +402,50 @@ export function PartnerJobDetail({ onDetailOpenChange = undefined } = {}) {
           </div>
         )}
         {uploadError && <div style={{ margin: '-2px 2px 10px', color: 'var(--danger-fg)', fontSize: 11.5 }}>{uploadError}</div>}
+
+        {(canStart || canComplete || job.has_recorded_customer_signature) && (
+          <EvidenceChecklist
+            hasBeforePhoto={hasBeforePhoto}
+            hasAfterPhoto={hasAfterPhoto}
+            hasSignature={hasChecklistSignature}
+            canComplete={canComplete}
+            startedAt={job.work_started_at}
+            completedAt={job.work_completed_at}
+          />
+        )}
+
+        {canComplete && (
+          <Panel>
+            <SectionLabel>고객 서명</SectionLabel>
+            {job.has_recorded_customer_signature && !signatureDataUrl && (
+              <div style={{ marginBottom: 8, fontSize: 11.5, color: 'var(--text-tertiary)', lineHeight: 1.5 }}>
+                이전 서명 기록이 있어도 이번 작업 완료에는 고객님의 새 서명이 필요합니다.
+              </div>
+            )}
+            <PartnerSignaturePad
+              value={signatureDataUrl}
+              onChange={setSignatureDataUrl}
+              disabled={isSavingStatus}
+            />
+          </Panel>
+        )}
       </div>
 
       <div style={{ padding: '10px 14px calc(12px + env(safe-area-inset-bottom))', background: '#fff', borderTop: '1px solid var(--border)', boxShadow: '0 -4px 12px rgba(15,23,42,0.04)' }}>
-        {canStart || canComplete ? (
-          <div style={{ display: 'grid', gridTemplateColumns: canStart && canComplete ? '1fr 1fr' : '1fr', gap: 8 }}>
+        {canConfirm || canStart || canComplete ? (
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: 8 }}>
+            {canConfirm && (
+              <button data-testid="partner-confirm-job" disabled={isSavingStatus} onClick={() => void handleStatusAction('confirm')} style={primaryCtaStyle(isSavingStatus)}>
+                <Icon name="check" size={16}/> 작업 일정 확인
+              </button>
+            )}
             {canStart && (
-              <button data-testid="partner-start-job" disabled={isSavingStatus} onClick={() => void handleStatusAction('start')} style={secondaryCtaStyle(isSavingStatus)}>
+              <button data-testid="partner-start-job" disabled={isSavingStatus || !canSubmitStart} onClick={() => void handleStatusAction('start')} style={secondaryCtaStyle(isSavingStatus || !canSubmitStart)}>
                 <Icon name="clock" size={16}/> 작업 시작
               </button>
             )}
             {canComplete && (
-              <button data-testid="partner-complete-job" disabled={isSavingStatus} onClick={() => void handleStatusAction('complete')} style={primaryCtaStyle(isSavingStatus)}>
+              <button data-testid="partner-complete-job" disabled={isSavingStatus || !canSubmitComplete} onClick={() => void handleStatusAction('complete')} style={primaryCtaStyle(isSavingStatus || !canSubmitComplete)}>
                 <Icon name="check" size={16}/> 작업 완료
               </button>
             )}
@@ -408,7 +463,7 @@ export function PartnerJobDetail({ onDetailOpenChange = undefined } = {}) {
         )}
         {statusError && <div style={{ textAlign: 'center', fontSize: 11, color: 'var(--danger-fg)', marginTop: 6 }}>{statusError}</div>}
         <div style={{ textAlign: 'center', fontSize: 10.5, color: 'var(--text-tertiary)', marginTop: 6 }}>
-          사진은 업로드 즉시 고객에게 공개됩니다. 잘못 올렸다면 운영팀에 비공개 처리를 요청해주세요.
+          {footerHelpText}
         </div>
       </div>
     </div>
@@ -417,6 +472,13 @@ export function PartnerJobDetail({ onDetailOpenChange = undefined } = {}) {
 
 function formatJobAddress(job) {
   return [job.customer_address, job.customer_address_detail].filter(Boolean).join(' ');
+}
+
+function readInitialPartnerJobId() {
+  if (typeof window === 'undefined') {
+    return null;
+  }
+  return new URLSearchParams(window.location.search).get('job');
 }
 
 function PartnerJobList({ jobs, onSelect, onReload = undefined }) {
@@ -536,12 +598,12 @@ function PartnerHomeHero({ jobs, activeFilter = null, onToggleFilter = undefined
       }}
     >
       <div style={{ fontSize: 13.5, fontWeight: 700 }}>
-        {greetingPrefix()}{manager ? `, ${manager}님` : ''} 👋
+        {greetingPrefix()}{manager ? `, ${manager}님` : ''}
       </div>
       <div style={{ fontSize: 11.5, opacity: 0.85, display: 'flex', alignItems: 'center', gap: 5, marginTop: 5 }}>
         <Icon name="calendar" size={12} color="#fff" /> {todayLabel()}
       </div>
-      <div style={{ fontSize: 16.5, fontWeight: 800, marginTop: 6, letterSpacing: '-0.01em' }}>
+      <div style={{ fontSize: 16.5, fontWeight: 800, marginTop: 6, letterSpacing: 0 }}>
         {heroHeadline(jobs, summary)}
       </div>
       <div style={{ display: 'flex', gap: 8, marginTop: 13 }}>
@@ -576,7 +638,7 @@ function HeroStat({ label, value, active, onClick }) {
 }
 
 const BUCKET_LABELS = { upcoming: '예정', inProgress: '진행 중', done: '완료' };
-const DONE_BUCKET_STATUSES = ['사진검수대기', '고객전달필요', '고객전달완료', '고객확인필요', '서비스완료'];
+const DONE_BUCKET_STATUSES = ['사진검수대기', '고객전달필요', '고객전달완료', '서비스완료'];
 
 function jobBucket(status) {
   if (status === '작업진행') {
@@ -641,7 +703,45 @@ function todayLabel() {
   return `${now.getMonth() + 1}월 ${now.getDate()}일 ${weekday}요일`;
 }
 
-function PhotoPanel({ title, tone, photos, onAdd, disabled }) {
+function EvidenceChecklist({ hasBeforePhoto, hasAfterPhoto, hasSignature, canComplete, startedAt, completedAt }) {
+  const rows = [
+    { key: 'before', label: '비포 사진', done: hasBeforePhoto },
+    { key: 'after', label: '애프터 사진', done: hasAfterPhoto },
+    { key: 'signature', label: '고객 서명', done: hasSignature },
+  ];
+
+  return (
+    <Panel>
+      <SectionLabel>작업 증빙</SectionLabel>
+      <div style={{ display: 'grid', gap: 6 }}>
+        {startedAt && <EvidenceRow label="진입시간" value={formatKoreanDateTime(startedAt)} done />}
+        {completedAt && <EvidenceRow label="완료시간" value={formatKoreanDateTime(completedAt)} done />}
+        {rows.map((row) => (
+          <EvidenceRow
+            key={row.key}
+            label={row.label}
+            value={row.done ? '완료' : canComplete ? '필요' : '대기'}
+            done={row.done}
+          />
+        ))}
+      </div>
+    </Panel>
+  );
+}
+
+function EvidenceRow({ label, value, done }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 8, minHeight: 26 }}>
+      <Badge tone={done ? 'success' : 'warn'}>{done ? '완료' : '필요'}</Badge>
+      <span style={{ flex: 1, fontSize: 12.5, color: 'var(--text)', fontWeight: 600 }}>{label}</span>
+      <span style={{ fontSize: 11.5, color: 'var(--text-tertiary)' }}>{value}</span>
+    </div>
+  );
+}
+
+function PhotoPanel({ title, tone, photos, onAdd, disabled, isUploading = false }) {
+  const uploadLabel = isUploading ? '업로드 중' : disabled ? '잠김' : '촬영';
+
   return (
     <Panel>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
@@ -668,11 +768,21 @@ function PhotoPanel({ title, tone, photos, onAdd, disabled }) {
         ))}
         <button onClick={onAdd} disabled={disabled} style={{ aspectRatio: '1', border: '1.5px dashed var(--border-strong)', borderRadius: 6, background: 'var(--bg-subtle)', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: disabled ? 'default' : 'pointer', flexDirection: 'column', gap: 2, color: 'var(--text-tertiary)' }}>
           <Icon name="camera" size={16}/>
-          <span style={{ fontSize: 9.5 }}>{disabled ? '업로드 중' : '촬영'}</span>
+          <span style={{ fontSize: 9.5 }}>{uploadLabel}</span>
         </button>
       </div>
     </Panel>
   );
+}
+
+function partnerFooterHelpText(status) {
+  if (status === '고객확인필요') {
+    return 'AS 요청을 확인한 뒤 비포 사진을 올리고 작업을 시작하세요.';
+  }
+  if (DONE_BUCKET_STATUSES.includes(status)) {
+    return '작업 완료 처리가 기록되었습니다.';
+  }
+  return '작업완료 시 미수금이 있으면 고객에게 잔금 안내가 자동 발송됩니다.';
 }
 
 function PartnerMessagesPanel({ jobId }) {
@@ -763,7 +873,7 @@ function ActionButton({ icon, label, href }) {
 }
 
 function SectionLabel({ children }) {
-  return <div style={{ fontSize: 11, color: 'var(--text-tertiary)', fontWeight: 600, letterSpacing: '0.04em', marginBottom: 6 }}>{children}</div>;
+  return <div style={{ fontSize: 11, color: 'var(--text-tertiary)', fontWeight: 600, letterSpacing: 0, marginBottom: 6 }}>{children}</div>;
 }
 
 function PartnerStatusBadge({ status }) {
@@ -814,6 +924,23 @@ function groupJobPhotos(photos) {
   }
 
   return groups;
+}
+
+function filterCurrentEvidencePhotos(job) {
+  if (!job?.photos) {
+    return [];
+  }
+  if (!job.as_requested || !job.as_requested_at) {
+    return job.photos;
+  }
+  const requestedAt = Date.parse(job.as_requested_at);
+  if (Number.isNaN(requestedAt)) {
+    return job.photos;
+  }
+  return job.photos.filter((photo) => {
+    const createdAt = Date.parse(photo.created_at || '');
+    return !Number.isNaN(createdAt) && createdAt >= requestedAt;
+  });
 }
 
 function toPhotoUploadErrorMessage(error) {
@@ -931,6 +1058,9 @@ function partnerStatusLabel(status) {
   if (status === '작업진행') {
     return '작업 중';
   }
+  if (status === '고객확인필요') {
+    return '확인 필요';
+  }
   if (['사진검수대기', '고객전달필요'].includes(status)) {
     return '완료 확인 중';
   }
@@ -951,6 +1081,9 @@ function partnerStatusTone(status) {
     return 'success';
   }
   if (['사진검수대기', '고객전달필요'].includes(status)) {
+    return 'warn';
+  }
+  if (status === '고객확인필요') {
     return 'warn';
   }
   if (status === '작업진행') {

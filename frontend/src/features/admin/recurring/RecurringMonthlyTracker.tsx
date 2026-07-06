@@ -33,7 +33,7 @@ function thisMonth(): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
 }
 
-type ToggleField = 'tax_invoice_issued' | 'balance_paid';
+type ToggleField = 'tax_invoice_issued' | 'balance_paid' | 'partner_payment_paid';
 
 export function RecurringMonthlyTracker() {
   const [month, setMonth] = React.useState(thisMonth());
@@ -130,15 +130,17 @@ export function RecurringMonthlyTracker() {
             background: 'var(--surface)',
           }}
         >
-          <table style={{ width: '100%', minWidth: 640, fontSize: 13, borderCollapse: 'collapse' }}>
+          <table style={{ width: '100%', minWidth: 820, fontSize: 13, borderCollapse: 'collapse' }}>
             <thead>
               <tr>
                 <th style={headStyle}>계약</th>
                 <th style={headStyle}>고객</th>
                 <th style={headStyle}>주기</th>
-                <th style={headStyle}>월 금액</th>
+                <th style={headStyle}>고객 월금액</th>
+                <th style={headStyle}>협력사 도급액</th>
                 <th style={{ ...headStyle, textAlign: 'center' }}>세금계산서</th>
                 <th style={{ ...headStyle, textAlign: 'center' }}>잔금입금</th>
+                <th style={{ ...headStyle, textAlign: 'center' }}>협력사 지급</th>
               </tr>
             </thead>
             <tbody>
@@ -148,6 +150,7 @@ export function RecurringMonthlyTracker() {
                   <td style={cellStyle}>{r.customer_name}</td>
                   <td style={cellStyle}>{r.schedule_text}</td>
                   <td style={cellStyle}>{formatAmount(r.amount)}</td>
+                  <td style={cellStyle}>{formatAmount(r.partner_amount)}</td>
                   <td style={checkCellStyle}>
                     <input
                       type="checkbox"
@@ -169,6 +172,21 @@ export function RecurringMonthlyTracker() {
                       aria-label={`${r.label} ${month} 잔금입금`}
                       style={{ width: 18, height: 18, cursor: 'pointer' }}
                     />
+                  </td>
+                  <td style={checkCellStyle}>
+                    {r.partner_billing_mode === 'monthly' ? (
+                      <input
+                        type="checkbox"
+                        checked={r.partner_payment_paid}
+                        disabled={pendingKeys.has(`${r.contract_id}:partner_payment_paid`)}
+                        onChange={() => void toggle(r, 'partner_payment_paid')}
+                        data-testid={`monthly-partner-paid-${r.contract_id}`}
+                        aria-label={`${r.label} ${month} 협력사 지급`}
+                        style={{ width: 18, height: 18, cursor: 'pointer' }}
+                      />
+                    ) : (
+                      <span style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>주문별</span>
+                    )}
                   </td>
                 </tr>
               ))}

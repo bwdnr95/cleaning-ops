@@ -15,3 +15,4 @@ class RecurringMonthlyStatus(TimestampMixin, Base):
     billing_month: Mapped[str] = mapped_column(String(7), index=True)  # "YYYY-MM"
     tax_invoice_issued: Mapped[bool] = mapped_column(Boolean, default=False)
     balance_paid: Mapped[bool] = mapped_column(Boolean, default=False)
+    partner_payment_paid: Mapped[bool] = mapped_column(Boolean, default=False)

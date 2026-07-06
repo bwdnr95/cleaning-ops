@@ -1,3 +1,6 @@
+import base64
+import binascii
+from contextlib import suppress
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from secrets import token_urlsafe
@@ -6,10 +9,11 @@ from uuid import uuid4
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from app.core.config import settings
 from app.domain.constants import (
-    MessageChannel,
     MessageType,
     OrderStatus,
+    PhotoType,
     ReceiptStatus,
     ReceiptType,
     RecipientType,
@@ -25,6 +29,7 @@ from app.models.timeline import OrderTimeline
 from app.repositories.order_groups import OrderGroupRepository
 from app.repositories.orders import OrderRepository
 from app.repositories.photos import PhotoRepository
+from app.repositories.timeline import TimelineRepository
 from app.schemas.message import MessageLogRead, MessageSendRequest
 from app.schemas.order import (
     AdminOrderGroupRead,
@@ -44,7 +49,9 @@ from app.schemas.order import (
     PartnerMemoRead,
 )
 from app.schemas.photo import PartnerPhotoRead, PhotoRead
+from app.services.messages import MessageService, has_customer_balance_due
 from app.services.service_catalog import ServiceCatalogService
+from app.services.storage import get_storage_provider
 from app.services.timeline import TimelineService
 
 
@@ -58,6 +65,11 @@ PARTNER_JOB_STARTABLE_STATUSES = {
     OrderStatus.DAY_BEFORE_NOTICE_NEEDED.value,
     OrderStatus.DAY_BEFORE_NOTICE_DONE.value,
     OrderStatus.SCHEDULED.value,
+    OrderStatus.CUSTOMER_CHECK_NEEDED.value,
+}
+
+PARTNER_JOB_CONFIRMABLE_STATUSES = {
+    OrderStatus.PARTNER_CONFIRMING.value,
 }
 
 # 방문일이 없던(미배정) 주문에 방문일을 새로 지정하면 자동으로 '일정확정'으로 올릴 수 있는 상태들.
@@ -71,6 +83,13 @@ PARTNER_JOB_COMPLETABLE_STATUSES = {
     OrderStatus.IN_PROGRESS.value,
 }
 
+AS_REQUEST_ALLOWED_STATUSES = {
+    OrderStatus.CUSTOMER_DELIVERY_NEEDED.value,
+    OrderStatus.CUSTOMER_DELIVERY_DONE.value,
+    OrderStatus.CUSTOMER_CHECK_NEEDED.value,
+    OrderStatus.COMPLETED.value,
+}
+
 # 협력사 사진 업로드 허용 상태 집합.
 # 시작 가능(STARTABLE) 상태 + 작업진행(IN_PROGRESS)을 합친 "활성 작업 구간"으로 정의한다.
 # - STARTABLE 포함: 현재 플로우에서 협력사가 '작업 시작'을 누르기 전(작업예정 등)에도 사진을 올릴 수 있도록 허용.
@@ -80,6 +99,9 @@ PARTNER_JOB_COMPLETABLE_STATUSES = {
 PARTNER_PHOTO_UPLOADABLE_STATUSES = (
     PARTNER_JOB_STARTABLE_STATUSES | PARTNER_JOB_COMPLETABLE_STATUSES
 )
+
+SIGNATURE_DATA_URL_PREFIX = "data:image/png;base64,"
+PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 
 
 @dataclass(frozen=True)
@@ -99,6 +121,7 @@ class OrderService:
         self.db = db
         self.orders = OrderRepository(db)
         self.photos = PhotoRepository(db)
+        self.timelines = TimelineRepository(db)
         self.service_catalog = ServiceCatalogService(db)
         self.timeline = TimelineService(db)
 
@@ -166,9 +189,14 @@ class OrderService:
         )
         self.db.add(group)
         self.db.flush()
-        for line_payload in payload.lines:
+        created_orders = [
             self._create_line_internal(group, line_payload, actor_user_id=actor_user_id)
+            for line_payload in payload.lines
+        ]
         self.db.commit()
+        for order in created_orders:
+            self.db.refresh(order)
+            self._send_partner_assignment_if_needed(order, actor_user_id=actor_user_id)
         self.db.refresh(group)
         return group
 
@@ -185,6 +213,7 @@ class OrderService:
         order = self._create_line_internal(group, payload, actor_user_id=actor_user_id)
         self.db.commit()
         self.db.refresh(order)
+        self._send_partner_assignment_if_needed(order, actor_user_id=actor_user_id)
         return order
 
     def create_empty_group(
@@ -270,7 +299,9 @@ class OrderService:
         self._apply_service_catalog(changes)
         _normalize_receipt_fields(changes)
         old_status = order.status
+        old_partner_id = order.partner_id
         old_scheduled_date = order.scheduled_date
+        should_send_schedule_confirmed = False
         payment_changes = collect_payment_changes(order, changes)
         schedule_changes = collect_schedule_changes(order, changes)
         for key, value in changes.items():
@@ -296,6 +327,7 @@ class OrderService:
                 description="방문일 지정으로 자동 일정확정 처리되었습니다.",
                 metadata={"from": old_status, "to": OrderStatus.SCHEDULE_CONFIRMED.value, "auto": True},
             )
+            should_send_schedule_confirmed = True
 
         # #2: 완납(paid) 처리 시 자동 최종결제완료(서비스완료). 운영자가 같은 요청에서 상태를
         # 직접 지정했으면 그 값을 존중하고, 취소/이미 완료 건은 건드리지 않는다.
@@ -375,6 +407,24 @@ class OrderService:
             )
 
         self.db.commit()
+        self.db.refresh(order)
+        if (
+            settings.automation_send_partner_assignment
+            and "partner_id" in changes
+            and order.partner_id
+            and order.partner_id != old_partner_id
+        ):
+            self._send_partner_assignment_if_needed(order, actor_user_id=actor_user_id)
+        if settings.automation_send_schedule_confirmed and should_send_schedule_confirmed:
+            self._send_automation_message(
+                order,
+                MessageSendRequest(
+                    order_id=order.id,
+                    message_type=MessageType.CUSTOMER_SCHEDULE_CONFIRMED,
+                    recipient_type=RecipientType.CUSTOMER,
+                ),
+                actor_user_id=actor_user_id,
+            )
         self.db.refresh(order)
         return order
 
@@ -466,6 +516,28 @@ class OrderService:
             raise ValueError("order_not_found")
         return order
 
+    def confirm_partner_job(
+        self,
+        order_id: str,
+        *,
+        actor_user_id: str,
+        partner_id: str,
+    ) -> Order:
+        order = self.get_for_partner(order_id, partner_id=partner_id)
+        if order.status not in PARTNER_JOB_CONFIRMABLE_STATUSES:
+            raise ValueError("invalid_status_transition")
+
+        self._change_status(
+            order,
+            OrderStatus.SCHEDULED,
+            actor_user_id=actor_user_id,
+            title="작업 일정 확인",
+            description="협력사가 배정된 작업 일정을 확인했습니다.",
+        )
+        self.db.commit()
+        self.db.refresh(order)
+        return order
+
     def start_partner_job(
         self,
         order_id: str,
@@ -476,7 +548,14 @@ class OrderService:
         order = self.get_for_partner(order_id, partner_id=partner_id)
         if order.status not in PARTNER_JOB_STARTABLE_STATUSES:
             raise ValueError("invalid_status_transition")
+        if not self.photos.has_visible_type(
+            order.id,
+            PhotoType.BEFORE.value,
+            created_after=self._completion_evidence_created_after(order),
+        ):
+            raise ValueError("before_photo_required_for_start")
 
+        order.work_started_at = datetime.now(UTC)
         self._change_status(
             order,
             OrderStatus.IN_PROGRESS,
@@ -487,12 +566,55 @@ class OrderService:
         self.db.refresh(order)
         return order
 
+    def _send_partner_assignment_if_needed(
+        self,
+        order: Order,
+        *,
+        actor_user_id: str | None,
+    ) -> None:
+        if not settings.automation_send_partner_assignment or not order.partner_id:
+            return
+        self._send_automation_message(
+            order,
+            MessageSendRequest(
+                order_id=order.id,
+                message_type=MessageType.PARTNER_ASSIGNMENT,
+                recipient_type=RecipientType.PARTNER,
+            ),
+            actor_user_id=actor_user_id,
+        )
+
+    def _send_automation_message(
+        self,
+        order: Order,
+        payload: MessageSendRequest,
+        *,
+        actor_user_id: str | None,
+    ) -> None:
+        try:
+            MessageService(self.db).send(payload, actor_user_id=actor_user_id)
+        except ValueError as exc:
+            self.timeline.record(
+                order_id=order.id,
+                actor_user_id=actor_user_id,
+                event_type=TimelineEventType.MESSAGE_SENT,
+                title="자동 메시지 발송 실패",
+                description=str(exc),
+                metadata={
+                    "message_type": payload.message_type,
+                    "recipient_type": payload.recipient_type,
+                    "automation": True,
+                },
+            )
+            self.db.commit()
+
     def complete_partner_job(
         self,
         order_id: str,
         *,
         actor_user_id: str,
         partner_id: str,
+        customer_signature_data_url: str,
     ) -> Order:
         order = self.db.execute(
             select(Order)
@@ -508,19 +630,69 @@ class OrderService:
         if order.status not in PARTNER_JOB_COMPLETABLE_STATUSES:
             raise ValueError("invalid_status_transition")
 
-        photo_count = self.photos.count_visible_for_order(order.id)
-        if photo_count == 0:
-            raise ValueError("photo_required_for_completion")
-
-        self._change_status(
-            order,
-            OrderStatus.CUSTOMER_DELIVERY_NEEDED,
-            actor_user_id=actor_user_id,
-            title="작업 완료",
-            description="협력사가 작업 완료를 처리했습니다. 자동 공개된 사진으로 고객 전달이 가능합니다.",
+        evidence_created_after = self._completion_evidence_created_after(order)
+        has_before = self.photos.has_visible_type(
+            order.id,
+            PhotoType.BEFORE.value,
+            created_after=evidence_created_after,
         )
-        self.db.commit()
-        self.db.refresh(order)
+        has_after = self.photos.has_visible_type(
+            order.id,
+            PhotoType.AFTER.value,
+            created_after=evidence_created_after,
+        )
+        signature_data = decode_signature_data_url(customer_signature_data_url)
+        if not has_before or not has_after or signature_data is None:
+            raise ValueError("completion_evidence_required")
+
+        storage = get_storage_provider()
+        stored_signature = storage.save(
+            data=signature_data,
+            file_name=f"{order.id}-customer-signature.png",
+            content_type="image/png",
+        )
+        try:
+            order.work_completed_at = datetime.now(UTC)
+            order.customer_signature_storage_key = stored_signature.storage_key
+            order.customer_signature_file_url = stored_signature.file_url
+
+            was_as_requested = bool(order.as_requested)
+            next_status = (
+                OrderStatus.COMPLETED
+                if order.payment_status == PaymentStatus.PAID
+                else OrderStatus.CUSTOMER_DELIVERY_NEEDED
+            )
+            order.as_requested = False
+
+            self._change_status(
+                order,
+                next_status,
+                actor_user_id=actor_user_id,
+                title="AS 작업 완료" if was_as_requested else "작업 완료",
+                description=(
+                    "협력사가 AS 작업 완료를 처리했습니다."
+                    if was_as_requested
+                    else "협력사가 작업 완료를 처리했습니다. 자동 공개된 사진으로 고객 전달이 가능합니다."
+                ),
+            )
+            self.db.commit()
+            self.db.refresh(order)
+        except Exception:
+            self.db.rollback()
+            with suppress(Exception):
+                storage.delete(stored_signature.storage_key)
+            raise
+        if settings.automation_send_customer_balance_due and should_send_customer_balance_due(order):
+            self._send_automation_message(
+                order,
+                MessageSendRequest(
+                    order_id=order.id,
+                    message_type=MessageType.CUSTOMER_BALANCE_DUE,
+                    recipient_type=RecipientType.CUSTOMER,
+                ),
+                actor_user_id=actor_user_id,
+            )
+            self.db.refresh(order)
         return order
 
     def add_partner_memo(
@@ -552,20 +724,26 @@ class OrderService:
         memo: str,
         actor_user_id: str,
     ) -> Order:
-        """AS(사후관리) 요청. 주문에 AS 플래그+메모를 세팅하고 배정 협력사에게 안내를 발송한다.
-
-        협력사 링크에도 AS 요청/메모가 노출된다(PartnerJobRead.as_requested/as_memo).
-        미배정이면 발송은 건너뛰고 플래그/메모/타임라인만 남긴다(추후 배정 시 링크로 확인).
-        """
         memo = (memo or "").strip()
         if not memo:
             raise ValueError("as_memo_required")
         order = self.orders.get(order_id)
         if order is None or order.deleted_at is not None:
             raise ValueError("order_not_found")
+        if not order.partner_id:
+            raise ValueError("partner_not_assigned")
+        if order.status not in AS_REQUEST_ALLOWED_STATUSES:
+            raise ValueError("invalid_as_request_status")
 
         order.as_requested = True
         order.as_memo = memo
+        self._change_status(
+            order,
+            OrderStatus.CUSTOMER_CHECK_NEEDED,
+            actor_user_id=actor_user_id,
+            title="AS 확인 필요",
+            description="운영자가 AS 요청 상태로 변경했습니다.",
+        )
         self.timeline.record(
             order_id=order.id,
             actor_user_id=actor_user_id,
@@ -575,28 +753,38 @@ class OrderService:
         )
         self.db.flush()
 
-        # 배정된 협력사가 있으면 AS 안내를 발송한다(발송 실패는 message_logs에 기록되고 예외를 던지지 않음).
+        message_service = MessageService(self.db)
+        message_committed = False
         if order.partner_id:
-            # 지연 import: 순환참조 방지.
-            from app.services.messages import MessageService
-
-            # AS 안내는 자유서식(메모)이라 사전등록 카카오 템플릿에 맞지 않으므로 LMS로 발송한다.
             try:
-                MessageService(self.db).send(
+                message_service.send(
                     MessageSendRequest(
                         order_id=order.id,
                         message_type=MessageType.PARTNER_AS_REQUEST,
                         recipient_type=RecipientType.PARTNER,
-                        channel=MessageChannel.LMS,
                         memo=memo,
                     ),
                     actor_user_id=actor_user_id,
                 )
-                # MessageService.send가 내부에서 commit한다(플래그+타임라인+메시지 로그 원자 커밋).
+                message_committed = True
             except ValueError:
-                # 수신자 해석 실패(예: 댕글링 협력사) 등 발송 자체가 불가해도 AS 플래그/타임라인은 남긴다.
-                self.db.commit()
-        else:
+                pass
+
+        try:
+            message_service.send(
+                MessageSendRequest(
+                    order_id=order.id,
+                    message_type=MessageType.CUSTOMER_AS_NOTICE,
+                    recipient_type=RecipientType.CUSTOMER,
+                    memo=memo,
+                ),
+                actor_user_id=actor_user_id,
+            )
+            message_committed = True
+        except ValueError:
+            pass
+
+        if not message_committed:
             self.db.commit()
 
         self.db.refresh(order)
@@ -680,6 +868,14 @@ class OrderService:
             metadata={"from": old_status, "to": next_status},
         )
 
+    def _completion_evidence_created_after(self, order: Order) -> datetime | None:
+        if not order.as_requested:
+            return None
+        return self.timelines.latest_created_at(
+            order_id=order.id,
+            event_type=TimelineEventType.AS_REQUESTED,
+        )
+
 
 def to_admin_group_dto(group: OrderGroup, *, lines: list[Order] | None = None) -> AdminOrderGroupRead:
     return AdminOrderGroupRead(
@@ -733,6 +929,9 @@ def to_admin_order_dto(
         special_request=order.special_request,
         as_requested=bool(order.as_requested),
         as_memo=order.as_memo,
+        work_started_at=order.work_started_at,
+        work_completed_at=order.work_completed_at,
+        customer_signature_file_url=order.customer_signature_file_url,
         source_channel=source_channel,
         customer_name=customer_name or "",
         customer_phone=customer_phone or "",
@@ -821,6 +1020,7 @@ def to_partner_job_dto(
     group: OrderGroup | None = None,
     photos: list[OrderPhoto] | None = None,
     memos: list[OrderTimeline] | None = None,
+    as_requested_at: datetime | None = None,
 ) -> PartnerJobRead:
     customer_name = group.customer_name if group else order.customer_name
     customer_phone = group.customer_phone if group else order.customer_phone
@@ -837,6 +1037,10 @@ def to_partner_job_dto(
         special_request=order.special_request,
         as_requested=bool(order.as_requested),
         as_memo=order.as_memo,
+        as_requested_at=as_requested_at,
+        work_started_at=order.work_started_at,
+        work_completed_at=order.work_completed_at,
+        has_recorded_customer_signature=bool(order.customer_signature_file_url),
         customer_name=customer_name or "",
         customer_phone=customer_phone or "",
         customer_address=customer_address or "",
@@ -860,6 +1064,7 @@ def to_partner_photo_dto(photo: OrderPhoto) -> PartnerPhotoRead:
         file_size=photo.file_size,
         content_type=photo.content_type,
         is_customer_visible=photo.is_customer_visible,
+        created_at=photo.created_at,
     )
 
 
@@ -953,6 +1158,27 @@ def collect_schedule_changes(order: Order, changes: dict) -> dict[str, dict[str,
         if before != after:
             schedule_changes[field] = {"from": before, "to": after}
     return schedule_changes
+
+
+def decode_signature_data_url(data_url: str) -> bytes | None:
+    text = (data_url or "").strip()
+    if not text.startswith(SIGNATURE_DATA_URL_PREFIX):
+        return None
+    try:
+        data = base64.b64decode(text.removeprefix(SIGNATURE_DATA_URL_PREFIX), validate=True)
+    except binascii.Error:
+        return None
+    if (
+        not data
+        or len(data) > settings.photo_max_upload_bytes
+        or not data.startswith(PNG_SIGNATURE)
+    ):
+        return None
+    return data
+
+
+def should_send_customer_balance_due(order: Order) -> bool:
+    return has_customer_balance_due(order)
 
 
 def to_timeline_value(value) -> object | None:

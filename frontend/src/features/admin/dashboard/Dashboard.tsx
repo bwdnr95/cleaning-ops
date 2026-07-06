@@ -217,8 +217,8 @@ export function Dashboard({ onOpenOrder, onNav, onCreateOrder, userName = undefi
                       </div>
                       <div style={{ fontSize: 11, color: 'var(--text-tertiary)', marginTop: 1 }}>{p.count} · {p.time}</div>
                     </div>
-                    {p.tone === 'wait' && <Badge tone="warn" dot>검수대기</Badge>}
-                    {p.tone === 'approved' && <Badge tone="success" dot>승인</Badge>}
+                    {p.tone === 'wait' && <Badge tone="warn" dot>비공개</Badge>}
+                    {p.tone === 'approved' && <Badge tone="success" dot>공개</Badge>}
                     {p.tone === 'partial' && <Badge tone="info" dot>업로드중</Badge>}
                   </button>
                 ))}
@@ -327,7 +327,7 @@ function DashMessage({ text, tone = 'muted' }) {
 function toKpis(summary: DashboardSummary) {
   return withKpiNavigation([
     { label: '오늘 작업 예정', value: summary.today_jobs, delta: '실시간', trend: [0, 0, 0, 0, summary.today_jobs || 0], tone: 'info' },
-    { label: '내일 안내 대상', value: summary.tomorrow_notice_targets, delta: '실시간', trend: [0, 0, 0, 0, summary.tomorrow_notice_targets || 0], tone: 'warn' },
+    { label: '내일 작업 예정', value: summary.tomorrow_notice_targets, delta: '실시간', trend: [0, 0, 0, 0, summary.tomorrow_notice_targets || 0], tone: 'warn' },
     { label: '협력사 확인 필요', value: summary.partner_pending, delta: '실시간', trend: [0, 0, 0, 0, summary.partner_pending || 0], tone: 'warn' },
     { label: '미정산 확인', value: summary.unpaid_check_needed, delta: '실시간', trend: [0, 0, 0, 0, summary.unpaid_check_needed || 0], tone: 'danger' },
     { label: '고객 확인 필요', value: summary.customer_check_needed, delta: '실시간', trend: [0, 0, 0, 0, summary.customer_check_needed || 0], tone: 'purple' },
@@ -356,14 +356,14 @@ function withKpiNavigation(items) {
   }));
 }
 
-// 업무 큐 — 실행 대상 5종만 노출(사진검수·결제확인·고객전달은 카드 재정의로 제거).
 function toQueues(summary: DashboardSummary) {
   return [
     { key: 'partner_pending', title: '협력사 확인 필요', count: summary.partner_pending, tone: 'warn', icon: 'clock', desc: '배정 후 확인 대기', targetPage: 'orders', ordersTab: 'partner_pending', datePreset: 'all' },
+    { key: 'customer_delivery', title: '고객 전달 필요', count: summary.customer_delivery_needed, tone: 'success', icon: 'image', desc: '사진 링크/잔금 안내', targetPage: 'orders', ordersTab: 'work_done', datePreset: 'all' },
     { key: 'unpaid_check', title: '미정산 확인', count: summary.unpaid_check_needed, tone: 'danger', icon: 'creditCard', desc: '작업완료·고객 미수', targetPage: 'orders', ordersTab: 'unpaid_check', datePreset: 'all' },
     { key: 'customer_check', title: '고객 확인 필요', count: summary.customer_check_needed, tone: 'purple', icon: 'user', desc: '고객 확인/컴플레인', targetPage: 'orders', ordersTab: 'customer_check', datePreset: 'all' },
     { key: 'today_work', title: '오늘 작업 예정', count: summary.today_jobs, tone: 'info', icon: 'truck', desc: '오늘 방문 예정 전체', targetPage: 'orders', ordersTab: 'today', datePreset: 'today' },
-    { key: 'tomorrow_notify', title: '내일 안내 발송 필요', count: summary.tomorrow_notice_targets, tone: 'warn', icon: 'send', desc: '내일 작업 예정', targetPage: 'orders', ordersTab: 'tomorrow_notice', datePreset: 'tomorrow' },
+    { key: 'tomorrow_notify', title: '내일 작업 예정', count: summary.tomorrow_notice_targets, tone: 'warn', icon: 'send', desc: '전날 안내 대상 확인', targetPage: 'orders', ordersTab: 'tomorrow_notice', datePreset: 'tomorrow' },
   ];
 }
 

@@ -257,6 +257,29 @@ export interface MessageProvider {
 - 테스트가 핵심 업무 흐름을 덮고 있는가?
 - 디자인 토큰과 화면 밀도가 핸드오프 기준을 따르는가?
 
+## ULW Approved Review Loop
+
+ULW/ulw-plan 기반 작업, 다중 모듈 작업, 알림톡/정산/결제/권한/마이그레이션/동시성처럼 운영 리스크가 큰 작업, 또는 사용자가 approved loop를 요구한 작업은 완료 직후 다음 승인 루프를 반드시 실행한다.
+
+1. `codex-collab` CTO 리뷰
+   - 리뷰어 프롬프트에는 “까다로운 CTO” 페르소나, 고객사 워크플로우, 성공 기준, 실행한 검증, 전체 diff 요약을 포함한다.
+   - 리뷰 결과는 `APPROVED` 또는 `CHANGES`로 판정하게 한다.
+   - `APPROVED`가 아니면 모든 지적사항을 실제 코드/테스트/문서에 반영하고 검증을 다시 실행한다.
+
+2. `fable-mode` 적대적 리뷰
+   - 우선 현재 턴에서 사용자가 지정한 `fable-mode` skill 파일을 읽어 하네스를 적용한다. 이 워크스테이션의 기본 경로는 `C:/Users/A/Desktop/TONO OPERATION/tono-operation/.claude/skills/fable-mode/SKILL.md`다.
+   - 지정 파일을 읽을 수 없는 환경에서는 아래 fable-style 체크리스트(회의적 기본값, blast-radius 축소, file:line 재현경로, CoVe, 테스트/실행 증거)를 동일하게 적용하고, fallback 사용 사실을 최종 리뷰 결과에 기록한다.
+   - 기본값은 회의적으로 보고, 더 낮은 blast-radius framing이 있는지 먼저 검토한다.
+   - 모든 finding은 `file:line`, 재현경로(입력 -> 잘못된 출력), 심각도, confidence를 포함한다.
+   - CoVe 자기비판을 수행해 버티지 못하는 finding은 폐기한다.
+   - 메시지 발송, 결제/정산, 권한, 동시성, 트랜잭션처럼 미묘한 정확성은 추론만으로 승인하지 않고 테스트나 실제 실행 증거로 결착한다.
+
+3. 승인 루프 종료 조건
+   - 두 리뷰가 모두 무조건 `APPROVED`일 때만 작업을 완료로 보고한다.
+   - 최대 3회까지 수정 -> 검증 -> 재리뷰를 반복한다.
+   - 3회 안에 승인되지 않거나 `codex-collab`를 실제로 실행할 수 없으면 승인으로 간주하지 말고, 남은 리스크와 차단 사유를 사용자에게 drift한다. `fable-mode` 파일을 읽을 수 없을 때는 위 fallback 체크리스트를 실행하되, fallback 자체가 리스크라고 판단되면 drift한다.
+   - 최종 답변에는 각 리뷰의 판정, 수정 반영 여부, 재검증 명령을 함께 남긴다.
+
 ## Agent Workflow
 
 에이전트는 작업 시 다음 순서를 따른다.
@@ -268,6 +291,7 @@ export interface MessageProvider {
 5. 관련 테스트를 추가하거나 갱신한다.
 6. 가능한 검증 명령을 실행한다.
 7. 자체 리뷰로 권한, DTO, 타임라인, 테스트 누락을 확인한다.
-8. 최종 답변에는 변경 사항과 실행한 검증을 간단히 남긴다.
+8. 해당하면 `ULW Approved Review Loop`를 통과한다.
+9. 최종 답변에는 변경 사항과 실행한 검증을 간단히 남긴다.
 
 새 기능 요청을 받을 때 에이전트는 “돌아가는 화면”만 보지 말고, 실제 운영 흐름이 끊기지 않는지 기준으로 판단한다.

@@ -100,7 +100,7 @@ export function RecurringOrdersList() {
             background: 'var(--surface)',
           }}
         >
-          <table style={{ width: '100%', minWidth: 640, fontSize: 13, borderCollapse: 'collapse' }}>
+          <table style={{ width: '100%', minWidth: 720, fontSize: 13, borderCollapse: 'collapse' }}>
             <thead>
               <tr>
                 <th style={headStyle}>방문일</th>
@@ -108,7 +108,8 @@ export function RecurringOrdersList() {
                 <th style={headStyle}>서비스</th>
                 <th style={headStyle}>담당</th>
                 <th style={headStyle}>상태</th>
-                <th style={headStyle}>금액</th>
+                <th style={headStyle}>고객 금액</th>
+                <th style={headStyle}>도급가</th>
               </tr>
             </thead>
             <tbody>
@@ -120,6 +121,7 @@ export function RecurringOrdersList() {
                   <td style={cellStyle}>{o.team_name || '미배정'}</td>
                   <td style={cellStyle}>{o.status}</td>
                   <td style={cellStyle}>{formatAmount(o.total_amount ?? null)}</td>
+                  <td style={cellStyle}>{formatAmount(o.partner_payment_amount ?? null)}</td>
                 </tr>
               ))}
             </tbody>

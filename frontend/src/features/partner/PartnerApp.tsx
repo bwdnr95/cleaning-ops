@@ -1,4 +1,5 @@
 import React from 'react';
+import { BrandLogo } from '../../components/common/BrandLogo';
 import { Icon } from '../../components/common/ui';
 import { useAuth } from '../../store/authStore';
 import { PartnerJobDetail } from './PartnerJobDetail';
@@ -19,7 +20,13 @@ export function PartnerApp() {
 
   return (
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column', background: '#f4f6f8', overflow: 'hidden' }}>
-      {showShell && <PartnerTopBar title={title} subtitle={tab === 'account' ? '내 정보' : '오늘의 현장'} />}
+      {showShell && (
+        <PartnerTopBar
+          title={title}
+          subtitle={tab === 'account' ? '내 정보' : '오늘의 현장'}
+          onLogout={() => void auth.logout('partner')}
+        />
+      )}
 
       <div style={{ flex: 1, minHeight: 0 }}>
         {tab === 'jobs' ? (
@@ -51,7 +58,7 @@ export function PartnerApp() {
   );
 }
 
-function PartnerTopBar({ title, subtitle }) {
+function PartnerTopBar({ title, subtitle, onLogout }) {
   const initial = (title || '협').charAt(0) || '협';
   return (
     <header
@@ -66,11 +73,9 @@ function PartnerTopBar({ title, subtitle }) {
         gap: 11,
       }}
     >
-      <span style={{ width: 36, height: 36, borderRadius: 11, background: 'var(--brand)', color: '#fff', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-        <Icon name="truck" size={19} />
-      </span>
+      <BrandLogo size="sm" />
       <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ fontSize: 10, fontWeight: 800, letterSpacing: '0.1em', color: 'var(--brand)' }}>CLEAN OPS · 협력사</div>
+        <div style={{ fontSize: 10, fontWeight: 800, letterSpacing: '0.06em', color: 'var(--brand)' }}>클린잡 · 협력사 작업센터</div>
         <div style={{ fontSize: 15.5, fontWeight: 800, color: 'var(--text)', letterSpacing: '-0.01em', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
           {title} <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--text-tertiary)' }}>· {subtitle}</span>
         </div>
@@ -78,6 +83,30 @@ function PartnerTopBar({ title, subtitle }) {
       <span style={{ width: 36, height: 36, borderRadius: '50%', background: 'var(--brand-bg)', color: 'var(--brand)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 15, fontWeight: 800, flexShrink: 0 }}>
         {initial}
       </span>
+      <button
+        type="button"
+        data-testid="partner-topbar-logout"
+        aria-label="로그아웃"
+        onClick={onLogout}
+        style={{
+          height: 34,
+          padding: '0 9px',
+          border: '1px solid var(--danger-border)',
+          borderRadius: 9,
+          background: 'var(--surface)',
+          color: 'var(--danger-fg)',
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: 4,
+          fontSize: 11.5,
+          fontWeight: 800,
+          flexShrink: 0,
+          cursor: 'pointer',
+        }}
+      >
+        <Icon name="logOut" size={13} />
+        로그아웃
+      </button>
     </header>
   );
 }

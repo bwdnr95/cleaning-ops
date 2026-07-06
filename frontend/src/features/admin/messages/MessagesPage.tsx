@@ -15,6 +15,10 @@ const MESSAGE_TYPE_OPTIONS = [
   { value: 'partner_assignment', label: '협력사배정' },
   { value: 'customer_photo_ready', label: '사진전달' },
   { value: 'customer_balance_due', label: '잔금안내' },
+  { value: 'customer_quote', label: '견적서' },
+  { value: 'partner_customer_info', label: '협력사 고객정보' },
+  { value: 'partner_as_request', label: '협력사 AS' },
+  { value: 'customer_as_notice', label: '고객 AS' },
 ];
 
 const STATUS_OPTIONS = [
@@ -453,7 +457,7 @@ function toStats(messages) {
   return {
     sent: messages.filter((message) => ['sent', 'delivered'].includes(message.status)).length,
     failed: messages.filter((message) => ['failed', 'delivery_failed'].includes(message.status)).length,
-    customerLinks: messages.filter((message) => ['customer_schedule_confirmed', 'customer_day_before', 'customer_photo_ready', 'customer_balance_due'].includes(message.message_type)).length,
+    customerLinks: messages.filter((message) => ['customer_schedule_confirmed', 'customer_day_before', 'customer_photo_ready', 'customer_balance_due', 'customer_as_notice'].includes(message.message_type)).length,
   };
 }
 
@@ -522,6 +526,10 @@ function messageTypeLabel(type) {
   if (type === 'partner_assignment') return '협력사 배정';
   if (type === 'customer_photo_ready') return '사진 전달';
   if (type === 'customer_balance_due') return '잔금 안내';
+  if (type === 'customer_quote') return '견적서';
+  if (type === 'partner_customer_info') return '협력사 고객정보';
+  if (type === 'partner_as_request') return '협력사 AS 요청';
+  if (type === 'customer_as_notice') return '고객 AS 안내';
   return type;
 }
 
@@ -568,7 +576,7 @@ function providerErrorText(message) {
     missing_recipient: '수신번호 없음',
     solapi_missing_credentials: 'SOL API 인증 설정 누락',
     solapi_missing_sender_number: 'SOL API 발신번호 누락',
-    solapi_missing_kakao_pf_id: 'SOL API 카카오 채널 ID 누락',
+    solapi_missing_kakao_channel_id: 'SOL API 카카오 채널 ID 누락',
     solapi_missing_kakao_template_id: '알림톡 승인 템플릿 ID 누락',
     solapi_http_error: 'SOL API HTTP 오류',
     solapi_request_failed: 'SOL API 요청 실패',
@@ -585,7 +593,7 @@ function settingsWarningText(code) {
     solapi_missing_credentials: 'SOL API 인증 설정 필요',
     solapi_missing_sender_number: '발신번호 설정 필요',
     solapi_missing_webhook_secret: 'Webhook secret 설정 필요',
-    solapi_missing_kakao_pf_id: '카카오 채널 ID 설정 필요',
+    solapi_missing_kakao_channel_id: '카카오 채널 ID 설정 필요',
     solapi_missing_kakao_template_ids: '알림톡 템플릿 ID 설정 필요',
     unsupported_message_provider: 'Provider 설정 확인 필요',
   };
@@ -614,7 +622,9 @@ function toActionErrorMessage(error) {
     order_not_found: '주문을 찾지 못했습니다.',
     partner_not_assigned: '협력사 배정 후 재발송할 수 있습니다.',
     partner_not_found: '배정된 협력사를 찾지 못했습니다.',
-    no_customer_visible_photos: '고객 공개 승인된 사진이 있어야 재발송할 수 있습니다.',
+    no_customer_visible_photos: '고객에게 공개된 사진이 있어야 재발송할 수 있습니다.',
+    customer_balance_not_due: '미수금이 있는 주문에만 잔금 안내를 재발송할 수 있습니다.',
+    as_request_required: 'AS 요청 처리 후에만 AS 안내를 재발송할 수 있습니다.',
     invalid_recipient_type: '수신자 유형이 올바르지 않습니다.',
   };
   return map[detail] || '재발송을 처리하지 못했습니다.';

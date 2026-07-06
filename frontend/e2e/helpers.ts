@@ -69,21 +69,41 @@ export async function partnerUploadPhoto(
     await page.getByTestId(`partner-job-row-${orderId}`).click();
     await expect(page.getByTestId('partner-job-detail-page')).toBeVisible();
 
+    await page.getByTestId('partner-before-photo-input').setInputFiles({
+      name: 'before-e2e.png',
+      mimeType: 'image/png',
+      buffer: ONE_PIXEL_PNG,
+    });
+    await expect(page.getByText('비포 사진 1장이 업로드되었습니다.')).toBeVisible({ timeout: 5_000 });
+
     const startButton = page.getByTestId('partner-start-job');
     if ((await startButton.count()) > 0) {
       await startButton.click();
       await expect(page.getByText('작업 중')).toBeVisible();
     }
 
-    await page.getByTestId(`partner-${photoType}-photo-input`).setInputFiles({
-      name: `${photoType}-e2e.png`,
-      mimeType: 'image/png',
-      buffer: ONE_PIXEL_PNG,
-    });
+    if (photoType !== 'before') {
+      await page.getByTestId(`partner-${photoType}-photo-input`).setInputFiles({
+        name: `${photoType}-e2e.png`,
+        mimeType: 'image/png',
+        buffer: ONE_PIXEL_PNG,
+      });
+    }
     const labelMap = { before: '비포', after: '애프터', etc: '기타' } as const;
-    await expect(page.getByText(`${labelMap[photoType]} 사진 1장이 업로드되었습니다.`)).toBeVisible({ timeout: 5_000 });
+    if (photoType !== 'before') {
+      await expect(page.getByText(`${labelMap[photoType]} 사진 1장이 업로드되었습니다.`)).toBeVisible({ timeout: 5_000 });
+    }
 
     await expect(page.getByTestId('partner-complete-job')).toBeVisible();
+    if (photoType !== 'after') {
+      await page.getByTestId('partner-after-photo-input').setInputFiles({
+        name: 'after-e2e.png',
+        mimeType: 'image/png',
+        buffer: ONE_PIXEL_PNG,
+      });
+      await expect(page.getByText('애프터 사진 1장이 업로드되었습니다.')).toBeVisible({ timeout: 5_000 });
+    }
+    await drawCustomerSignature(page);
     await page.getByTestId('partner-complete-job').click();
     await expect(page.getByTestId('partner-status-locked')).toContainText('작업 완료 처리됨', { timeout: 10_000 });
   } finally {
@@ -209,4 +229,27 @@ async function checkedJson<T>(response: APIResponse) {
 
 function authHeaders(accessToken: string) {
   return { Authorization: `Bearer ${accessToken}` };
+}
+
+async function drawCustomerSignature(page: Page) {
+  const canvas = page.getByTestId('partner-signature-canvas');
+  await expect(canvas).toBeVisible();
+  await canvas.evaluate((node) => {
+    const rect = node.getBoundingClientRect();
+    const dispatch = (type: string, x: number, y: number, buttons: number) => {
+      node.dispatchEvent(new MouseEvent(type, {
+        bubbles: true,
+        cancelable: true,
+        button: 0,
+        buttons,
+        clientX: rect.left + x,
+        clientY: rect.top + y,
+      }));
+    };
+    dispatch('mousedown', 24, 48, 1);
+    dispatch('mousemove', 88, 58, 1);
+    dispatch('mousemove', 156, 42, 1);
+    dispatch('mouseup', 156, 42, 0);
+  });
+  await expect(page.getByText('서명이 입력되었습니다.')).toBeVisible();
 }

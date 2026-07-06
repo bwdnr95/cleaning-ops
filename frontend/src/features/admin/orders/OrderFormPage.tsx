@@ -17,6 +17,7 @@ import { Icon } from '../../../components/common/ui';
 import { ORDER_STATUS_OPTIONS, ORDER_STATUSES, orderWorkflowStatusValue } from '../../../domain/orderStatus';
 import { PARTNER_PAYMENT_STATUSES, PAYMENT_STATUSES } from '../../../domain/paymentStatus';
 import { getAppTodayValue } from '../../../domain/time';
+import { SourceChannelSelect } from './SourceChannelSelect';
 import { useOrderFormDraft } from './useOrderFormDraft';
 
 export function OrderFormPage({ mode = 'create', orderId = null, duplicateFromOrderId = null, onCancel, onSaved }) {
@@ -244,7 +245,7 @@ export function OrderFormPage({ mode = 'create', orderId = null, duplicateFromOr
       const updated = await sendOrderAsRequest(orderId, memo);
       setAsRequested(Boolean(updated.as_requested));
       setAsMemo(updated.as_memo || memo);
-      setNotice('AS 요청을 협력사에게 전송했습니다. 협력사 링크에도 표시됩니다.');
+      setNotice('AS 요청을 협력사와 고객에게 전송했습니다. 협력사 링크에도 표시됩니다.');
     } catch (requestError) {
       setError(requestError?.message || 'AS 요청 전송에 실패했습니다.');
     } finally {
@@ -298,7 +299,12 @@ export function OrderFormPage({ mode = 'create', orderId = null, duplicateFromOr
               <FieldGrid>
                 <TextField testId="order-customer-name" label="고객명" required value={form.customer_name} onChange={(value) => setGroupField('customer_name', value)} />
                 <TextField testId="order-customer-phone" label="연락처" required value={form.customer_phone} onChange={(value) => setGroupField('customer_phone', value)} placeholder="010-0000-0000" />
-                <TextField label="유입 경로" value={form.source_channel} onChange={(value) => setGroupField('source_channel', value)} />
+                <Field label="유입 경로">
+                  <SourceChannelSelect
+                    value={form.source_channel}
+                    onChange={(value) => setGroupField('source_channel', value)}
+                  />
+                </Field>
                 <div style={{ gridColumn: 'span 2' }}>
                   <AddressInput
                     baseAddress={form.customer_address}
@@ -550,7 +556,7 @@ function LineEditor({
                     <Icon name="send" size={12} /> {asBusy ? '전송 중' : (asRequested ? 'AS 재전송' : 'AS 전송')}
                   </button>
                   <span style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>
-                    배정된 협력사에게 알림을 보내고, 협력사 링크에도 AS 요청이 표시됩니다.
+                    배정된 협력사와 고객에게 알림을 보내고, 협력사 링크에도 AS 요청이 표시됩니다.
                   </span>
                 </div>
               </>

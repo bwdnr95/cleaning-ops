@@ -31,6 +31,7 @@ export interface RecurringContractInput {
   special_request?: string | null;
   requested_time?: string | null;
   billing_mode?: 'per_visit' | 'monthly';
+  partner_billing_mode?: 'per_visit' | 'monthly';
   total_amount?: number | null;
   discount_amount?: number;
   deposit_amount?: number | null;

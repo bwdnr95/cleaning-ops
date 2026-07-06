@@ -33,6 +33,13 @@ class Settings(BaseSettings):
     s3_secret_access_key: str = ""
     s3_public_base_url: str = ""
     photo_max_upload_bytes: int = 10 * 1024 * 1024
+    automation_send_partner_assignment: bool = False
+    automation_send_schedule_confirmed: bool = False
+    automation_send_customer_photo_ready: bool = False
+    automation_send_customer_balance_due: bool = True
+    automation_day_before_notice_scheduler_enabled: bool = False
+    automation_day_before_notice_hour: int = 10
+    automation_day_before_notice_minute: int = 0
     message_provider: str = "mock"
     solapi_api_key: str = ""
     solapi_api_secret: str = ""
@@ -40,14 +47,16 @@ class Settings(BaseSettings):
     solapi_send_url: str = "https://api.solapi.com/messages/v4/send-many/detail"
     solapi_timeout_seconds: float = 10.0
     solapi_webhook_secret: str = ""
-    solapi_kakao_pf_id: str = ""
+    solapi_kakao_channel_id: str = ""
     solapi_kakao_template_customer_schedule_confirmed: str = ""
     solapi_kakao_template_customer_day_before: str = ""
-    solapi_kakao_template_partner_assignment: str = ""
+    solapi_kakao_template_partner_job_assignment: str = ""
     solapi_kakao_template_customer_photo_ready: str = ""
     solapi_kakao_template_customer_balance_due: str = ""
     solapi_kakao_template_customer_quote: str = ""
     solapi_kakao_template_partner_customer_info: str = ""
+    solapi_kakao_template_partner_as_request: str = ""
+    solapi_kakao_template_customer_as_notice: str = ""
     solapi_alimtalk_fallback_sms: bool = True
     sentry_dsn: str = ""
     sentry_environment: str = ""
@@ -66,6 +75,10 @@ class Settings(BaseSettings):
             ZoneInfo(self.business_timezone)
         except ZoneInfoNotFoundError as exc:
             raise ValueError(f"unsupported business_timezone: {self.business_timezone}") from exc
+        if not 0 <= self.automation_day_before_notice_hour <= 23:
+            raise ValueError("automation_day_before_notice_hour must be between 0 and 23")
+        if not 0 <= self.automation_day_before_notice_minute <= 59:
+            raise ValueError("automation_day_before_notice_minute must be between 0 and 59")
 
         if self.environment == "production":
             if self.secret_key == "change-me-in-production" or len(self.secret_key) < 32:

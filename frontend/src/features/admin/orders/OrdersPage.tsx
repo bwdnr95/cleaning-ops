@@ -3,7 +3,7 @@ import { DatePicker } from '../../../components/common/DatePicker';
 import { PaginationBar } from '../../../components/common/Pagination';
 import { Avatar, Icon } from '../../../components/common/ui';
 import { bulkDeleteAdminOrders, exportAdminOrders, listAdminOrdersPage, listBrokers, listPartners, updateAdminOrder, type AdminOrderPageParams, type AdminOrderSort } from '../../../api/admin';
-import { sendAdminMessage } from '../../../api/messages';
+import { sendAdminMessage, type AdminMessageType } from '../../../api/messages';
 import { useApiResource } from '../../../api/useApiResource';
 import { ORDER_STATUS_OPTIONS, orderStatusLabel, orderWorkflowStatusValue } from '../../../domain/orderStatus';
 import { formatQuantity } from '../../../domain/format';
@@ -98,8 +98,8 @@ function SimplePill({ kind, value }) {
   const photo = {
     none:     null,
     partial:  { label: '진행', color: '#3b82f6' },
-    wait:     { label: '검수', color: '#f59e0b' },
-    approved: { label: '승인', color: '#10b981' },
+    wait:     { label: '비공개', color: '#f59e0b' },
+    approved: { label: '공개', color: '#10b981' },
   };
   const deliver = {
     pending:   { label: '대기', color: '#94a3b8' },
@@ -206,7 +206,11 @@ const ORDER_STATUS_TAB_OPTIONS = [
   { key: 'cancel', status: '취소', label: '취소' },
 ];
 const ORDER_STATUS_TAB_BY_KEY = new Map(ORDER_STATUS_TAB_OPTIONS.map((item) => [item.key, item]));
-const BULK_MESSAGE_OPTIONS = [
+const BULK_MESSAGE_OPTIONS: ReadonlyArray<{
+  readonly value: AdminMessageType;
+  readonly label: string;
+  readonly recipient: 'customer' | 'partner';
+}> = [
   { value: 'customer_schedule_confirmed', label: '고객 일정확정 안내', recipient: 'customer' },
   { value: 'customer_day_before', label: '고객 전날 안내', recipient: 'customer' },
   { value: 'partner_assignment', label: '협력사 배정 안내', recipient: 'partner' },
@@ -257,7 +261,7 @@ export function OrdersPage({ onOpenOrder, onCreateOrder, onEditOrder, initialTab
   const [bulkAction, setBulkAction] = React.useState(null);
   const [bulkStatus, setBulkStatus] = React.useState('작업예정');
   const [bulkPartnerId, setBulkPartnerId] = React.useState('');
-  const [bulkMessageType, setBulkMessageType] = React.useState('customer_schedule_confirmed');
+  const [bulkMessageType, setBulkMessageType] = React.useState<AdminMessageType>('customer_schedule_confirmed');
   const [bulkPaymentStatus, setBulkPaymentStatus] = React.useState('paid');
   const [bulkReceiptType, setBulkReceiptType] = React.useState('cash_receipt');
   const [bulkReceiptStatus, setBulkReceiptStatus] = React.useState('issued');

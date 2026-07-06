@@ -1,3 +1,5 @@
+from datetime import date
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
@@ -7,6 +9,7 @@ from app.schemas.message import (
     MessagePreviewRead,
     MessageSendRequest,
     MessageSettingsRead,
+    DayBeforeNoticeRunRead,
 )
 from app.services.messages import MessageService
 
@@ -29,6 +32,18 @@ def get_message_settings(
     return MessageService(db).settings_status()
 
 
+@router.post("/day-before/run", response_model=DayBeforeNoticeRunRead)
+def run_day_before_notices(
+    target_date: date | None = None,
+    db: Session = Depends(get_session),
+    user: CurrentUser = Depends(require_admin),
+) -> DayBeforeNoticeRunRead:
+    return MessageService(db).send_day_before_notices(
+        target_date=target_date,
+        actor_user_id=user.id,
+    )
+
+
 @router.post("/send", response_model=MessageLogRead)
 def send_message(
     payload: MessageSendRequest,
@@ -42,6 +57,10 @@ def send_message(
             raise HTTPException(status_code=404, detail="order_not_found") from exc
         if str(exc) == "no_customer_visible_photos":
             raise HTTPException(status_code=400, detail="no_customer_visible_photos") from exc
+        if str(exc) == "customer_balance_not_due":
+            raise HTTPException(status_code=400, detail="customer_balance_not_due") from exc
+        if str(exc) == "as_request_required":
+            raise HTTPException(status_code=400, detail="as_request_required") from exc
         if str(exc) in {"partner_not_assigned", "partner_not_found", "invalid_recipient_type"}:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         raise
@@ -60,6 +79,10 @@ def preview_message(
             raise HTTPException(status_code=404, detail="order_not_found") from exc
         if str(exc) == "no_customer_visible_photos":
             raise HTTPException(status_code=400, detail="no_customer_visible_photos") from exc
+        if str(exc) == "customer_balance_not_due":
+            raise HTTPException(status_code=400, detail="customer_balance_not_due") from exc
+        if str(exc) == "as_request_required":
+            raise HTTPException(status_code=400, detail="as_request_required") from exc
         if str(exc) in {"partner_not_assigned", "partner_not_found", "invalid_recipient_type"}:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         raise

@@ -26,8 +26,6 @@ test('partner uploads job photos and customer sees auto-published photos except 
   await expect(partnerPage.getByText('Internal payment memo')).toHaveCount(0);
   await expect(partnerPage.getByText('010-8899-7766')).toBeVisible();
 
-  await partnerPage.getByTestId('partner-start-job').click();
-  await expect(partnerPage.getByText('작업 중')).toBeVisible();
   await partnerPage.getByTestId('partner-before-photo-input').setInputFiles([
     {
       name: 'before-partner-r2.png',
@@ -43,12 +41,15 @@ test('partner uploads job photos and customer sees auto-published photos except 
   await expect(partnerPage.getByText('비포 사진 2장이 업로드되었습니다.')).toBeVisible();
   await expect(partnerPage.getByRole('img', { name: 'before-partner-r2.png' })).toBeVisible();
   await expect(partnerPage.getByRole('img', { name: 'before-extra-partner-r2.png' })).toBeVisible();
+  await partnerPage.getByTestId('partner-start-job').click();
+  await expect(partnerPage.getByText('작업 중')).toBeVisible();
   await partnerPage.getByTestId('partner-after-photo-input').setInputFiles({
     name: 'after-partner-r2.png',
     mimeType: 'image/png',
     buffer: ONE_PIXEL_PNG,
   });
   await expect(partnerPage.getByRole('img', { name: 'after-partner-r2.png' })).toBeVisible();
+  await drawCustomerSignature(partnerPage);
   await partnerPage.getByTestId('partner-complete-job').click();
   await expect(partnerPage.getByTestId('partner-status-locked')).toContainText('작업 완료 처리됨');
   await expect(partnerPage.getByTestId('partner-start-job')).toHaveCount(0);
@@ -179,4 +180,27 @@ function authHeaders(accessToken) {
   return {
     Authorization: `Bearer ${accessToken}`,
   };
+}
+
+async function drawCustomerSignature(page) {
+  const canvas = page.getByTestId('partner-signature-canvas');
+  await expect(canvas).toBeVisible();
+  await canvas.evaluate((node) => {
+    const rect = node.getBoundingClientRect();
+    const dispatch = (type, x, y, buttons) => {
+      node.dispatchEvent(new MouseEvent(type, {
+        bubbles: true,
+        cancelable: true,
+        button: 0,
+        buttons,
+        clientX: rect.left + x,
+        clientY: rect.top + y,
+      }));
+    };
+    dispatch('mousedown', 24, 48, 1);
+    dispatch('mousemove', 88, 58, 1);
+    dispatch('mousemove', 156, 42, 1);
+    dispatch('mouseup', 156, 42, 0);
+  });
+  await expect(page.getByText('서명이 입력되었습니다.')).toBeVisible();
 }

@@ -96,11 +96,11 @@ export function PhotoReviewPage({ onOpenOrder, onNav }) {
   };
 
   if (queue.isLoading) {
-    return <ReviewState text="검수 대기 사진을 불러오는 중입니다." />;
+    return <ReviewState text="사진 공개 상태를 불러오는 중입니다." />;
   }
 
   if (queue.error) {
-    return <ReviewState text="검수 대기 사진을 불러오지 못했습니다." tone="danger" />;
+    return <ReviewState text="사진 공개 상태를 불러오지 못했습니다." tone="danger" />;
   }
 
   if (items.length === 0) {
@@ -114,7 +114,7 @@ export function PhotoReviewPage({ onOpenOrder, onNav }) {
           <span style={{ fontSize: 12.5, fontWeight: 700 }}>사진 모니터링</span>
           <Badge tone="warn">{counts.pending_link}</Badge>
           <div style={{ flex: 1 }}/>
-          <button className="btn btn--ghost btn--sm" style={{ padding: '0 4px' }} onClick={queue.reload} aria-label="사진검수 새로고침">
+          <button className="btn btn--ghost btn--sm" style={{ padding: '0 4px' }} onClick={queue.reload} aria-label="사진 공개 상태 새로고침">
             <Icon name="refresh" size={12}/>
           </button>
         </div>
@@ -228,14 +228,14 @@ export function PhotoReviewPage({ onOpenOrder, onNav }) {
             {activePhoto ? (
               <img
                 src={toApiAssetUrl(activePhoto.file_url)}
-                alt={activePhoto.file_name || '검수 사진'}
+                alt={activePhoto.file_name || '작업 사진'}
                 style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain', display: 'block' }}
               />
             ) : (
               <div style={{ textAlign: 'center', color: 'var(--text-tertiary)', fontSize: 13, lineHeight: 1.6 }}>
                 <Icon name="image" size={22}/>
                 <div style={{ marginTop: 8, fontWeight: 600, color: 'var(--text-secondary)' }}>표시할 사진이 없습니다</div>
-                <div>협력사가 업로드한 사진이 있으면 이곳에서 검수합니다.</div>
+                <div>협력사가 업로드한 사진의 공개 상태를 이곳에서 확인합니다.</div>
               </div>
             )}
           </div>
@@ -383,7 +383,7 @@ function PhotoReviewEmptyState({ onNav, onRefresh }) {
           <span style={{ fontSize: 12.5, fontWeight: 700 }}>사진 모니터링</span>
           <Badge tone="success">0</Badge>
           <div style={{ flex: 1 }}/>
-          <button className="btn btn--ghost btn--sm" style={{ padding: '0 4px' }} onClick={onRefresh} aria-label="사진검수 새로고침">
+          <button className="btn btn--ghost btn--sm" style={{ padding: '0 4px' }} onClick={onRefresh} aria-label="사진 공개 상태 새로고침">
             <Icon name="refresh" size={12}/>
           </button>
         </div>
@@ -418,7 +418,7 @@ function PhotoReviewEmptyState({ onNav, onRefresh }) {
         <div style={{ padding: 14, borderBottom: '1px solid var(--divider)' }}>
           <div style={{ padding: 10, borderRadius: 8, border: '1px solid var(--success-bg)', background: 'var(--success-bg)', color: 'var(--success-fg)', fontSize: 12, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 7 }}>
             <Icon name="check" size={14}/>
-            검수 큐 정상
+            고객 전달 대기 없음
           </div>
         </div>
 
@@ -573,7 +573,7 @@ function providerErrorText(message) {
     missing_recipient: '수신번호 없음',
     solapi_missing_credentials: 'SOL API 인증 설정 누락',
     solapi_missing_sender_number: 'SOL API 발신번호 누락',
-    solapi_missing_kakao_pf_id: 'SOL API 카카오 채널 ID 누락',
+    solapi_missing_kakao_channel_id: 'SOL API 카카오 채널 ID 누락',
     solapi_missing_kakao_template_id: '알림톡 승인 템플릿 ID 누락',
     solapi_http_error: 'SOL API HTTP 오류',
     solapi_request_failed: 'SOL API 요청 실패',

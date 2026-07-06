@@ -10,8 +10,11 @@ export interface RecurringMonthlyRow {
   schedule_text: string;
   month: string;
   amount: number | null;
+  partner_amount: number | null;
+  partner_billing_mode: 'per_visit' | 'monthly';
   tax_invoice_issued: boolean;
   balance_paid: boolean;
+  partner_payment_paid: boolean;
 }
 
 // month: "YYYY-MM".
@@ -25,7 +28,11 @@ export function getRecurringMonthly(month: string): Promise<RecurringMonthlyRow[
 export function setRecurringMonthlyStatus(
   contractId: string,
   month: string,
-  patch: { tax_invoice_issued?: boolean; balance_paid?: boolean },
+  patch: {
+    tax_invoice_issued?: boolean;
+    balance_paid?: boolean;
+    partner_payment_paid?: boolean;
+  },
 ): Promise<RecurringMonthlyRow> {
   return apiRequest('/admin/recurring/monthly/set', {
     method: 'POST',

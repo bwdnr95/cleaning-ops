@@ -113,6 +113,23 @@ class OrderRepository(Repository[Order]):
         )
         return int(self.db.scalar(stmt) or 0)
 
+    def list_day_before_notice_candidates(
+        self,
+        *,
+        target_date: date,
+        statuses: set[str],
+    ) -> list[Order]:
+        stmt = (
+            select(Order)
+            .where(
+                Order.deleted_at.is_(None),
+                Order.scheduled_date == target_date,
+                Order.status.in_(statuses),
+            )
+            .order_by(Order.requested_time.asc().nulls_last(), Order.id.asc())
+        )
+        return list(self.db.scalars(stmt))
+
 
 OVERDUE_UNPAID_PAYMENT_STATUSES: tuple[str, ...] = (
     PaymentStatus.UNPAID,

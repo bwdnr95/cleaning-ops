@@ -13,13 +13,18 @@ from app.core.observability import (
     configure_structlog,
     init_sentry,
 )
+from app.services.day_before_scheduler import day_before_notice_lifespan
 
 
 def create_app() -> FastAPI:
     init_sentry(settings)
     configure_structlog(settings)
 
-    app = FastAPI(title=settings.app_name, version=settings.app_version)
+    app = FastAPI(
+        title=settings.app_name,
+        version=settings.app_version,
+        lifespan=day_before_notice_lifespan,
+    )
     if settings.storage_provider.strip().lower() == "local":
         app.mount(
             settings.storage_public_base_path,

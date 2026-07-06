@@ -45,7 +45,7 @@ class RecurringMonthlyService:
         # in-memory 객체가 None을 노출하지 않도록 생성 시 명시적으로 False를 채운다.
         status = RecurringMonthlyStatus(
             id=str(uuid4()), contract_id=contract_id, billing_month=month,
-            tax_invoice_issued=False, balance_paid=False,
+            tax_invoice_issued=False, balance_paid=False, partner_payment_paid=False,
         )
         self.statuses.add(status)
         return status
@@ -84,8 +84,11 @@ class RecurringMonthlyService:
             schedule_text=self._recurring._schedule_text(contract),
             month=month,
             amount=self._month_amount(contract, month),
-            tax_invoice_issued=status.tax_invoice_issued,
-            balance_paid=status.balance_paid,
+            partner_amount=self._partner_month_amount(contract, month),
+            partner_billing_mode=contract.partner_billing_mode or RecurringBillingMode.PER_VISIT,
+            tax_invoice_issued=bool(status.tax_invoice_issued),
+            balance_paid=bool(status.balance_paid),
+            partner_payment_paid=bool(status.partner_payment_paid),
         )
 
     def _month_amount(self, contract: RecurringContract, month: str) -> float | None:
@@ -116,6 +119,40 @@ class RecurringMonthlyService:
             # 미래 달이 자기 예정 방문(N건)을 빠뜨려 과소청구되는 것을 막는다(과거 미생성분은 발생 안 했으니 제외).
             return amount * (billable + self._ungenerated_upcoming_count(contract, first, last))
         # 살아있는 방문이 0: 그달 회차가 이미 생성됐다면(전부 취소/삭제) 0, 미생성이면 스케줄 예상.
+        generated = self.db.scalar(
+            select(func.count(Order.id)).where(
+                Order.recurring_contract_id == contract.id,
+                Order.recurring_planned_date >= first,
+                Order.recurring_planned_date <= last,
+            )
+        ) or 0
+        if generated > 0:
+            return 0.0
+        scheduled_visits = sum(
+            1
+            for _seq, due in iter_due_dates(self._recurring._spec(contract), until=last)
+            if first <= due <= last
+        )
+        return amount * scheduled_visits
+
+    def _partner_month_amount(self, contract: RecurringContract, month: str) -> float | None:
+        if contract.partner_payment_amount is None:
+            return None
+        amount = float(contract.partner_payment_amount)
+        if (contract.partner_billing_mode or RecurringBillingMode.PER_VISIT) == RecurringBillingMode.MONTHLY:
+            return amount
+        first, last = _month_bounds(month)
+        billable = self.db.scalar(
+            select(func.count(Order.id)).where(
+                Order.recurring_contract_id == contract.id,
+                Order.deleted_at.is_(None),
+                Order.status != OrderStatus.CANCELLED,
+                Order.scheduled_date >= first,
+                Order.scheduled_date <= last,
+            )
+        ) or 0
+        if billable > 0:
+            return amount * (billable + self._ungenerated_upcoming_count(contract, first, last))
         generated = self.db.scalar(
             select(func.count(Order.id)).where(
                 Order.recurring_contract_id == contract.id,
@@ -173,7 +210,9 @@ class RecurringMonthlyService:
 
     def set_status(
         self, contract_id: str, month: str, *,
-        tax_invoice_issued: bool | None = None, balance_paid: bool | None = None,
+        tax_invoice_issued: bool | None = None,
+        balance_paid: bool | None = None,
+        partner_payment_paid: bool | None = None,
     ) -> RecurringMonthlyRowRead:
         contract = self.contracts.get(contract_id)
         if contract is None:
@@ -183,5 +222,7 @@ class RecurringMonthlyService:
             status.tax_invoice_issued = tax_invoice_issued
         if balance_paid is not None:
             status.balance_paid = balance_paid
+        if partner_payment_paid is not None:
+            status.partner_payment_paid = partner_payment_paid
         self.db.commit()
         return self._to_row(contract, month, status)

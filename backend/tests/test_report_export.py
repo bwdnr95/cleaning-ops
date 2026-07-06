@@ -89,3 +89,15 @@ def test_partners_export_csv(client, seed_admin_token):
     )
     assert res.status_code == 200
     assert "text/csv" in res.headers["content-type"]
+
+
+def test_source_channels_export_csv(client, seed_admin_token):
+    res = client.get(
+        "/api/admin/reports/source-channels/export",
+        params={"start_date": "2026-01-01", "end_date": "2026-12-31", "format": "csv"},
+        headers={"Authorization": f"Bearer {seed_admin_token}"},
+    )
+    assert res.status_code == 200
+    assert "text/csv" in res.headers["content-type"]
+    text = res.content.decode("utf-8-sig")
+    assert "source_channel" in text.splitlines()[0]

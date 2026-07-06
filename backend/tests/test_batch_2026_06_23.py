@@ -12,16 +12,35 @@ from __future__ import annotations
 from datetime import UTC, date, datetime, timedelta
 from uuid import uuid4
 
+import pytest
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.db.seed import DEV_PARTNER_USER_ID
+from app.core.config import settings
 from app.core.time import business_today
-from app.domain.constants import OrderStatus, ReceiptType
+from app.domain.constants import (
+    MessageChannel,
+    MessageStatus,
+    MessageType,
+    OrderStatus,
+    PhotoType,
+    ReceiptType,
+    RecipientType,
+    TimelineEventType,
+)
+from app.domain.payment_status import PaymentStatus
+from app.models.message import MessageLog
 from app.models.order import Order
 from app.models.order_group import OrderGroup
+from app.models.photo import OrderPhoto
+from app.repositories.timeline import TimelineRepository
+from app.schemas.message import MessageSendRequest
 from app.schemas.partner import PartnerCreate
 from app.services.dashboard import DashboardService
+from app.services.messages import MessageService, customer_balance_due_amount
 from app.services.order_page import OrderPageService
+from app.services.orders import OrderService
 from app.services.partner_settlements import PartnerSettlementService
 from app.services.partners import PartnerService
 
@@ -45,6 +64,8 @@ def _add(
     partner_payment_status: str | None = None,
     partner_payment_amount: float | None = None,
     total_amount: float | None = None,
+    deposit_amount: float | None = None,
+    balance_amount: float | None = None,
     address: str = "서울특별시 강남구 테스트로 1",
     address_detail: str | None = None,
 ) -> str:
@@ -78,6 +99,8 @@ def _add(
             customer_address=address,
             payment_status=payment_status,
             total_amount=total_amount,
+            deposit_amount=deposit_amount,
+            balance_amount=balance_amount,
             partner_payment_amount=partner_payment_amount,
             partner_payment_status=partner_payment_status,
         )
@@ -266,6 +289,492 @@ def test_explicit_status_overrides_auto_confirm(db_session: Session) -> None:
 
     order = db_session.get(Order, oid)
     assert order.status == OrderStatus.PARTNER_CONFIRMING
+
+
+def test_partner_assignment_auto_message_is_disabled_by_default(
+    db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.schemas.order import OrderUpdate
+
+    monkeypatch.setattr(settings, "automation_send_partner_assignment", False)
+    pid = _partner(db_session)
+    oid = _add(db_session, status=OrderStatus.CONSULTING, scheduled_date=date(2026, 7, 1))
+    db_session.flush()
+
+    OrderService(db_session).update(oid, OrderUpdate(partner_id=pid))
+
+    logs = db_session.scalars(select(MessageLog).where(MessageLog.order_id == oid)).all()
+    assert logs == []
+
+
+def test_partner_assignment_auto_message_runs_when_enabled(
+    db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.schemas.order import OrderUpdate
+
+    monkeypatch.setattr(settings, "automation_send_partner_assignment", True)
+    pid = _partner(db_session)
+    oid = _add(db_session, status=OrderStatus.CONSULTING, scheduled_date=date(2026, 7, 1))
+    db_session.flush()
+
+    OrderService(db_session).update(oid, OrderUpdate(partner_id=pid))
+
+    logs = db_session.scalars(select(MessageLog).where(MessageLog.order_id == oid)).all()
+    assert len(logs) == 1
+    assert logs[0].message_type == MessageType.PARTNER_ASSIGNMENT
+    assert logs[0].recipient_type == "partner"
+    order = db_session.get(Order, oid)
+    assert order.status == OrderStatus.PARTNER_CONFIRMING
+
+
+def test_partner_assignment_auto_message_runs_on_create_when_enabled(
+    db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.schemas.order import OrderGroupCreate, OrderLineCreate
+
+    monkeypatch.setattr(settings, "automation_send_partner_assignment", True)
+    pid = _partner(db_session)
+
+    group = OrderService(db_session).create_group(
+        OrderGroupCreate(
+            customer_name="신규고객",
+            customer_phone="01044445555",
+            customer_address="서울특별시 중구 신규로 1",
+            lines=[
+                OrderLineCreate(
+                    status=OrderStatus.PARTNER_CONFIRMING,
+                    received_date=date(2026, 7, 1),
+                    scheduled_date=date(2026, 7, 2),
+                    partner_id=pid,
+                    service_name="입주청소",
+                )
+            ],
+        )
+    )
+
+    order = db_session.scalars(select(Order).where(Order.group_id == group.id)).one()
+    logs = db_session.scalars(select(MessageLog).where(MessageLog.order_id == order.id)).all()
+    assert len(logs) == 1
+    assert logs[0].message_type == MessageType.PARTNER_ASSIGNMENT
+
+
+def test_schedule_confirmed_auto_message_runs_when_enabled(
+    db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.schemas.order import OrderUpdate
+
+    monkeypatch.setattr(settings, "automation_send_schedule_confirmed", True)
+    oid = _add(db_session, status=OrderStatus.CONSULTING, scheduled_date=None)
+    db_session.flush()
+
+    OrderService(db_session).update(oid, OrderUpdate(scheduled_date=date(2026, 7, 1)))
+
+    logs = db_session.scalars(select(MessageLog).where(MessageLog.order_id == oid)).all()
+    assert len(logs) == 1
+    assert logs[0].message_type == MessageType.CUSTOMER_SCHEDULE_CONFIRMED
+
+
+def test_day_before_notice_batch_sends_once_for_default_target(db_session: Session) -> None:
+    from app.services.messages import MessageService
+
+    _clean_universe(db_session)
+    tomorrow = business_today() + timedelta(days=1)
+    target_id = _add(
+        db_session,
+        status=OrderStatus.SCHEDULE_CONFIRMED,
+        scheduled_date=tomorrow,
+    )
+    already_sent_id = _add(
+        db_session,
+        status=OrderStatus.DAY_BEFORE_NOTICE_NEEDED,
+        scheduled_date=tomorrow,
+    )
+    _add(
+        db_session,
+        status=OrderStatus.DAY_BEFORE_NOTICE_DONE,
+        scheduled_date=tomorrow,
+    )
+    _add(
+        db_session,
+        status=OrderStatus.SCHEDULE_CONFIRMED,
+        scheduled_date=tomorrow + timedelta(days=1),
+    )
+    db_session.add(
+        MessageLog(
+            id=str(uuid4()),
+            order_id=already_sent_id,
+            recipient_type=RecipientType.CUSTOMER,
+            recipient_name="홍길동",
+            recipient_phone="01055556666",
+            message_type=MessageType.CUSTOMER_DAY_BEFORE,
+            channel=MessageChannel.SMS,
+            content="already sent",
+            status=MessageStatus.SENT,
+            provider="mock",
+            requested_at=datetime.now(UTC),
+            sent_at=datetime.now(UTC),
+        )
+    )
+    db_session.flush()
+
+    result = MessageService(db_session).send_day_before_notices(target_date=tomorrow)
+
+    assert result.scanned == 2
+    assert result.sent == 1
+    assert result.skipped_already_sent == 1
+    assert result.failed == 0
+    assert result.sent_order_ids == [target_id]
+    sent_logs = db_session.scalars(
+        select(MessageLog).where(
+            MessageLog.order_id == target_id,
+            MessageLog.message_type == MessageType.CUSTOMER_DAY_BEFORE,
+        )
+    ).all()
+    assert len(sent_logs) == 1
+    assert db_session.get(Order, target_id).status == OrderStatus.DAY_BEFORE_NOTICE_DONE
+    assert db_session.get(Order, already_sent_id).status == OrderStatus.DAY_BEFORE_NOTICE_DONE
+
+
+SIGNATURE_DATA_URL = (
+    "data:image/png;base64,"
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII="
+)
+
+
+def test_customer_balance_due_auto_message_runs_after_partner_completion(
+    db_session: Session,
+) -> None:
+    pid = _partner(db_session)
+    oid = _add(
+        db_session,
+        status=OrderStatus.IN_PROGRESS,
+        scheduled_date=date(2026, 7, 1),
+        partner_id=pid,
+        payment_status=PaymentStatus.BALANCE_PENDING,
+        balance_amount=50000,
+    )
+    db_session.add(
+        OrderPhoto(
+            id=f"p-before-{oid}",
+            order_id=oid,
+            uploaded_by_user_id=DEV_PARTNER_USER_ID,
+            photo_type=PhotoType.BEFORE,
+            file_url="https://cdn.example.com/before.jpg",
+            file_name="before.jpg",
+            is_customer_visible=True,
+        )
+    )
+    db_session.add(
+        OrderPhoto(
+            id=f"p-after-{oid}",
+            order_id=oid,
+            uploaded_by_user_id=DEV_PARTNER_USER_ID,
+            photo_type=PhotoType.AFTER,
+            file_url="https://cdn.example.com/after.jpg",
+            file_name="after.jpg",
+            is_customer_visible=True,
+        )
+    )
+    db_session.flush()
+
+    OrderService(db_session).complete_partner_job(
+        oid,
+        actor_user_id=DEV_PARTNER_USER_ID,
+        partner_id=pid,
+        customer_signature_data_url=SIGNATURE_DATA_URL,
+    )
+
+    logs = db_session.scalars(select(MessageLog).where(MessageLog.order_id == oid)).all()
+    assert len(logs) == 1
+    assert logs[0].message_type == MessageType.CUSTOMER_BALANCE_DUE
+    order = db_session.get(Order, oid)
+    assert order.status == OrderStatus.CUSTOMER_DELIVERY_NEEDED
+    assert order.work_completed_at is not None
+    assert order.customer_signature_file_url is not None
+
+
+def test_customer_balance_due_auto_message_skips_paid_partner_completion(
+    db_session: Session,
+) -> None:
+    pid = _partner(db_session)
+    oid = _add(
+        db_session,
+        status=OrderStatus.IN_PROGRESS,
+        scheduled_date=date(2026, 7, 1),
+        partner_id=pid,
+        payment_status=PaymentStatus.PAID,
+        balance_amount=0,
+        total_amount=100000,
+    )
+    for photo_type in (PhotoType.BEFORE, PhotoType.AFTER):
+        db_session.add(
+            OrderPhoto(
+                id=f"p-{photo_type}-{oid}",
+                order_id=oid,
+                uploaded_by_user_id=DEV_PARTNER_USER_ID,
+                photo_type=photo_type,
+                file_url=f"https://cdn.example.com/{photo_type}.jpg",
+                file_name=f"{photo_type}.jpg",
+                is_customer_visible=True,
+            )
+        )
+    db_session.flush()
+
+    OrderService(db_session).complete_partner_job(
+        oid,
+        actor_user_id=DEV_PARTNER_USER_ID,
+        partner_id=pid,
+        customer_signature_data_url=SIGNATURE_DATA_URL,
+    )
+
+    logs = db_session.scalars(select(MessageLog).where(MessageLog.order_id == oid)).all()
+    assert all(log.message_type != MessageType.CUSTOMER_BALANCE_DUE for log in logs)
+
+
+def test_customer_balance_due_auto_message_skips_zero_balance_partner_completion(
+    db_session: Session,
+) -> None:
+    pid = _partner(db_session)
+    oid = _add(
+        db_session,
+        status=OrderStatus.IN_PROGRESS,
+        scheduled_date=date(2026, 7, 1),
+        partner_id=pid,
+        payment_status=PaymentStatus.DEPOSIT_PAID,
+        balance_amount=0,
+        total_amount=100000,
+    )
+    for photo_type in (PhotoType.BEFORE, PhotoType.AFTER):
+        db_session.add(
+            OrderPhoto(
+                id=f"p-zero-{photo_type}-{oid}",
+                order_id=oid,
+                uploaded_by_user_id=DEV_PARTNER_USER_ID,
+                photo_type=photo_type,
+                file_url=f"https://cdn.example.com/zero-{photo_type}.jpg",
+                file_name=f"zero-{photo_type}.jpg",
+                is_customer_visible=True,
+            )
+        )
+    db_session.flush()
+
+    OrderService(db_session).complete_partner_job(
+        oid,
+        actor_user_id=DEV_PARTNER_USER_ID,
+        partner_id=pid,
+        customer_signature_data_url=SIGNATURE_DATA_URL,
+    )
+
+    logs = db_session.scalars(select(MessageLog).where(MessageLog.order_id == oid)).all()
+    assert all(log.message_type != MessageType.CUSTOMER_BALANCE_DUE for log in logs)
+
+
+def test_customer_balance_due_manual_send_requires_positive_due(db_session: Session) -> None:
+    oid = _add(
+        db_session,
+        status=OrderStatus.CUSTOMER_DELIVERY_NEEDED,
+        scheduled_date=date(2026, 7, 1),
+        payment_status=PaymentStatus.DEPOSIT_PAID,
+        total_amount=100000,
+        deposit_amount=100000,
+        balance_amount=None,
+    )
+    order = db_session.get(Order, oid)
+    assert customer_balance_due_amount(order) == 0
+
+    payload = MessageSendRequest(
+        order_id=oid,
+        message_type=MessageType.CUSTOMER_BALANCE_DUE,
+        recipient_type=RecipientType.CUSTOMER,
+    )
+    with pytest.raises(ValueError, match="customer_balance_not_due"):
+        MessageService(db_session).preview(payload)
+    with pytest.raises(ValueError, match="customer_balance_not_due"):
+        MessageService(db_session).send(payload, actor_user_id=DEV_PARTNER_USER_ID)
+
+
+def test_customer_balance_due_manual_preview_uses_total_minus_deposit(db_session: Session) -> None:
+    oid = _add(
+        db_session,
+        status=OrderStatus.CUSTOMER_DELIVERY_NEEDED,
+        scheduled_date=date(2026, 7, 1),
+        payment_status=PaymentStatus.DEPOSIT_PAID,
+        total_amount=100000,
+        deposit_amount=30000,
+        balance_amount=None,
+    )
+
+    preview = MessageService(db_session).preview(
+        MessageSendRequest(
+            order_id=oid,
+            message_type=MessageType.CUSTOMER_BALANCE_DUE,
+            recipient_type=RecipientType.CUSTOMER,
+        )
+    )
+
+    assert "잔금: 70,000원" in preview.content
+
+
+def test_partner_assignment_message_link_opens_assigned_job(
+    db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings, "frontend_url", "https://ops.example.com")
+    pid = _partner(db_session)
+    oid = _add(
+        db_session,
+        status=OrderStatus.PARTNER_CONFIRMING,
+        scheduled_date=date(2026, 7, 1),
+        partner_id=pid,
+    )
+
+    preview = MessageService(db_session).preview(
+        MessageSendRequest(
+            order_id=oid,
+            message_type=MessageType.PARTNER_ASSIGNMENT,
+            recipient_type=RecipientType.PARTNER,
+            channel=MessageChannel.ALIMTALK,
+        )
+    )
+
+    assert f"https://ops.example.com/partner?job={oid}" in preview.content
+    assert preview.kakao_variables["#{협력사링크}"] == f"ops.example.com/partner?job={oid}"
+
+
+def test_as_messages_require_stateful_as_request(db_session: Session) -> None:
+    pid = _partner(db_session)
+    oid = _add(
+        db_session,
+        status=OrderStatus.COMPLETED,
+        scheduled_date=date(2026, 7, 1),
+        partner_id=pid,
+        payment_status=PaymentStatus.PAID,
+    )
+    payload = MessageSendRequest(
+        order_id=oid,
+        message_type=MessageType.PARTNER_AS_REQUEST,
+        recipient_type=RecipientType.PARTNER,
+    )
+    with pytest.raises(ValueError, match="as_request_required"):
+        MessageService(db_session).preview(payload)
+    with pytest.raises(ValueError, match="as_request_required"):
+        MessageService(db_session).send(payload, actor_user_id=DEV_PARTNER_USER_ID)
+
+    OrderService(db_session).request_as(
+        oid,
+        memo="욕실 코너 AS 요청",
+        actor_user_id=DEV_PARTNER_USER_ID,
+    )
+
+    preview = MessageService(db_session).preview(payload)
+    assert "AS(재작업) 요청" in preview.content
+
+
+def test_as_job_can_restart_and_complete_to_final_when_paid(db_session: Session) -> None:
+    pid = _partner(db_session)
+    oid = _add(
+        db_session,
+        status=OrderStatus.COMPLETED,
+        scheduled_date=date(2026, 7, 1),
+        partner_id=pid,
+        payment_status=PaymentStatus.PAID,
+        balance_amount=0,
+    )
+    old_photo_time = datetime(2026, 6, 30, 9, 0, tzinfo=UTC)
+    for photo_type in (PhotoType.BEFORE, PhotoType.AFTER):
+        db_session.add(
+            OrderPhoto(
+                id=f"p-old-{photo_type}-{oid}",
+                order_id=oid,
+                uploaded_by_user_id=DEV_PARTNER_USER_ID,
+                photo_type=photo_type,
+                file_url=f"https://cdn.example.com/old-{photo_type}.jpg",
+                file_name=f"old-{photo_type}.jpg",
+                is_customer_visible=True,
+                created_at=old_photo_time,
+            )
+        )
+    db_session.flush()
+
+    OrderService(db_session).request_as(
+        oid,
+        memo="AS 재방문 필요",
+        actor_user_id=DEV_PARTNER_USER_ID,
+    )
+    as_requested_at = TimelineRepository(db_session).latest_created_at(
+        order_id=oid,
+        event_type=TimelineEventType.AS_REQUESTED,
+    )
+    assert as_requested_at is not None
+    assert db_session.get(Order, oid).status == OrderStatus.CUSTOMER_CHECK_NEEDED
+
+    with pytest.raises(ValueError, match="before_photo_required_for_start"):
+        OrderService(db_session).start_partner_job(
+            oid,
+            actor_user_id=DEV_PARTNER_USER_ID,
+            partner_id=pid,
+        )
+
+    new_photo_time = as_requested_at + timedelta(seconds=1)
+    db_session.add(
+        OrderPhoto(
+            id=f"p-as-before-{oid}",
+            order_id=oid,
+            uploaded_by_user_id=DEV_PARTNER_USER_ID,
+            photo_type=PhotoType.BEFORE,
+            file_url="https://cdn.example.com/as-before.jpg",
+            file_name="as-before.jpg",
+            is_customer_visible=True,
+            created_at=new_photo_time,
+        )
+    )
+    db_session.flush()
+
+    started = OrderService(db_session).start_partner_job(
+        oid,
+        actor_user_id=DEV_PARTNER_USER_ID,
+        partner_id=pid,
+    )
+    assert started.status == OrderStatus.IN_PROGRESS
+    assert started.work_started_at is not None
+
+    with pytest.raises(ValueError, match="completion_evidence_required"):
+        OrderService(db_session).complete_partner_job(
+            oid,
+            actor_user_id=DEV_PARTNER_USER_ID,
+            partner_id=pid,
+            customer_signature_data_url=SIGNATURE_DATA_URL,
+        )
+
+    db_session.add(
+        OrderPhoto(
+            id=f"p-as-after-{oid}",
+            order_id=oid,
+            uploaded_by_user_id=DEV_PARTNER_USER_ID,
+            photo_type=PhotoType.AFTER,
+            file_url="https://cdn.example.com/as-after.jpg",
+            file_name="as-after.jpg",
+            is_customer_visible=True,
+            created_at=new_photo_time,
+        )
+    )
+    db_session.flush()
+
+    completed = OrderService(db_session).complete_partner_job(
+        oid,
+        actor_user_id=DEV_PARTNER_USER_ID,
+        partner_id=pid,
+        customer_signature_data_url=SIGNATURE_DATA_URL,
+    )
+
+    assert completed.status == OrderStatus.COMPLETED
+    assert completed.as_requested is False
+    logs = db_session.scalars(select(MessageLog).where(MessageLog.order_id == oid)).all()
+    assert all(log.message_type != MessageType.CUSTOMER_BALANCE_DUE for log in logs)
 
 
 # --------------------------------------------------------------------------

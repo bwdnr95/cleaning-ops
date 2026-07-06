@@ -3,7 +3,7 @@ import React from 'react';
 import { exportReport } from '../../../api/reports';
 
 interface Props {
-  name: 'revenue' | 'partners' | 'services' | 'settlements';
+  name: 'revenue' | 'partners' | 'services' | 'source-channels' | 'settlements';
   params: Record<string, string>;
 }
 

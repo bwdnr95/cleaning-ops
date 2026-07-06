@@ -1,5 +1,7 @@
 import React from 'react';
 import { Avatar, Icon } from '../common/ui';
+import { BrandLogo } from '../common/BrandLogo';
+import { useIsNarrowViewport } from '../common/useIsNarrowViewport';
 
 // Admin app shell — sidebar + topbar + page router
 
@@ -28,6 +30,7 @@ export function AdminShell({
 }) {
   const [uncontrolledPage, setUncontrolledPage] = React.useState(initialPage);
   const page = controlledPage ?? uncontrolledPage;
+  const isNarrowViewport = useIsNarrowViewport();
 
   const setPage = React.useCallback((nextPage) => {
     if (onPageChange) {
@@ -42,23 +45,16 @@ export function AdminShell({
   };
 
   return (
-    <div data-testid="admin-shell" style={{ display: 'flex', height: '100%', background: 'var(--bg)' }}>
+    <div data-testid="admin-shell" style={{ display: 'flex', height: '100%', background: 'var(--bg)', overflowX: isNarrowViewport ? 'hidden' : 'auto' }}>
       {/* Sidebar */}
       <aside style={{
         width: 220, flexShrink: 0,
         borderRight: '1px solid var(--border)',
         background: 'var(--surface)',
-        display: 'flex', flexDirection: 'column',
+        display: isNarrowViewport ? 'none' : 'flex', flexDirection: 'column',
       }}>
         <div style={{ height: 52, padding: '0 14px', display: 'flex', alignItems: 'center', gap: 10, borderBottom: '1px solid var(--border)' }}>
-          <img
-            src="/cleanjob-logo.png"
-            alt="클린잡"
-            style={{ height: 30, width: 'auto', display: 'block' }}
-          />
-          <div style={{ marginLeft: 'auto', fontSize: 10, color: 'var(--text-tertiary)', fontWeight: 700, letterSpacing: '0.04em' }}>
-            운영 시스템
-          </div>
+          <BrandLogo size="sm" caption="운영 시스템" />
         </div>
 
         <nav style={{ padding: 8, flex: 1, display: 'flex', flexDirection: 'column', gap: 1 }}>
@@ -117,17 +113,86 @@ export function AdminShell({
             aria-label="로그아웃"
             title="로그아웃"
             onClick={() => onLogout?.()}
-            style={{ padding: '0 6px' }}
+            style={{ height: 30, padding: '0 8px', gap: 4, color: 'var(--danger-fg)', flexShrink: 0 }}
           >
             <Icon name="logOut" size={14}/>
+            <span style={{ fontSize: 11.5, fontWeight: 700 }}>로그아웃</span>
           </button>
         </div>
       </aside>
 
       {/* Main */}
-      <main style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+      <main style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: isNarrowViewport ? 0 : 760, paddingBottom: isNarrowViewport ? 88 : 0 }}>
         {children({ page, setPage })}
       </main>
+      {isNarrowViewport && (
+        <nav
+          data-testid="admin-mobile-nav"
+          style={{
+            position: 'fixed',
+            left: 0,
+            right: 0,
+            bottom: 0,
+            zIndex: 45,
+            height: 82,
+            padding: '8px 10px 10px',
+            display: 'flex',
+            gap: 6,
+            overflowX: 'auto',
+            background: 'var(--surface)',
+            borderTop: '1px solid var(--border)',
+            boxShadow: '0 -8px 24px rgba(15, 23, 42, 0.08)',
+          }}
+        >
+          {NAV.map((item) => {
+            const active = page === item.key;
+            const badge = navBadges[item.key] ?? item.badge;
+            return (
+              <button
+                key={item.key}
+                type="button"
+                data-testid={`admin-mobile-nav-${item.key}`}
+                onClick={() => handleNav(item.key)}
+                style={{
+                  position: 'relative',
+                  flex: '0 0 68px',
+                  border: 'none',
+                  borderRadius: 7,
+                  background: active ? 'var(--brand-bg)' : 'transparent',
+                  color: active ? 'var(--brand)' : 'var(--text-secondary)',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: 4,
+                  fontSize: 10.5,
+                  fontWeight: active ? 700 : 600,
+                  cursor: 'pointer',
+                }}
+              >
+                <Icon name={item.icon} size={15}/>
+                <span style={{ whiteSpace: 'nowrap' }}>{item.label}</span>
+                {badge ? (
+                  <span style={{
+                    position: 'absolute',
+                    top: 5,
+                    right: 7,
+                    minWidth: 16,
+                    height: 16,
+                    padding: '0 4px',
+                    borderRadius: 999,
+                    background: active ? 'var(--brand)' : 'var(--neutral-bg)',
+                    color: active ? '#fff' : 'var(--neutral-fg)',
+                    fontSize: 10,
+                    fontWeight: 700,
+                    lineHeight: '16px',
+                  }}>{badge}</span>
+                ) : null}
+              </button>
+            );
+          })}
+        </nav>
+      )}
       <button
         type="button"
         data-testid="admin-mobile-create-order"

@@ -84,6 +84,9 @@ export interface AdminOrder extends AdminOrderLineInput {
   // AS(사후관리) 요청 상태. 저장 페이로드가 아니라 AS 전송 액션으로만 세팅되는 읽기 필드.
   as_requested?: boolean;
   as_memo?: string | null;
+  work_started_at?: string | null;
+  work_completed_at?: string | null;
+  customer_signature_file_url?: string | null;
 }
 
 export interface AdminOrderGroup {
@@ -167,6 +170,10 @@ export interface DashboardSummary {
   monthly_completed: number;       // 이번 달 완료 = 당월 작업완료 건수
   monthly_contract_amount: number; // 이번 달 계약금액(원)
   outstanding_receivable: number;  // 미정산 금액 = 고객 미수금(원)
+  photo_review_pending: number;
+  customer_delivery_needed: number;
+  payment_check_needed: number;
+  monthly_revenue: number;
 }
 
 export function getDashboardSummary(): Promise<DashboardSummary> {

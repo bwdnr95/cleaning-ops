@@ -14,9 +14,16 @@ export function startPartnerJob(orderId) {
   });
 }
 
-export function completePartnerJob(orderId) {
+export function confirmPartnerJob(orderId) {
+  return apiRequest(`/partner/jobs/${encodeURIComponent(orderId)}/confirm`, {
+    method: 'POST',
+  });
+}
+
+export function completePartnerJob(orderId, customerSignatureDataUrl = '') {
   return apiRequest(`/partner/jobs/${encodeURIComponent(orderId)}/complete`, {
     method: 'POST',
+    body: { customer_signature_data_url: customerSignatureDataUrl },
   });
 }
 

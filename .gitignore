@@ -17,12 +17,43 @@ backend/local_storage/
 # Postgres backups / logs (R10 선반영)
 backups/
 logs/
+*.log
+*.LOG
 
 # Frontend
 frontend/node_modules/
 frontend/dist/
 frontend/playwright-report/
 frontend/test-results/
+test-results/
+backend/test-results/
+backend/tmp/
+exports/
+
+# Local screenshots / generated images
+*.png
+*.PNG
+*.jpg
+*.JPG
+*.jpeg
+*.JPEG
+!frontend/public/**/*.png
+!frontend/public/**/*.jpg
+!frontend/public/**/*.jpeg
+!.master/design_handoff_prototype/**/*.png
+!.master/design_handoff_prototype/**/*.jpg
+!.master/design_handoff_prototype/**/*.jpeg
+
+# Local markdown drafts / generated notes
+*.md
+*.MD
+!README.md
+!AGENTS.md
+!CLAUDE.md
+!DESIGN.md
+!docs/**/*.md
+!.github/**/*.md
+!.master/design_handoff_prototype/**/*.md
 
 # Env
 .env
@@ -32,6 +63,8 @@ frontend/test-results/
 
 # Operator workspace (not for repo)
 .claude/
+.codex/
+.playwright-mcp/
 .master/*
 !.master/design_handoff_prototype/
 !.master/design_handoff_prototype/**

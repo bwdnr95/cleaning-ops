@@ -9,10 +9,10 @@
 
 ## 현재 구현 상태 (확인 완료)
 - SMS 발송: `SolapiMessageProvider.send` — SOLAPI v4 send-many/detail 호출, 인증 서명(`HMAC-SHA256 apiKey/date/salt`) **규격 일치**.
-- 알림톡: `_send_kakao_alimtalk` — `kakaoOptions(pfId/templateId/variables)` + **실패 시 SMS 자동 폴백**.
+- 알림톡: `_send_kakao_alimtalk` — `kakaoOptions(channelId/templateId/variables)` + **실패 시 SMS 자동 폴백**.
 - 웹훅: `/api/webhooks/solapi` — 서명 검증 후 `message_logs` 전송상태 갱신.
 - 준비상태 점검: 관리자 "메시지 설정"에서 `can_send_alimtalk`, 누락 경고 표시.
-- 설정 키: `config.py`에 api key/secret/발신번호/pfId/템플릿 7종/웹훅시크릿/폴백 모두 정의. `.env`는 `backend/.env`.
+- 설정 키: `config.py`에 api key/secret/발신번호/channelId/템플릿 7종/웹훅시크릿/폴백 모두 정의. `.env`는 `backend/.env`.
 
 ---
 
@@ -54,7 +54,7 @@ SOLAPI_SENDER_NUMBER=<등록한 발신번호, 하이픈 없이>
 
 ### 1. 카카오 채널 + 연동
 1. 카카오 비즈니스 채널 보유(로그인 완료).
-2. SOLAPI에 카카오 채널 연동 → **pfId(발신 프로필 키)** 발급.
+2. SOLAPI에 카카오 채널 연동 → **channelId(카카오 채널 식별자)** 발급.
 
 ### 2. 알림톡 템플릿 등록 + 검수 승인
 7종 메시지 타입을 등록하고, **변수명을 코드의 `#{...}` 형식과 정확히 일치**시킨다(`message_templates.py` 기준):
@@ -68,7 +68,8 @@ SOLAPI_SENDER_NUMBER=<등록한 발신번호, 하이픈 없이>
 
 ### 3. `.env` 채우기 + 테스트
 ```
-SOLAPI_KAKAO_PF_ID=<pfId>
+SOLAPI_KAKAO_CHANNEL_ID=<channelId>
+SOLAPI_KAKAO_PF_ID=<legacy-pfId-fallback>
 SOLAPI_KAKAO_TEMPLATE_CUSTOMER_SCHEDULE_CONFIRMED=<템플릿ID>
 ... (7종)
 ```
