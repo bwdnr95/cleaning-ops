@@ -11,6 +11,7 @@ export interface OrderDetailPhoto {
   readonly file_url: string;
   readonly file_name?: string | null;
   readonly photo_type: string;
+  readonly photo_source?: string | null;
   readonly is_customer_visible: boolean;
 }
 

@@ -18,11 +18,12 @@ class PhotoRead(ApiModel):
     id: str
     order_id: str
     photo_type: PhotoType
+    photo_source: str = "partner"
     file_url: str
     file_name: str | None = None
     file_size: int | None = None
     content_type: str | None = None
-    uploaded_by_user_id: str
+    uploaded_by_user_id: str | None = None
     is_customer_visible: bool
 
 
@@ -30,6 +31,7 @@ class PartnerPhotoRead(ApiModel):
     id: str
     order_id: str
     photo_type: PhotoType
+    photo_source: str = "partner"
     file_url: str
     file_name: str | None = None
     file_size: int | None = None

@@ -1,24 +1,28 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import date, datetime, timedelta
+from datetime import date, datetime
+from uuid import uuid4
 from zoneinfo import ZoneInfo
 
 from fastapi import FastAPI
-from sqlalchemy.orm import Session
 
 from app.core.config import settings
-from app.db.seed import DEV_PARTNER_ID
-from app.domain.constants import OrderStatus, TimelineEventType
+from app.domain.constants import (
+    MessageChannel,
+    MessageStatus,
+    MessageType,
+    OrderStatus,
+    RecipientType,
+)
+from app.models.message import MessageLog
 from app.schemas.message import DayBeforeNoticeRunRead
 from app.services.day_before_scheduler import (
     DayBeforeNoticeScheduler,
     day_before_notice_lifespan,
-    is_day_before_catchup_due,
     next_daily_run_at,
 )
 from app.services.messages import MessageService
-from app.services.timeline import TimelineService
 
 
 def test_next_daily_run_at_uses_today_when_before_schedule() -> None:
@@ -37,36 +41,6 @@ def test_next_daily_run_at_moves_to_tomorrow_after_schedule() -> None:
     result = next_daily_run_at(now, hour=10, minute=0)
 
     assert result == datetime(2026, 7, 7, 10, 0, tzinfo=timezone)
-
-
-def test_day_before_catchup_runs_once_after_scheduled_time() -> None:
-    timezone = ZoneInfo("Asia/Seoul")
-    now = datetime(2026, 7, 6, 10, 5, tzinfo=timezone)
-
-    assert is_day_before_catchup_due(
-        now,
-        hour=10,
-        minute=0,
-        last_run_date=None,
-    )
-    assert not is_day_before_catchup_due(
-        now,
-        hour=10,
-        minute=0,
-        last_run_date=now.date(),
-    )
-    assert is_day_before_catchup_due(
-        datetime(2026, 7, 6, 23, 59, tzinfo=timezone),
-        hour=10,
-        minute=0,
-        last_run_date=None,
-    )
-    assert not is_day_before_catchup_due(
-        datetime(2026, 7, 6, 9, 59, tzinfo=timezone),
-        hour=10,
-        minute=0,
-        last_run_date=None,
-    )
 
 
 def test_day_before_lifespan_defaults_to_off(monkeypatch) -> None:
@@ -107,24 +81,19 @@ def test_day_before_lifespan_starts_and_stops_when_enabled(monkeypatch) -> None:
 
 
 def test_day_before_scheduler_run_once_closes_session() -> None:
-    calls: list[Session] = []
+    calls = []
 
-    class FakeSession(Session):
+    class FakeSession:
         is_closed = False
 
         def close(self) -> None:
             self.is_closed = True
 
-    class FakeMessageService(MessageService):
-        def __init__(self, db: Session) -> None:
-            super().__init__(db)
+    class FakeMessageService:
+        def __init__(self, db: FakeSession) -> None:
+            self.db = db
 
-        def send_day_before_notices(
-            self,
-            *,
-            target_date: date | None = None,
-            actor_user_id: str | None = None,
-        ) -> DayBeforeNoticeRunRead:
+        def send_day_before_notices(self) -> DayBeforeNoticeRunRead:
             calls.append(self.db)
             return DayBeforeNoticeRunRead(
                 target_date=date(2026, 7, 7),
@@ -137,8 +106,8 @@ def test_day_before_scheduler_run_once_closes_session() -> None:
 
     db = FakeSession()
     scheduler = DayBeforeNoticeScheduler(
-        session_factory=lambda: db,
-        message_service_factory=FakeMessageService,
+        session_factory=lambda: db,  # type: ignore[arg-type]
+        message_service_factory=FakeMessageService,  # type: ignore[arg-type]
     )
 
     result = scheduler.run_once()
@@ -148,128 +117,10 @@ def test_day_before_scheduler_run_once_closes_session() -> None:
     assert db.is_closed is True
 
 
-def test_day_before_scheduler_failure_waits_before_retry(monkeypatch) -> None:
-    scheduler = DayBeforeNoticeScheduler()
-    run_calls = 0
-    wait_timeouts: list[float] = []
-
-    def fail_once() -> DayBeforeNoticeRunRead:
-        nonlocal run_calls
-        run_calls += 1
-        raise RuntimeError("database unavailable")
-
-    async def fake_wait_for(awaitable, *, timeout: float):
-        wait_timeouts.append(timeout)
-        if len(wait_timeouts) == 1:
-            awaitable.close()
-            raise TimeoutError
-        scheduler._stopped.set()
-        return await awaitable
-
-    monkeypatch.setattr(scheduler, "run_once", fail_once)
-    monkeypatch.setattr(
-        "app.services.day_before_scheduler.is_day_before_catchup_due",
-        lambda *args, **kwargs: True,
-    )
-    monkeypatch.setattr(asyncio, "wait_for", fake_wait_for)
-
-    asyncio.run(scheduler._run_loop())
-
-    assert run_calls == 1
-    assert len(wait_timeouts) == 2
-    assert wait_timeouts[1] >= 60
-
-
-def test_day_before_scheduler_retries_known_failures_until_success(monkeypatch) -> None:
-    scheduler = DayBeforeNoticeScheduler()
-    run_calls = 0
-    wait_timeouts: list[float] = []
-
-    def run_with_two_failures() -> DayBeforeNoticeRunRead:
-        nonlocal run_calls
-        run_calls += 1
-        is_success = run_calls == 3
-        if is_success:
-            scheduler._stopped.set()
-        return DayBeforeNoticeRunRead(
-            target_date=date.today() + timedelta(days=1),
-            scanned=1,
-            sent=1 if is_success else 0,
-            skipped_already_sent=0,
-            failed=0 if is_success else 1,
-            sent_order_ids=["order-1"] if is_success else [],
-            failed_order_ids=[] if is_success else ["order-1"],
-        )
-
-    async def fake_wait_for(awaitable, *, timeout: float):
-        wait_timeouts.append(timeout)
-        awaitable.close()
-        raise TimeoutError
-
-    monkeypatch.setattr(scheduler, "run_once", run_with_two_failures)
-    monkeypatch.setattr(
-        "app.services.day_before_scheduler.is_day_before_catchup_due",
-        lambda *args, **kwargs: True,
-    )
-    monkeypatch.setattr(asyncio, "wait_for", fake_wait_for)
-
-    asyncio.run(scheduler._run_loop())
-
-    assert run_calls == 3
-    assert len(wait_timeouts) == 3
-    assert wait_timeouts[1] >= 60
-    assert wait_timeouts[2] >= 60
-
-
-def test_day_before_scheduler_retries_stale_pending_candidate(monkeypatch) -> None:
-    scheduler = DayBeforeNoticeScheduler()
-    run_calls = 0
-
-    def run_pending_then_success() -> DayBeforeNoticeRunRead:
-        nonlocal run_calls
-        run_calls += 1
-        is_success = run_calls == 2
-        if is_success:
-            scheduler._stopped.set()
-        return DayBeforeNoticeRunRead(
-            target_date=date.today() + timedelta(days=1),
-            scanned=1,
-            sent=1 if is_success else 0,
-            skipped_already_sent=0 if is_success else 1,
-            failed=0,
-            retryable=0 if is_success else 1,
-            sent_order_ids=["order-1"] if is_success else [],
-            skipped_order_ids=[] if is_success else ["order-1"],
-            retryable_order_ids=[] if is_success else ["order-1"],
-        )
-
-    async def fake_wait_for(awaitable, *, timeout: float):
-        awaitable.close()
-        raise TimeoutError
-
-    monkeypatch.setattr(scheduler, "run_once", run_pending_then_success)
-    monkeypatch.setattr(
-        "app.services.day_before_scheduler.is_day_before_catchup_due",
-        lambda *args, **kwargs: True,
-    )
-    monkeypatch.setattr(asyncio, "wait_for", fake_wait_for)
-
-    asyncio.run(scheduler._run_loop())
-
-    assert run_calls == 2
-
-
 def test_day_before_notice_does_not_regress_scheduled_order(db_session, seed_order) -> None:
     target_date = date(2030, 1, 2)
     seed_order.status = OrderStatus.SCHEDULED
-    seed_order.partner_id = DEV_PARTNER_ID
     seed_order.scheduled_date = target_date
-    TimelineService(db_session).record(
-        order_id=seed_order.id,
-        event_type=TimelineEventType.PARTNER_CONFIRMED,
-        title="partner confirmed",
-        metadata={"partner_id": DEV_PARTNER_ID},
-    )
     db_session.commit()
 
     result = MessageService(db_session).send_day_before_notices(target_date=target_date)
@@ -279,17 +130,30 @@ def test_day_before_notice_does_not_regress_scheduled_order(db_session, seed_ord
     assert seed_order.status == OrderStatus.SCHEDULED
 
 
-def test_day_before_notice_skips_unconfirmed_scheduled_order(db_session, seed_order) -> None:
+def test_day_before_notice_skips_pending_delivery_attempt(db_session, seed_order) -> None:
     target_date = date(2030, 1, 2)
     seed_order.status = OrderStatus.SCHEDULED
-    seed_order.partner_id = DEV_PARTNER_ID
     seed_order.scheduled_date = target_date
+    db_session.add(
+        MessageLog(
+            id=str(uuid4()),
+            order_id=seed_order.id,
+            recipient_type=RecipientType.CUSTOMER,
+            recipient_name=seed_order.customer_name,
+            recipient_phone=seed_order.customer_phone,
+            recipient_partner_id=None,
+            message_type=MessageType.CUSTOMER_DAY_BEFORE,
+            channel=MessageChannel.ALIMTALK,
+            content="pending",
+            status=MessageStatus.PENDING,
+            error_message=None,
+            provider="solapi",
+        )
+    )
     db_session.commit()
 
     result = MessageService(db_session).send_day_before_notices(target_date=target_date)
 
-    assert result.scanned == 1
     assert result.sent == 0
-    assert result.skipped_unconfirmed == 1
-    assert result.unconfirmed_order_ids == [seed_order.id]
-    assert result.failed == 0
+    assert result.skipped_already_sent == 1
+    assert result.skipped_order_ids == [seed_order.id]

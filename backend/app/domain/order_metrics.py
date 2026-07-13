@@ -52,3 +52,12 @@ WORK_DONE_STATUSES: tuple[OrderStatus, ...] = (
     OrderStatus.CUSTOMER_CHECK_NEEDED,
     OrderStatus.COMPLETED,
 )
+
+# 협력사 관리 화면의 '미정산 도급가' 표시 대상.
+# 정산 실행/정산 탭의 공통 미정산 조건은 완료 전 정산 정책 때문에 더 넓게 유지하고,
+# 협력사별 관리 요약은 실제 작업 진행 이후 상태만 보여준다.
+PARTNER_ADMIN_UNPAID_STATUSES: tuple[OrderStatus, ...] = (
+    OrderStatus.IN_PROGRESS,
+    OrderStatus.PHOTO_REVIEW_PENDING,
+    *WORK_DONE_STATUSES,
+)

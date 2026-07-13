@@ -1,4 +1,5 @@
 import type { SourceChannelRow } from '../../../api/reports';
+import { sourceChannelLabel } from '../../../domain/sourceChannel';
 
 interface Props {
   rows: SourceChannelRow[];
@@ -19,7 +20,7 @@ export function SourceChannelTable({ rows }: Props) {
       <tbody>
         {rows.map((row) => (
           <tr key={row.source_channel}>
-            <td>{row.source_channel}</td>
+            <td>{sourceChannelLabel(row.source_channel)}</td>
             <td>{row.order_count}</td>
             <td>{row.completed_count}</td>
             <td>{formatWon(row.revenue)}</td>

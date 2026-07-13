@@ -4,11 +4,10 @@ from calendar import monthrange
 from datetime import date
 from uuid import uuid4
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.core.time import business_today
 from app.domain.constants import OrderStatus, RecurringBillingMode
 from app.domain.recurrence import iter_due_dates
 from app.models.order import Order
@@ -94,9 +93,9 @@ class RecurringMonthlyService:
     def _month_amount(self, contract: RecurringContract, month: str) -> float | None:
         """월 청구 금액. per_visit=회당 금액×그달 청구 대상 방문 수, monthly=월 고정 금액.
 
-        per_visit는 '실제 발생한 방문'만 청구한다: 그달의 살아있는(삭제/취소 제외) 정기 회차 주문을
-        방문일(scheduled_date) 기준으로 센다 → 회차를 삭제/취소/이동하면 청구액이 실제 발생과 일치한다.
-        그달 회차가 아직 생성되지 않았으면(미래 달 등) 계약 스케줄 기준으로 예상 청구액을 보여준다.
+        per_visit는 살아있는(삭제/취소 제외) 정기 회차를 생성 당시 예정 슬롯 기준으로 센다.
+        요일 변경/방문일 조정 뒤에도 해당 월에 이미 생성된 정기 슬롯이 월 청구액에서 빠지지 않는다.
+        recurring_planned_date가 없는 구버전/수기 데이터만 방문일로 보정한다.
         """
         if contract.total_amount is None:
             return None
@@ -104,28 +103,11 @@ class RecurringMonthlyService:
         if contract.billing_mode == RecurringBillingMode.MONTHLY:
             return amount
         first, last = _month_bounds(month)
-        # 청구 대상 = 살아있는(soft-delete 아님) + 취소 아님 + 방문일이 그달인 정기 회차.
-        billable = self.db.scalar(
-            select(func.count(Order.id)).where(
-                Order.recurring_contract_id == contract.id,
-                Order.deleted_at.is_(None),
-                Order.status != OrderStatus.CANCELLED,
-                Order.scheduled_date >= first,
-                Order.scheduled_date <= last,
-            )
-        ) or 0
+        billable = self._billable_generated_count(contract, first, last)
         if billable > 0:
-            # 실제 발생 회차 + 아직 생성 안 된 '미래' 예정 슬롯을 더한다. 이동 회차 때문에 billable>0가 된
-            # 미래 달이 자기 예정 방문(N건)을 빠뜨려 과소청구되는 것을 막는다(과거 미생성분은 발생 안 했으니 제외).
-            return amount * (billable + self._ungenerated_upcoming_count(contract, first, last))
+            return amount * billable
         # 살아있는 방문이 0: 그달 회차가 이미 생성됐다면(전부 취소/삭제) 0, 미생성이면 스케줄 예상.
-        generated = self.db.scalar(
-            select(func.count(Order.id)).where(
-                Order.recurring_contract_id == contract.id,
-                Order.recurring_planned_date >= first,
-                Order.recurring_planned_date <= last,
-            )
-        ) or 0
+        generated = self._generated_slot_count(contract, first, last)
         if generated > 0:
             return 0.0
         scheduled_visits = sum(
@@ -142,24 +124,10 @@ class RecurringMonthlyService:
         if (contract.partner_billing_mode or RecurringBillingMode.PER_VISIT) == RecurringBillingMode.MONTHLY:
             return amount
         first, last = _month_bounds(month)
-        billable = self.db.scalar(
-            select(func.count(Order.id)).where(
-                Order.recurring_contract_id == contract.id,
-                Order.deleted_at.is_(None),
-                Order.status != OrderStatus.CANCELLED,
-                Order.scheduled_date >= first,
-                Order.scheduled_date <= last,
-            )
-        ) or 0
+        billable = self._billable_generated_count(contract, first, last)
         if billable > 0:
-            return amount * (billable + self._ungenerated_upcoming_count(contract, first, last))
-        generated = self.db.scalar(
-            select(func.count(Order.id)).where(
-                Order.recurring_contract_id == contract.id,
-                Order.recurring_planned_date >= first,
-                Order.recurring_planned_date <= last,
-            )
-        ) or 0
+            return amount * billable
+        generated = self._generated_slot_count(contract, first, last)
         if generated > 0:
             return 0.0
         scheduled_visits = sum(
@@ -169,29 +137,35 @@ class RecurringMonthlyService:
         )
         return amount * scheduled_visits
 
-    def _ungenerated_upcoming_count(self, contract: RecurringContract, first: date, last: date) -> int:
-        """그달 예정 방문 중 아직 회차가 생성되지 않은 '미래(오늘 이후)' 슬롯 수.
-
-        과거 달은 예정 슬롯을 예상치로 더하지 않는다(실제 발생분만 청구). 미래/현재 달만,
-        스케줄상 예정이지만 아직 주문이 없는(recurring_planned_date 미존재) 방문을 예상 청구로 더한다.
-        """
-        today = business_today()
-        if last < today:
-            return 0
-        generated_planned = set(
-            self.db.scalars(
-                select(Order.recurring_planned_date).where(
-                    Order.recurring_contract_id == contract.id,
-                    Order.recurring_planned_date >= first,
-                    Order.recurring_planned_date <= last,
-                )
+    def _billable_generated_count(self, contract: RecurringContract, first: date, last: date) -> int:
+        rows = self.db.scalars(
+            select(Order.id).where(
+                Order.recurring_contract_id == contract.id,
+                Order.deleted_at.is_(None),
+                Order.status != OrderStatus.CANCELLED,
+                or_(
+                    (
+                        (Order.recurring_planned_date >= first)
+                        & (Order.recurring_planned_date <= last)
+                    ),
+                    (
+                        Order.recurring_planned_date.is_(None)
+                        & (Order.scheduled_date >= first)
+                        & (Order.scheduled_date <= last)
+                    ),
+                ),
             )
-        )
-        return sum(
-            1
-            for _seq, due in iter_due_dates(self._recurring._spec(contract), until=last)
-            if first <= due <= last and due >= today and due not in generated_planned
-        )
+        ).all()
+        return len(set(rows))
+
+    def _generated_slot_count(self, contract: RecurringContract, first: date, last: date) -> int:
+        return self.db.scalar(
+            select(func.count(Order.id)).where(
+                Order.recurring_contract_id == contract.id,
+                Order.recurring_planned_date >= first,
+                Order.recurring_planned_date <= last,
+            )
+        ) or 0
 
     def list_month(self, month: str) -> list[RecurringMonthlyRowRead]:
         first, last = _month_bounds(month)

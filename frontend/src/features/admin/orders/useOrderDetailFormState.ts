@@ -66,36 +66,30 @@ export function useOrderDetailFormState(order: AdminOrderDetail | null) {
     && isBalanceIncomplete(paymentStatusForBalance)
     && Number(order?.balance_amount ?? recomputedBalance) > 0;
   const isBalanceNoticeWorkflowReady = isBalanceNoticeAllowedStatus(order?.status);
-  const isBalanceNoticeBlockedByAs = Boolean(order?.as_intake_pending || order?.as_requested);
-  const canSendBalanceDue = hasSavedBalanceDue
-    && isBalanceNoticeWorkflowReady
-    && !isPaymentDirty
-    && !isBalanceNoticeBlockedByAs;
+  const canSendBalanceDue = hasSavedBalanceDue && isBalanceNoticeWorkflowReady && !isPaymentDirty;
   const canSendBalanceDueAfterStatusChange = hasSavedBalanceDue
     && isBalanceNoticeAllowedStatus(selectedStatus)
-    && !isPaymentDirty
-    && !isBalanceNoticeBlockedByAs;
-  const balanceDueBlockedText = isBalanceNoticeBlockedByAs
-    ? 'AS 접수 확인 또는 처리 중에는 잔금 안내를 보류합니다.'
-    : isPaymentDirty
-      ? '결제/정산 변경을 먼저 저장하세요.'
-      : !isBalanceNoticeWorkflowReady
-        ? '작업완료 이후 상태에서만 잔금 안내를 보낼 수 있습니다.'
-        : '미수 잔금이 있는 주문에서만 발송합니다.';
+    && !isPaymentDirty;
+  const balanceDueBlockedText = isPaymentDirty
+    ? '결제/정산 변경을 먼저 저장하세요.'
+    : !isBalanceNoticeWorkflowReady
+      ? '작업완료 이후 상태에서만 잔금 안내를 보낼 수 있습니다.'
+      : '미수 잔금이 있는 주문에서만 발송합니다.';
   const isAsRequestWorkflowReady = isAsRequestAllowedStatus(order?.status);
+  const hasAcceptedAsRequest = Boolean(order?.as_requested);
   const canOpenAsRequest = Boolean(order?.partner_id)
+    && !hasAcceptedAsRequest
     && !hasUnsavedChanges
-    && isAsRequestWorkflowReady
-    && !order?.as_requested;
-  const asRequestBlockedText = order?.as_requested
-    ? '이미 협력사에 전달되어 AS를 처리 중입니다.'
-    : !order?.partner_id
-      ? '협력사 배정 후 AS 요청을 보낼 수 있습니다.'
-    : hasUnsavedChanges
-      ? '저장하지 않은 변경사항을 먼저 저장하세요.'
-      : !isAsRequestWorkflowReady
-        ? '작업완료 이후 또는 고객확인필요 상태에서 AS 요청을 보낼 수 있습니다.'
-        : undefined;
+    && isAsRequestWorkflowReady;
+  const asRequestBlockedText = !order?.partner_id
+    ? '협력사 배정 후 AS 요청을 보낼 수 있습니다.'
+    : hasAcceptedAsRequest
+      ? '이미 협력사에 전달된 AS 요청입니다.'
+      : hasUnsavedChanges
+        ? '저장하지 않은 변경사항을 먼저 저장하세요.'
+        : !isAsRequestWorkflowReady
+          ? '작업완료 이후 또는 고객확인필요 상태에서 AS 요청을 보낼 수 있습니다.'
+          : undefined;
 
   const setReceiptType = (next: string) => {
     setSelectedReceiptType(next);

@@ -75,4 +75,6 @@ def _source_channel_orders(start_date: date, end_date: date) -> Select[tuple[Ord
 
 def _source_channel_label(value: str | None) -> str:
     source_channel = (value or "").strip()
+    if source_channel == "네이버":
+        return "네이버톡톡"
     return source_channel or "미지정"

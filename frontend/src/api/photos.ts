@@ -26,3 +26,9 @@ export function uploadPartnerJobPhoto(orderId, input) {
     body,
   });
 }
+
+export function deletePartnerJobPhoto(orderId, photoId) {
+  return apiRequest(`/partner/jobs/${encodeURIComponent(orderId)}/photos/${encodeURIComponent(photoId)}`, {
+    method: 'DELETE',
+  });
+}

@@ -19,14 +19,14 @@ from app.db.seed import (
     DEV_PARTNER_USER_ID,
     seed_dev_data,
 )
-from app.domain.constants import OrderStatus, PhotoType
+from app.domain.constants import OrderStatus, PhotoType, TimelineEventType
 from app.main import create_app
 from app.models import Base, Order, OrderGroup, OrderPhoto, Partner
 from app.services.photos import PhotoService
 
+
 SeedCallback = Callable[[Session], None]
 PNG_BYTES = b"\x89PNG\r\n\x1a\ncleanops-test-image"
-CUSTOMER_HEADERS = {"X-Customer-Token": "ct2_seed-customer-token-2450"}
 
 
 def make_test_client(
@@ -62,17 +62,10 @@ def make_test_client(
     return TestClient(app)
 
 
-def login(
-    client: TestClient,
-    path: str,
-    identifier: str,
-    password: str,
-) -> str:
+def login(client: TestClient, path: str, identifier: str, password: str) -> dict:
     response = client.post(path, json={"identifier": identifier, "password": password})
     assert response.status_code == 200, response.text
-    access_token = response.json().get("access_token")
-    assert isinstance(access_token, str)
-    return access_token
+    return response.json()
 
 
 def auth_headers(access_token: str) -> dict[str, str]:
@@ -80,23 +73,13 @@ def auth_headers(access_token: str) -> dict[str, str]:
 
 
 def partner_headers(client: TestClient) -> dict[str, str]:
-    access_token = login(
-        client,
-        "/api/auth/partner/login",
-        DEV_PARTNER_PHONE,
-        DEV_PARTNER_PASSWORD,
-    )
-    return auth_headers(access_token)
+    session = login(client, "/api/auth/partner/login", DEV_PARTNER_PHONE, DEV_PARTNER_PASSWORD)
+    return auth_headers(session["access_token"])
 
 
 def admin_headers(client: TestClient) -> dict[str, str]:
-    access_token = login(
-        client,
-        "/api/auth/admin/login",
-        DEV_ADMIN_EMAIL,
-        DEV_ADMIN_PASSWORD,
-    )
-    return auth_headers(access_token)
+    session = login(client, "/api/auth/admin/login", DEV_ADMIN_EMAIL, DEV_ADMIN_PASSWORD)
+    return auth_headers(session["access_token"])
 
 
 def seed_photo(
@@ -248,6 +231,7 @@ def test_partner_upload_auto_publishes_and_records_timeline(tmp_path, monkeypatc
     assert uploaded["photo_type"] == "before"
     assert uploaded["file_name"] == "upload-before.png"
     assert uploaded["file_url"].startswith("/uploads/photos/")
+    assert uploaded["photo_source"] == "partner"
     assert uploaded["is_customer_visible"] is True
     assert "uploaded_by_user_id" not in uploaded
 
@@ -266,6 +250,79 @@ def test_partner_upload_auto_publishes_and_records_timeline(tmp_path, monkeypatc
     event_types = {event["event_type"] for event in admin_detail_response.json()["timeline"]}
     assert {"photo_uploaded", "photo_approved"}.issubset(event_types)
     assert "status_changed" not in event_types
+
+
+def test_partner_can_delete_uploaded_photo_before_completion(tmp_path, monkeypatch) -> None:
+    client = make_test_client(tmp_path, monkeypatch)
+    headers = partner_headers(client)
+
+    upload_response = client.post(
+        f"/api/partner/jobs/{DEV_ORDER_ID}/photos",
+        headers=headers,
+        data={"photo_type": "before"},
+        files={"file": ("wrong-before.png", PNG_BYTES, "image/png")},
+    )
+    assert upload_response.status_code == 200, upload_response.text
+    photo_id = upload_response.json()["id"]
+    storage_root = Path(settings.storage_root)
+    assert [path for path in storage_root.rglob("*") if path.is_file()]
+
+    delete_response = client.delete(
+        f"/api/partner/jobs/{DEV_ORDER_ID}/photos/{photo_id}",
+        headers=headers,
+    )
+
+    assert delete_response.status_code == 204, delete_response.text
+    detail_response = client.get(f"/api/partner/jobs/{DEV_ORDER_ID}", headers=headers)
+    assert detail_response.status_code == 200
+    assert photo_id not in {photo["id"] for photo in detail_response.json()["photos"]}
+    assert not [path for path in storage_root.rglob("*") if path.is_file()]
+
+    admin_detail_response = client.get(
+        f"/api/admin/orders/{DEV_ORDER_ID}",
+        headers=admin_headers(client),
+    )
+    assert admin_detail_response.status_code == 200
+    assert any(
+        event["event_type"] == TimelineEventType.PHOTO_REVOKED.value
+        and event["title"] == "협력사 사진 삭제"
+        for event in admin_detail_response.json()["timeline"]
+    )
+
+
+def test_partner_delete_rejects_other_partner_photo(tmp_path, monkeypatch) -> None:
+    def seed(db: Session) -> None:
+        seed_other_partner_order_with_photo(db)
+
+    client = make_test_client(tmp_path, monkeypatch, seed)
+    headers = partner_headers(client)
+
+    response = client.delete(
+        "/api/partner/jobs/other-partner-order/photos/other-partner-photo",
+        headers=headers,
+    )
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "order_not_found"
+
+
+def test_partner_delete_rejects_locked_job_status(tmp_path, monkeypatch) -> None:
+    def seed(db: Session) -> None:
+        order = db.get(Order, DEV_ORDER_ID)
+        assert order is not None
+        order.status = OrderStatus.CUSTOMER_DELIVERY_NEEDED
+        seed_photo(db, photo_id="locked-before-photo", photo_type=PhotoType.BEFORE)
+
+    client = make_test_client(tmp_path, monkeypatch, seed)
+    headers = partner_headers(client)
+
+    response = client.delete(
+        f"/api/partner/jobs/{DEV_ORDER_ID}/photos/locked-before-photo",
+        headers=headers,
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "invalid_status_for_delete"
 
 
 def test_partner_upload_removes_stored_file_when_db_write_fails(tmp_path, monkeypatch) -> None:
@@ -316,8 +373,7 @@ def test_customer_dto_exposes_only_approved_photos(tmp_path, monkeypatch) -> Non
     client = make_test_client(tmp_path, monkeypatch, seed)
 
     response = client.post(
-        "/api/customer/orders/verify",
-        headers=CUSTOMER_HEADERS,
+        "/api/customer/orders/ct2_seed-customer-token-2450/verify",
         json={"phone_suffix": "5432"},
     )
 

@@ -120,9 +120,31 @@ def test_month_amount_per_visit_counts_actual_live_orders(db_session):
     assert row.amount == 50000 * 2
 
 
-def test_month_amount_per_visit_future_projects_own_plus_moved(db_session):
-    # 배치4 리뷰 #8: 미래 달로 이동해 온 회차로 billable>0가 된 미래 달도, 그 달 자체의 미생성
-    # 예정 방문을 함께 예상한다(과소청구 방지). 월 1회(day10) per_visit 계약 + 미래 달로 이동한 1건.
+def test_month_amount_uses_generated_slots_without_new_weekday_projection(db_session):
+    g = OrderGroup(id=str(uuid4()), customer_token=f"t-{uuid4()}", customer_name="요일변경",
+                   customer_phone="01022223333", customer_address="C", customer_visible_payment=False)
+    db_session.add(g); db_session.flush()
+    c = RecurringContract(id=str(uuid4()), label="WG", order_group_id=g.id,
+                          recurrence_mode=RecurrenceMode.WEEKLY, interval_weeks=1, weekdays="1",
+                          start_date=date(2026, 6, 1), status=RecurringContractStatus.ACTIVE,
+                          service_name="청소", total_amount=50000, billing_mode="per_visit",
+                          partner_payment_amount=30000, partner_billing_mode="per_visit")
+    db_session.add(c); db_session.flush()
+    db_session.add(Order(
+        id=str(uuid4()), group_id=g.id, status=OrderStatus.SCHEDULED,
+        received_date=date(2026, 6, 1), scheduled_date=date(2026, 6, 1),
+        service_name="청소", recurring_contract_id=c.id, recurring_planned_date=date(2026, 6, 1),
+    ))
+    db_session.commit()
+
+    row = next(r for r in RecurringMonthlyService(db_session).list_month("2026-06") if r.contract_id == c.id)
+    assert row.amount == 50000
+    assert row.partner_amount == 30000
+
+
+def test_month_amount_per_visit_future_projects_own_slots_without_moved_planned_month(db_session):
+    # 월 1회(day10) per_visit 계약에서 과거 예정 회차를 미래 방문일로 옮겨도,
+    # 자동 생성 회차는 원래 예정 월에 귀속해 미래 달과 중복 청구하지 않는다.
     from app.core.time import business_today
 
     today = business_today()
@@ -142,9 +164,11 @@ def test_month_amount_per_visit_future_projects_own_plus_moved(db_session):
         service_name="청소", recurring_contract_id=c.id, recurring_planned_date=date(2020, 1, 10),
     ))
     db_session.commit()
+    original_row = next(r for r in RecurringMonthlyService(db_session).list_month("2020-01") if r.contract_id == c.id)
+    assert original_row.amount == 70000
+
     row = next(r for r in RecurringMonthlyService(db_session).list_month(fm) if r.contract_id == c.id)
-    # 이동해 온 1건(billable) + 그 달 자체 예정(day10, 미생성·미래) 1건 = 2회.
-    assert row.amount == 70000 * 2
+    assert row.amount == 70000
 
 
 def test_monthly_api_rejects_invalid_month(client, seed_admin_token):

@@ -1,7 +1,7 @@
 from datetime import date
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, Response, UploadFile, status
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
@@ -12,7 +12,6 @@ from app.repositories.order_groups import OrderGroupRepository
 from app.repositories.orders import OrderRepository
 from app.repositories.photos import PhotoRepository
 from app.repositories.timeline import TimelineRepository
-from app.schemas.message import MessageLogRead, MessageSendRequest
 from app.schemas.order import (
     AdminOrderDetailRead,
     AdminOrderGroupRead,
@@ -27,6 +26,7 @@ from app.schemas.order import (
     OrderLineCreate,
     OrderUpdate,
 )
+from app.schemas.message import MessageLogRead, MessageSendRequest
 from app.schemas.report import OrderImportResult
 from app.services.exporters import to_xlsx_bytes
 from app.services.messages import MessageService
@@ -75,7 +75,7 @@ class OrderMessageSendRequest(BaseModel):
 
 
 class OrderAsRequestBody(BaseModel):
-    memo: str = Field(max_length=2000)
+    memo: str
 
 
 @router.get("", response_model=list[AdminOrderRead])
@@ -84,7 +84,7 @@ def list_orders(
     include_past_paid: bool = False,
     db: Session = Depends(get_session),
     _: CurrentUser = Depends(require_admin),
-) -> list[AdminOrderRead]:
+) -> list:
     group_repo = OrderGroupRepository(db)
     orders = OrderRepository(db).list_orders(
         sort=sort,
@@ -325,7 +325,7 @@ def send_quote_message(
     user: CurrentUser = Depends(require_admin),
 ) -> MessageLogRead:
     try:
-        log = MessageService(db).send(
+        return MessageService(db).send(
             MessageSendRequest(
                 order_id=order_id,
                 message_type=MessageType.CUSTOMER_QUOTE,
@@ -335,7 +335,6 @@ def send_quote_message(
             ),
             actor_user_id=user.id,
         )
-        return MessageLogRead.model_validate(log)
     except ValueError as exc:
         raise order_message_http_error(exc) from exc
 
@@ -348,7 +347,7 @@ def send_partner_unpaid_notice(
     user: CurrentUser = Depends(require_admin),
 ) -> MessageLogRead:
     try:
-        log = MessageService(db).send(
+        return MessageService(db).send(
             MessageSendRequest(
                 order_id=order_id,
                 message_type=MessageType.PARTNER_CUSTOMER_INFO,
@@ -358,7 +357,6 @@ def send_partner_unpaid_notice(
             ),
             actor_user_id=user.id,
         )
-        return MessageLogRead.model_validate(log)
     except ValueError as exc:
         raise order_message_http_error(exc) from exc
 
@@ -387,7 +385,7 @@ def get_order(
     order_id: str,
     db: Session = Depends(get_session),
     _: CurrentUser = Depends(require_admin),
-) -> AdminOrderDetailRead:
+):
     order = OrderRepository(db).get(order_id)
     if order is None:
         raise HTTPException(status_code=404, detail="order_not_found")
@@ -400,7 +398,7 @@ def get_order(
             service_name=line.service_name,
             partner_id=line.partner_id,
             team_name=line.team_name,
-            total_amount=float(line.total_amount) if line.total_amount is not None else None,
+            total_amount=line.total_amount,
         )
         for line in group_repo.list_lines(order.group_id)
         if line.id != order.id
@@ -432,15 +430,10 @@ def update_order(
 def order_http_error(exc: ValueError) -> HTTPException:
     detail = str(exc)
     if detail in {"order_not_found", "group_not_found"}:
-        status_code = 404
-    elif detail in {
-        "as_request_already_requested",
-        "as_intake_approval_required",
-        "message_dispatch_in_progress",
-    }:
-        status_code = 409
-    else:
-        status_code = 400
+        return HTTPException(status_code=404, detail=detail)
+    if detail == "as_request_already_accepted":
+        return HTTPException(status_code=409, detail=detail)
+    status_code = 400
     return HTTPException(status_code=status_code, detail=detail)
 
 

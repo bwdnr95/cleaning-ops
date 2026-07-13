@@ -132,7 +132,8 @@ class ReportService:
             partner = partners.get(partner_id)
             if partner is None:
                 continue
-            total_amounts = [Decimal(str(order.total_amount or 0)) for order in orders]
+            revenue_orders = [order for order in orders if order.status in _REVENUE_STATUSES]
+            total_amounts = [Decimal(str(order.total_amount or 0)) for order in revenue_orders]
             pending_orders = [
                 order
                 for order in orders

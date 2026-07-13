@@ -1,4 +1,6 @@
 import React from 'react';
+import { PhotoLightbox } from '../../components/common/PhotoLightbox';
+import { ProtectedApiImage } from '../../components/common/ProtectedApiImage';
 import { Avatar, Badge, Icon } from '../../components/common/ui';
 import {
   addPartnerJobMemo,
@@ -10,8 +12,8 @@ import {
   startPartnerJob,
 } from '../../api/partner';
 import { PartnerSignaturePad } from './PartnerSignaturePad';
-import { uploadPartnerJobPhoto } from '../../api/photos';
-import { ApiError, toApiAssetUrl } from '../../api/client';
+import { deletePartnerJobPhoto, uploadPartnerJobPhoto } from '../../api/photos';
+import { ApiError } from '../../api/client';
 import { useApiResource } from '../../api/useApiResource';
 import { useAuth } from '../../store/authStore';
 import { formatQuantity } from '../../domain/format';
@@ -44,6 +46,7 @@ export function PartnerJobDetail({ onDetailOpenChange = undefined } = {}) {
   const [uploadNotice, setUploadNotice] = React.useState(null);
   const [uploadingPhotoType, setUploadingPhotoType] = React.useState(null);
   const [uploadingCount, setUploadingCount] = React.useState(0);
+  const [deletingPhotoId, setDeletingPhotoId] = React.useState(null);
   const [statusError, setStatusError] = React.useState(null);
   const [isUploading, setIsUploading] = React.useState(false);
   const [isSavingStatus, setIsSavingStatus] = React.useState(false);
@@ -52,10 +55,13 @@ export function PartnerJobDetail({ onDetailOpenChange = undefined } = {}) {
   const [memoNotice, setMemoNotice] = React.useState(null);
   const [isSavingMemo, setIsSavingMemo] = React.useState(false);
   const [signatureDataUrl, setSignatureDataUrl] = React.useState('');
-  const beforeInputRef = React.useRef<HTMLInputElement | null>(null);
-  const afterInputRef = React.useRef<HTMLInputElement | null>(null);
-  const etcInputRef = React.useRef<HTMLInputElement | null>(null);
-  const detailRegionRef = React.useRef<HTMLDivElement | null>(null);
+  const [openPhotoId, setOpenPhotoId] = React.useState<string | null>(null);
+  const beforeCameraInputRef = React.useRef<HTMLInputElement | null>(null);
+  const beforeAlbumInputRef = React.useRef<HTMLInputElement | null>(null);
+  const afterCameraInputRef = React.useRef<HTMLInputElement | null>(null);
+  const afterAlbumInputRef = React.useRef<HTMLInputElement | null>(null);
+  const etcCameraInputRef = React.useRef<HTMLInputElement | null>(null);
+  const etcAlbumInputRef = React.useRef<HTMLInputElement | null>(null);
 
   React.useEffect(() => {
     onDetailOpenChange?.(Boolean(selectedJobId));
@@ -76,25 +82,29 @@ export function PartnerJobDetail({ onDetailOpenChange = undefined } = {}) {
     () => groupJobPhotos(filterCurrentEvidencePhotos(job)),
     [job],
   );
-
-  React.useEffect(() => {
-    if (!selectedJobId || !job?.id) {
-      return undefined;
-    }
-    const frameId = window.requestAnimationFrame(() => detailRegionRef.current?.focus());
-    return () => window.cancelAnimationFrame(frameId);
-  }, [selectedJobId, job?.id]);
+  const lightboxPhotos = React.useMemo(
+    () => (job?.photos || []).map((photo) => ({
+      id: photo.id,
+      src: photo.file_url,
+      alt: photo.file_name || photoTypeLabel(photo.photo_type),
+      caption: photo.file_name || photoTypeLabel(photo.photo_type),
+      isProtected: true,
+    })),
+    [job?.photos],
+  );
 
   React.useEffect(() => {
     setUploadError(null);
     setUploadNotice(null);
     setUploadingPhotoType(null);
     setUploadingCount(0);
+    setDeletingPhotoId(null);
     setStatusError(null);
     setMemoDraft('');
     setMemoError(null);
     setMemoNotice(null);
     setSignatureDataUrl('');
+    setOpenPhotoId(null);
   }, [selectedJobId]);
 
   const refreshFlow = () => {
@@ -180,6 +190,31 @@ export function PartnerJobDetail({ onDetailOpenChange = undefined } = {}) {
     }
   };
 
+  const handlePhotoDelete = async (photo) => {
+    if (!job || !photo?.id || deletingPhotoId) {
+      return;
+    }
+    if (!window.confirm('이 사진을 삭제할까요?')) {
+      return;
+    }
+
+    setUploadError(null);
+    setUploadNotice(null);
+    setDeletingPhotoId(photo.id);
+    try {
+      await deletePartnerJobPhoto(job.id, photo.id);
+      if (openPhotoId === photo.id) {
+        setOpenPhotoId(null);
+      }
+      refreshFlow();
+      setUploadNotice(`${photoTypeLabel(photo.photo_type)} 사진을 삭제했습니다.`);
+    } catch (requestError) {
+      setUploadError(toPhotoDeleteErrorMessage(requestError));
+    } finally {
+      setDeletingPhotoId(null);
+    }
+  };
+
   const handleStatusAction = async (action) => {
     if (!job) {
       return;
@@ -197,12 +232,8 @@ export function PartnerJobDetail({ onDetailOpenChange = undefined } = {}) {
       }
       refreshFlow();
     } catch (requestError) {
-      if (requestError instanceof ApiError && requestError.detail === 'partner_confirmation_required') {
-        setStatusError('작업 일정을 먼저 확인해주세요.');
-      } else if (requestError instanceof ApiError && requestError.detail === 'before_photo_required_for_start') {
+      if (requestError instanceof ApiError && requestError.detail === 'before_photo_required_for_start') {
         setStatusError('비포 사진을 1장 이상 업로드한 뒤 작업을 시작해주세요.');
-      } else if (requestError instanceof ApiError && requestError.detail === 'schedule_required_for_confirmation') {
-        setStatusError('관리자가 방문일을 확정한 뒤 작업 일정을 확인할 수 있습니다.');
       } else if (requestError instanceof ApiError && requestError.detail === 'completion_evidence_required') {
         setStatusError('비포/애프터 사진과 고객 서명을 모두 준비한 뒤 완료 처리해주세요.');
       } else {
@@ -250,13 +281,13 @@ export function PartnerJobDetail({ onDetailOpenChange = undefined } = {}) {
     );
   }
 
-  const hasConfirmAction = CONFIRMABLE_JOB_STATUSES.includes(job.status) || Boolean(job.partner_confirmation_required);
-  const canConfirm = hasConfirmAction && Boolean(job.scheduled_date);
-  const hasApprovedAftercare = job.status !== '고객확인필요' || job.as_requested;
-  const canStart = STARTABLE_JOB_STATUSES.includes(job.status) && hasApprovedAftercare && !job.partner_confirmation_required;
+  const canConfirm = CONFIRMABLE_JOB_STATUSES.includes(job.status);
+  const canUseFieldActions = isPartnerFieldActionReady(job);
+  const canStart = STARTABLE_JOB_STATUSES.includes(job.status) && canUseFieldActions;
   const canComplete = COMPLETABLE_JOB_STATUSES.includes(job.status);
-  const canUploadPhotos = PHOTO_UPLOADABLE_JOB_STATUSES.includes(job.status) && hasApprovedAftercare && !job.partner_confirmation_required;
+  const canUploadPhotos = PHOTO_UPLOADABLE_JOB_STATUSES.includes(job.status) && canUseFieldActions;
   const photoUploadDisabled = isUploading || !canUploadPhotos;
+  const canDeletePhotos = canUploadPhotos && !isUploading && !deletingPhotoId;
   const statusLock = getPartnerStatusLock(job.status, job.as_requested);
   const jobAddress = formatJobAddress(job);
   const hasBeforePhoto = currentEvidencePhotoGroups.before.length > 0;
@@ -269,10 +300,10 @@ export function PartnerJobDetail({ onDetailOpenChange = undefined } = {}) {
   const footerHelpText = partnerFooterHelpText(job.status, job.as_requested);
 
   return (
-    <div data-testid="partner-job-detail-page" style={{ height: '100%', display: 'flex', flexDirection: 'column', background: 'var(--bg-subtle)', overflow: 'hidden' }}>
-      <div style={{ padding: '12px 16px 10px', background: 'var(--surface)', borderBottom: '1px solid var(--border)' }}>
+    <div data-testid="partner-job-detail-page" style={{ height: '100%', display: 'flex', flexDirection: 'column', background: '#f4f6f8', overflow: 'hidden' }}>
+      <div style={{ padding: '12px 16px 10px', background: '#fff', borderBottom: '1px solid var(--border)' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-          <button type="button" aria-label="작업 목록으로 돌아가기" onClick={() => setSelectedJobId(null)} style={{ padding: 0, border: 'none', background: 'transparent', cursor: 'pointer' }}>
+          <button onClick={() => setSelectedJobId(null)} style={{ padding: 0, border: 'none', background: 'transparent', cursor: 'pointer' }}>
             <Icon name="chevronLeft" size={20}/>
           </button>
           <PartnerStatusBadge status={job.status}/>
@@ -282,7 +313,7 @@ export function PartnerJobDetail({ onDetailOpenChange = undefined } = {}) {
         <div style={{ fontSize: 12, color: 'var(--text-tertiary)', marginTop: 2 }}>{formatQuantity(job.size_or_quantity) || job.service_detail || '상세 수량 미입력'}</div>
       </div>
 
-      <div ref={detailRegionRef} role="region" aria-label="작업 상세" tabIndex={0} className="scroll" style={{ flex: 1, overflow: 'auto', padding: 12 }}>
+      <div className="scroll" style={{ flex: 1, overflow: 'auto', padding: 12 }}>
         <Panel>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10, paddingBottom: 10, borderBottom: '1px solid var(--divider)' }}>
             <span style={{ width: 32, height: 32, borderRadius: 8, background: 'var(--info-bg)', color: 'var(--info-fg)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -315,7 +346,7 @@ export function PartnerJobDetail({ onDetailOpenChange = undefined } = {}) {
             </div>
           </div>
           <SectionLabel>특별 요청</SectionLabel>
-          <div className="multiline-text" style={{ padding: 10, background: 'var(--warn-bg)', border: '1px solid var(--warn-border)', borderRadius: 8, fontSize: 12.5, lineHeight: 1.5, color: 'var(--warn-fg)' }}>
+          <div className="multiline-text" style={{ padding: 10, background: 'var(--warn-bg)', border: '1px solid var(--warn-border)', borderRadius: 8, fontSize: 12.5, lineHeight: 1.5, color: '#78350f' }}>
             {job.special_request || '별도 요청 사항이 없습니다.'}
           </div>
           {job.as_requested && (
@@ -341,7 +372,7 @@ export function PartnerJobDetail({ onDetailOpenChange = undefined } = {}) {
               (job.memos || []).map((memo, index) => (
                 <div key={memo.id || index} data-testid="partner-memo-item" style={{ padding: 10, background: 'var(--bg-subtle)', border: '1px solid var(--border)', borderRadius: 8 }}>
                   <div className="multiline-text" style={{ fontSize: 12.5, lineHeight: 1.5, color: 'var(--text)' }}>{memo.text}</div>
-                  <div style={{ fontSize: 10.5, color: 'var(--text-secondary)', marginTop: 6 }}>{formatKoreanDateTime(memo.created_at)}</div>
+                  <div style={{ fontSize: 10.5, color: 'var(--text-tertiary)', marginTop: 6 }}>{formatKoreanDateTime(memo.created_at)}</div>
                 </div>
               ))
             )}
@@ -373,8 +404,8 @@ export function PartnerJobDetail({ onDetailOpenChange = undefined } = {}) {
         <PartnerMessagesPanel jobId={job.id} />
 
         {!canUploadPhotos && (
-          <div className="ko-copy" data-testid="partner-photo-upload-locked" style={{ margin: '0 2px 10px', padding: '8px 10px', border: '1px solid var(--border)', borderRadius: 8, background: 'var(--bg-subtle)', color: 'var(--text-secondary)', fontSize: 11.5, lineHeight: 1.45 }}>
-            {photoUploadLockMessage(job.status)}
+          <div data-testid="partner-photo-upload-locked" style={{ margin: '0 2px 10px', padding: '8px 10px', border: '1px solid var(--border)', borderRadius: 8, background: 'var(--bg-subtle)', color: 'var(--text-secondary)', fontSize: 11.5, lineHeight: 1.45 }}>
+            {photoUploadLockMessage(job.status, job.as_requested)}
           </div>
         )}
 
@@ -382,30 +413,58 @@ export function PartnerJobDetail({ onDetailOpenChange = undefined } = {}) {
           title="비포 사진"
           tone="neutral"
           photos={photoGroups.before}
-          onAdd={() => beforeInputRef.current?.click()}
+          onCapture={() => beforeCameraInputRef.current?.click()}
+          onPick={() => beforeAlbumInputRef.current?.click()}
           disabled={photoUploadDisabled}
           isUploading={isUploading}
+          onOpenPhoto={setOpenPhotoId}
+          canDelete={canDeletePhotos}
+          deletingPhotoId={deletingPhotoId}
+          onDeletePhoto={handlePhotoDelete}
         />
-        <input ref={beforeInputRef} data-testid="partner-before-photo-input" type="file" accept="image/jpeg,image/png,image/webp" capture="environment" multiple style={{ display: 'none' }} onChange={(event) => void handlePhotoSelected('before', event)} />
+        <input ref={beforeCameraInputRef} data-testid="partner-before-photo-camera-input" type="file" accept="image/*" capture="environment" style={{ display: 'none' }} onChange={(event) => void handlePhotoSelected('before', event)} />
+        <input ref={beforeAlbumInputRef} data-testid="partner-before-photo-album-input" type="file" accept="image/jpeg,image/png,image/webp" multiple style={{ display: 'none' }} onChange={(event) => void handlePhotoSelected('before', event)} />
 
         <PhotoPanel
           title="애프터 사진"
           tone="success"
           photos={photoGroups.after}
-          onAdd={() => afterInputRef.current?.click()}
+          onCapture={() => afterCameraInputRef.current?.click()}
+          onPick={() => afterAlbumInputRef.current?.click()}
           disabled={photoUploadDisabled}
           isUploading={isUploading}
+          onOpenPhoto={setOpenPhotoId}
+          canDelete={canDeletePhotos}
+          deletingPhotoId={deletingPhotoId}
+          onDeletePhoto={handlePhotoDelete}
         />
-        <input ref={afterInputRef} data-testid="partner-after-photo-input" type="file" accept="image/jpeg,image/png,image/webp" capture="environment" multiple style={{ display: 'none' }} onChange={(event) => void handlePhotoSelected('after', event)} />
+        <input ref={afterCameraInputRef} data-testid="partner-after-photo-camera-input" type="file" accept="image/*" capture="environment" style={{ display: 'none' }} onChange={(event) => void handlePhotoSelected('after', event)} />
+        <input ref={afterAlbumInputRef} data-testid="partner-after-photo-album-input" type="file" accept="image/jpeg,image/png,image/webp" multiple style={{ display: 'none' }} onChange={(event) => void handlePhotoSelected('after', event)} />
         <PhotoPanel
           title="기타 사진"
           tone="brand"
           photos={photoGroups.etc}
-          onAdd={() => etcInputRef.current?.click()}
+          onCapture={() => etcCameraInputRef.current?.click()}
+          onPick={() => etcAlbumInputRef.current?.click()}
           disabled={photoUploadDisabled}
           isUploading={isUploading}
+          onOpenPhoto={setOpenPhotoId}
+          canDelete={canDeletePhotos}
+          deletingPhotoId={deletingPhotoId}
+          onDeletePhoto={handlePhotoDelete}
         />
-        <input ref={etcInputRef} data-testid="partner-etc-photo-input" type="file" accept="image/jpeg,image/png,image/webp" capture="environment" multiple style={{ display: 'none' }} onChange={(event) => void handlePhotoSelected('etc', event)} />
+        <input ref={etcCameraInputRef} data-testid="partner-etc-photo-camera-input" type="file" accept="image/*" capture="environment" style={{ display: 'none' }} onChange={(event) => void handlePhotoSelected('etc', event)} />
+        <input ref={etcAlbumInputRef} data-testid="partner-etc-photo-album-input" type="file" accept="image/jpeg,image/png,image/webp" multiple style={{ display: 'none' }} onChange={(event) => void handlePhotoSelected('etc', event)} />
+        {photoGroups.customerAs.length > 0 && (
+          <PhotoPanel
+            title="고객 AS 접수 사진"
+            tone="warn"
+            photos={photoGroups.customerAs}
+            showUpload={false}
+            disabled
+            onOpenPhoto={setOpenPhotoId}
+          />
+        )}
         {isUploading && (
           <div data-testid="partner-photo-upload-status" style={{ margin: '-2px 2px 10px', color: 'var(--brand)', fontSize: 11.5, fontWeight: 700 }}>
             {photoTypeLabel(uploadingPhotoType)} 사진 {uploadingCount}장 업로드 중입니다.
@@ -433,7 +492,7 @@ export function PartnerJobDetail({ onDetailOpenChange = undefined } = {}) {
           <Panel>
             <SectionLabel>고객 서명</SectionLabel>
             {job.has_recorded_customer_signature && !signatureDataUrl && (
-              <div className="ko-copy" style={{ marginBottom: 8, fontSize: 11.5, color: 'var(--text-tertiary)', lineHeight: 1.5 }}>
+              <div style={{ marginBottom: 8, fontSize: 11.5, color: 'var(--text-tertiary)', lineHeight: 1.5 }}>
                 이전 서명 기록이 있어도 이번 작업 완료에는 고객님의 새 서명이 필요합니다.
               </div>
             )}
@@ -446,18 +505,13 @@ export function PartnerJobDetail({ onDetailOpenChange = undefined } = {}) {
         )}
       </div>
 
-      <div style={{ padding: '10px 14px calc(12px + env(safe-area-inset-bottom))', background: 'var(--surface)', borderTop: '1px solid var(--border)' }}>
-        {hasConfirmAction || canStart || canComplete ? (
+      <div style={{ padding: '10px 14px calc(12px + env(safe-area-inset-bottom))', background: '#fff', borderTop: '1px solid var(--border)', boxShadow: '0 -4px 12px rgba(15,23,42,0.04)' }}>
+        {canConfirm || canStart || canComplete ? (
           <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: 8 }}>
-            {hasConfirmAction && (
-              <button data-testid="partner-confirm-job" disabled={isSavingStatus || !canConfirm} onClick={() => void handleStatusAction('confirm')} style={primaryCtaStyle(isSavingStatus || !canConfirm)}>
+            {canConfirm && (
+              <button data-testid="partner-confirm-job" disabled={isSavingStatus} onClick={() => void handleStatusAction('confirm')} style={primaryCtaStyle(isSavingStatus)}>
                 <Icon name="check" size={16}/> 작업 일정 확인
               </button>
-            )}
-            {hasConfirmAction && !canConfirm && (
-              <div role="status" style={{ color: 'var(--warn-fg)', fontSize: 12, lineHeight: 1.45 }}>
-                관리자가 방문일을 확정하면 작업 일정을 확인할 수 있습니다.
-              </div>
             )}
             {canStart && (
               <button data-testid="partner-start-job" disabled={isSavingStatus || !canSubmitStart} onClick={() => void handleStatusAction('start')} style={secondaryCtaStyle(isSavingStatus || !canSubmitStart)}>
@@ -471,13 +525,13 @@ export function PartnerJobDetail({ onDetailOpenChange = undefined } = {}) {
             )}
           </div>
         ) : (
-          <div className="ko-copy" data-testid="partner-status-locked" style={{ minHeight: 48, border: '1px solid var(--border)', borderRadius: 10, background: statusLock.tone === 'danger' ? 'var(--danger-bg)' : 'var(--bg-subtle)', color: statusLock.tone === 'danger' ? 'var(--danger-fg)' : 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: 10, padding: '8px 10px' }}>
+          <div data-testid="partner-status-locked" style={{ minHeight: 48, border: '1px solid var(--border)', borderRadius: 10, background: statusLock.tone === 'danger' ? 'var(--danger-bg)' : 'var(--bg-subtle)', color: statusLock.tone === 'danger' ? 'var(--danger-fg)' : 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: 10, padding: '8px 10px' }}>
             <span style={{ width: 30, height: 30, borderRadius: 8, background: statusLock.tone === 'success' ? 'var(--success-bg)' : statusLock.tone === 'danger' ? 'var(--danger-bg)' : 'var(--warn-bg)', color: statusLock.tone === 'success' ? 'var(--success-fg)' : statusLock.tone === 'danger' ? 'var(--danger-fg)' : 'var(--warn-fg)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
               <Icon name={statusLock.icon} size={15}/>
             </span>
             <span style={{ minWidth: 0 }}>
               <span style={{ display: 'block', fontSize: 12.5, fontWeight: 800, color: 'var(--text)' }}>{statusLock.title}</span>
-              <span style={{ display: 'block', fontSize: 11, color: 'var(--text-secondary)', marginTop: 1 }}>{statusLock.description}</span>
+              <span style={{ display: 'block', fontSize: 11, color: 'var(--text-tertiary)', marginTop: 1 }}>{statusLock.description}</span>
             </span>
           </div>
         )}
@@ -486,12 +540,26 @@ export function PartnerJobDetail({ onDetailOpenChange = undefined } = {}) {
           {footerHelpText}
         </div>
       </div>
+      <PhotoLightbox
+        photos={lightboxPhotos}
+        openPhotoId={openPhotoId}
+        onOpenPhoto={setOpenPhotoId}
+        onClose={() => setOpenPhotoId(null)}
+      />
     </div>
   );
 }
 
 function formatJobAddress(job) {
-  return [job.customer_address, job.customer_address_detail].filter(Boolean).join(' ');
+  return [stripPostalCode(job.customer_address), job.customer_address_detail].filter(Boolean).join(' ');
+}
+
+function stripPostalCode(value) {
+  return String(value || '')
+    .replace(/^\s*\(?\d{5}\)?\s*/, '')
+    .replace(/\s*\(\d{5}\)\s*/g, ' ')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
 }
 
 function readInitialPartnerJobId() {
@@ -515,19 +583,19 @@ function PartnerJobList({ jobs, onSelect, onReload = undefined }) {
   }, [jobs, filter]);
 
   return (
-    <div data-testid="partner-jobs-page" style={{ height: '100%', background: 'var(--bg-subtle)', overflow: 'auto', padding: 14 }}>
+    <div data-testid="partner-jobs-page" style={{ height: '100%', background: '#f4f6f8', overflow: 'auto', padding: 14 }}>
       <PartnerHomeHero jobs={jobs} activeFilter={filter} onToggleFilter={toggleFilter} />
 
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
         <h2 style={{ margin: 0, fontSize: 16.5, fontWeight: 800 }}>
           {filter ? `${BUCKET_LABELS[filter]} 작업` : '내 작업'}
           {jobs.length > 0 && (
-            <span style={{ marginLeft: 6, fontSize: 13, fontWeight: 600, color: 'var(--text-secondary)' }}>{visibleJobs.length}건</span>
+            <span style={{ marginLeft: 6, fontSize: 13, fontWeight: 600, color: 'var(--text-tertiary)' }}>{visibleJobs.length}건</span>
           )}
         </h2>
         <div style={{ flex: 1 }} />
         {filter && (
-          <button type="button" onClick={() => setFilter(null)} style={{ height: 32, padding: '0 11px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text-secondary)', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>
+          <button type="button" onClick={() => setFilter(null)} style={{ height: 32, padding: '0 11px', borderRadius: 8, border: '1px solid var(--border)', background: '#fff', color: 'var(--text-secondary)', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>
             전체 보기
           </button>
         )}
@@ -537,7 +605,7 @@ function PartnerJobList({ jobs, onSelect, onReload = undefined }) {
             data-testid="partner-jobs-refresh"
             onClick={onReload}
             aria-label="새로고침"
-            style={{ width: 34, height: 34, flexShrink: 0, borderRadius: 8, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text-secondary)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}
+            style={{ width: 34, height: 34, flexShrink: 0, borderRadius: 9, border: '1px solid var(--border)', background: '#fff', color: 'var(--text-secondary)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}
           >
             <Icon name="refresh" size={15} />
           </button>
@@ -545,7 +613,7 @@ function PartnerJobList({ jobs, onSelect, onReload = undefined }) {
       </div>
 
       {jobs.length === 0 ? (
-        <div data-testid="partner-jobs-empty" style={{ marginTop: 8, background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8, padding: '34px 20px', textAlign: 'center' }}>
+        <div data-testid="partner-jobs-empty" style={{ marginTop: 8, background: '#fff', border: '1px solid var(--border)', borderRadius: 12, padding: '34px 20px', textAlign: 'center' }}>
           <div style={{ width: 54, height: 54, margin: '0 auto 14px', borderRadius: 15, background: 'var(--brand-bg)', color: 'var(--brand)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
             <Icon name="inbox" size={26} />
           </div>
@@ -557,23 +625,23 @@ function PartnerJobList({ jobs, onSelect, onReload = undefined }) {
             <button
               type="button"
               onClick={onReload}
-              style={{ marginTop: 18, height: 40, padding: '0 18px', borderRadius: 8, border: '1px solid var(--brand)', background: 'var(--surface)', color: 'var(--brand)', fontSize: 13, fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}
+              style={{ marginTop: 18, height: 40, padding: '0 18px', borderRadius: 10, border: '1px solid var(--brand)', background: '#fff', color: 'var(--brand)', fontSize: 13, fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}
             >
               <Icon name="refresh" size={14} /> 새로고침
             </button>
           )}
         </div>
       ) : visibleJobs.length === 0 ? (
-        <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8, padding: '26px 20px', textAlign: 'center', color: 'var(--text-secondary)' }}>
+        <div style={{ background: '#fff', border: '1px solid var(--border)', borderRadius: 12, padding: '26px 20px', textAlign: 'center', color: 'var(--text-tertiary)' }}>
           <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 12 }}>{BUCKET_LABELS[filter]} 상태인 작업이 없어요</div>
-          <button type="button" onClick={() => setFilter(null)} style={{ height: 36, padding: '0 16px', borderRadius: 8, border: '1px solid var(--brand)', background: 'var(--surface)', color: 'var(--brand)', fontSize: 12.5, fontWeight: 700, cursor: 'pointer' }}>
+          <button type="button" onClick={() => setFilter(null)} style={{ height: 36, padding: '0 16px', borderRadius: 9, border: '1px solid var(--brand)', background: '#fff', color: 'var(--brand)', fontSize: 12.5, fontWeight: 700, cursor: 'pointer' }}>
             전체 보기
           </button>
         </div>
       ) : (
         <div style={{ display: 'grid', gap: 10 }}>
           {visibleJobs.map((job) => (
-            <button type="button" key={job.id} data-testid={`partner-job-row-${job.id}`} onClick={() => onSelect(job.id)} style={{ textAlign: 'left', background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8, padding: 14, cursor: 'pointer' }}>
+            <button key={job.id} data-testid={`partner-job-row-${job.id}`} onClick={() => onSelect(job.id)} style={{ textAlign: 'left', background: '#fff', border: '1px solid var(--border)', borderRadius: 10, padding: 14, cursor: 'pointer' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
                 <PartnerStatusBadge status={job.status}/>
                 {job.is_recurring && <span data-testid="partner-recurring-badge"><Badge tone="brand">정기</Badge></span>}
@@ -609,18 +677,19 @@ function PartnerHomeHero({ jobs, activeFilter = null, onToggleFilter = undefined
     <div
       data-testid="partner-home-hero"
       style={{
-        background: 'var(--brand)',
-        borderRadius: 8,
+        background: 'linear-gradient(135deg, rgba(255,255,255,0.16), rgba(0,0,0,0.10)), var(--brand)',
+        borderRadius: 16,
         padding: '16px 16px 14px',
         marginBottom: 14,
-        color: 'var(--surface)',
+        color: '#fff',
+        boxShadow: '0 8px 20px rgba(15,23,42,0.16)',
       }}
     >
       <div style={{ fontSize: 13.5, fontWeight: 700 }}>
         {greetingPrefix()}{manager ? `, ${manager}님` : ''}
       </div>
-      <div style={{ fontSize: 11.5, display: 'flex', alignItems: 'center', gap: 5, marginTop: 5 }}>
-        <Icon name="calendar" size={12} color="var(--surface)" /> {todayLabel()}
+      <div style={{ fontSize: 11.5, opacity: 0.85, display: 'flex', alignItems: 'center', gap: 5, marginTop: 5 }}>
+        <Icon name="calendar" size={12} color="#fff" /> {todayLabel()}
       </div>
       <div style={{ fontSize: 16.5, fontWeight: 800, marginTop: 6, letterSpacing: 0 }}>
         {heroHeadline(jobs, summary)}
@@ -639,20 +708,19 @@ function HeroStat({ label, value, active, onClick }) {
     <button
       type="button"
       onClick={onClick}
-      aria-pressed={active}
       style={{
         flex: 1,
-        border: active ? '2px solid var(--surface)' : '1px solid var(--border)',
-        background: active ? 'var(--brand-bg)' : 'var(--surface)',
-        color: 'var(--brand)',
-        borderRadius: 8,
+        border: active ? '1.5px solid #fff' : '1.5px solid transparent',
+        background: active ? 'rgba(255,255,255,0.30)' : 'rgba(255,255,255,0.16)',
+        color: '#fff',
+        borderRadius: 11,
         padding: '9px 6px',
         textAlign: 'center',
         cursor: 'pointer',
       }}
     >
       <div style={{ fontSize: 19, fontWeight: 800, lineHeight: 1 }}>{value}</div>
-      <div style={{ fontSize: 11, marginTop: 4 }}>{label}</div>
+      <div style={{ fontSize: 11, opacity: 0.95, marginTop: 4 }}>{label}</div>
     </button>
   );
 }
@@ -754,12 +822,25 @@ function EvidenceRow({ label, value, done }) {
     <div style={{ display: 'flex', alignItems: 'center', gap: 8, minHeight: 26 }}>
       <Badge tone={done ? 'success' : 'warn'}>{done ? '완료' : '필요'}</Badge>
       <span style={{ flex: 1, fontSize: 12.5, color: 'var(--text)', fontWeight: 600 }}>{label}</span>
-      <span style={{ fontSize: 11.5, color: 'var(--text-secondary)' }}>{value}</span>
+      <span style={{ fontSize: 11.5, color: 'var(--text-tertiary)' }}>{value}</span>
     </div>
   );
 }
 
-function PhotoPanel({ title, tone, photos, onAdd, disabled, isUploading = false }) {
+function PhotoPanel({
+  title,
+  tone,
+  photos,
+  onCapture = undefined,
+  onPick = undefined,
+  disabled,
+  isUploading = false,
+  onOpenPhoto,
+  showUpload = true,
+  canDelete = false,
+  deletingPhotoId = null,
+  onDeletePhoto = undefined,
+}) {
   const uploadLabel = isUploading ? '업로드 중' : disabled ? '잠김' : '촬영';
 
   return (
@@ -768,38 +849,83 @@ function PhotoPanel({ title, tone, photos, onAdd, disabled, isUploading = false 
         <span style={{ fontSize: 13, fontWeight: 600 }}>{title}</span>
         <Badge tone={tone}>{photos.length}장</Badge>
         <div style={{ flex: 1 }}/>
-        <button onClick={onAdd} disabled={disabled} style={{ height: 26, padding: '0 10px', border: `1px solid ${disabled ? 'var(--border)' : 'transparent'}`, borderRadius: 6, background: disabled ? 'var(--bg-muted)' : tone === 'success' ? 'var(--success-bg)' : 'var(--brand-bg)', color: disabled ? 'var(--text-tertiary)' : tone === 'success' ? 'var(--success-fg)' : 'var(--brand)', fontSize: 12, fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: 4, cursor: disabled ? 'not-allowed' : 'pointer' }}>
-          <Icon name="plus" size={12}/> 추가
-        </button>
+        {showUpload && (
+          <button onClick={onPick} disabled={disabled} style={{ height: 26, padding: '0 10px', border: 'none', borderRadius: 6, background: tone === 'success' ? 'var(--success-bg)' : 'var(--brand-bg)', color: tone === 'success' ? 'var(--success-fg)' : 'var(--brand)', fontSize: 12, fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: 4, cursor: disabled ? 'default' : 'pointer' }}>
+            <Icon name="image" size={12}/> 앨범
+          </button>
+        )}
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 6 }}>
         {photos.map((photo, index) => (
-          <figure key={photo.id || index} data-testid={`partner-photo-thumb-${photo.id}`} style={{ margin: 0, position: 'relative', aspectRatio: '1', overflow: 'hidden', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--bg-muted)' }}>
-            <img
-              src={toApiAssetUrl(photo.file_url)}
-              alt={photo.file_name || `${title} ${index + 1}`}
-              loading="lazy"
-              style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
-            />
-            <span style={{ position: 'absolute', left: 4, bottom: 4, maxWidth: 'calc(100% - 8px)', height: 16, padding: '0 4px', borderRadius: 4, background: 'var(--text)', color: 'var(--surface)', fontSize: 9, fontWeight: 700, display: 'inline-flex', alignItems: 'center' }}>
-              {index + 1}
-            </span>
-          </figure>
+          <div
+            key={photo.id || index}
+            style={{
+              position: 'relative',
+              aspectRatio: '1',
+              borderRadius: 6,
+              contentVisibility: 'auto',
+              containIntrinsicSize: '72px 72px',
+            }}
+          >
+            <button
+              type="button"
+              data-testid={`partner-photo-thumb-${photo.id}`}
+              aria-label={`${title} ${index + 1} 크게 보기`}
+              onClick={() => onOpenPhoto(photo.id)}
+              style={{ width: '100%', height: '100%', margin: 0, padding: 0, border: '1px solid var(--border)', position: 'relative', overflow: 'hidden', borderRadius: 6, background: 'var(--bg-muted)', cursor: 'zoom-in' }}
+            >
+              <PartnerPhotoImage photo={photo} alt={photo.file_name || `${title} ${index + 1}`} />
+              <span style={{ position: 'absolute', left: 4, bottom: 4, maxWidth: 'calc(100% - 8px)', height: 16, padding: '0 4px', borderRadius: 4, background: 'rgba(15,23,42,0.78)', color: '#fff', fontSize: 9, fontWeight: 700, display: 'inline-flex', alignItems: 'center' }}>
+                {index + 1}
+              </span>
+            </button>
+            {canDelete && photo.photo_source !== 'customer_as' && (
+              <button
+                type="button"
+                data-testid={`partner-photo-delete-${photo.id}`}
+                aria-label={`${title} ${index + 1} 삭제`}
+                disabled={deletingPhotoId === photo.id}
+                onClick={() => onDeletePhoto?.(photo)}
+                style={{ position: 'absolute', top: -5, right: -5, width: 24, height: 24, borderRadius: 999, border: '1px solid rgba(15,23,42,0.12)', background: '#fff', color: 'var(--danger-fg)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 2px 8px rgba(15,23,42,0.16)', cursor: deletingPhotoId === photo.id ? 'default' : 'pointer' }}
+              >
+                <Icon name="x" size={13}/>
+              </button>
+            )}
+          </div>
         ))}
-        <button onClick={onAdd} disabled={disabled} style={{ aspectRatio: '1', border: '1.5px dashed var(--border-strong)', borderRadius: 6, background: disabled ? 'var(--bg-muted)' : 'var(--bg-subtle)', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: disabled ? 'not-allowed' : 'pointer', flexDirection: 'column', gap: 2, color: disabled ? 'var(--text-tertiary)' : 'var(--text-secondary)', opacity: disabled ? 0.72 : 1 }}>
-          <Icon name="camera" size={16}/>
-          <span style={{ fontSize: 9.5 }}>{uploadLabel}</span>
-        </button>
+        {showUpload && (
+          <button onClick={onCapture} disabled={disabled} style={{ aspectRatio: '1', border: '1.5px dashed var(--border-strong)', borderRadius: 6, background: 'var(--bg-subtle)', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: disabled ? 'default' : 'pointer', flexDirection: 'column', gap: 2, color: 'var(--text-tertiary)' }}>
+            <Icon name="camera" size={16}/>
+            <span style={{ fontSize: 9.5 }}>{uploadLabel}</span>
+          </button>
+        )}
       </div>
     </Panel>
   );
 }
 
+function PartnerPhotoImage({ photo, alt }) {
+  return (
+    <ProtectedApiImage
+      src={photo.file_url}
+      alt={alt}
+      loading="lazy"
+      style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
+      placeholderText="로딩"
+      placeholderStyle={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-tertiary)', fontSize: 9, fontWeight: 700 }}
+    />
+  );
+}
+
+function isPartnerFieldActionReady(job) {
+  return job.status !== '고객확인필요' || Boolean(job.as_requested);
+}
+
 function partnerFooterHelpText(status, asRequested = false) {
-  if (status === '고객확인필요' && !asRequested) {
-    return '운영팀 확인이 끝나면 작업 가능 여부와 일정을 안내드립니다.';
-  }
   if (status === '고객확인필요') {
+    if (!asRequested) {
+      return '운영팀이 AS 접수를 확인하면 작업 시작과 사진 등록이 열립니다.';
+    }
     return 'AS 요청을 확인한 뒤 비포 사진을 올리고 작업을 시작하세요.';
   }
   if (DONE_BUCKET_STATUSES.includes(status)) {
@@ -835,7 +961,7 @@ function PartnerMessagesPanel({ jobId }) {
               <span style={{ marginLeft: 'auto' }}><Badge tone={messageStatusTone(message.status)}>{messageStatusLabel(message.status)}</Badge></span>
             </div>
             <div className="multiline-text" style={{ fontSize: 12.5, lineHeight: 1.5, color: 'var(--text)' }}>{message.content}</div>
-            <div style={{ fontSize: 10.5, color: 'var(--text-secondary)', marginTop: 6 }}>{formatKoreanDateTime(message.sent_at || message.created_at)}</div>
+            <div style={{ fontSize: 10.5, color: 'var(--text-tertiary)', marginTop: 6 }}>{formatKoreanDateTime(message.sent_at || message.created_at)}</div>
           </div>
         ))}
       </div>
@@ -843,7 +969,7 @@ function PartnerMessagesPanel({ jobId }) {
   }
 
   return (
-    <div data-testid="partner-messages-panel" style={{ background: 'var(--surface)', borderRadius: 8, padding: 14, marginBottom: 10, border: '1px solid var(--border)' }}>
+    <div data-testid="partner-messages-panel" style={{ background: '#fff', borderRadius: 10, padding: 14, marginBottom: 10, border: '1px solid var(--border)' }}>
       <SectionLabel>운영팀 안내</SectionLabel>
       {body}
     </div>
@@ -851,7 +977,7 @@ function PartnerMessagesPanel({ jobId }) {
 }
 
 function Panel({ children }) {
-  return <div style={{ background: 'var(--surface)', borderRadius: 8, padding: 14, marginBottom: 10, border: '1px solid var(--border)' }}>{children}</div>;
+  return <div style={{ background: '#fff', borderRadius: 10, padding: 14, marginBottom: 10, border: '1px solid var(--border)' }}>{children}</div>;
 }
 
 function InfoRow({ icon, children }) {
@@ -868,7 +994,7 @@ function ActionButton({ icon, label, href }) {
     height: 36,
     border: '1px solid var(--border)',
     borderRadius: 8,
-    background: 'var(--surface)',
+    background: '#fff',
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
@@ -907,7 +1033,7 @@ function PartnerStatusBadge({ status }) {
 
 function PartnerState({ text, tone = 'muted', actions = null }) {
   return (
-    <div style={{ height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 14, padding: 24, background: 'var(--bg-subtle)', color: tone === 'danger' ? 'var(--danger-fg)' : 'var(--text-secondary)', fontSize: 13, textAlign: 'center' }}>
+    <div style={{ height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 14, padding: 24, background: '#f4f6f8', color: tone === 'danger' ? 'var(--danger-fg)' : 'var(--text-tertiary)', fontSize: 13, textAlign: 'center' }}>
       <div>{text}</div>
       {actions}
     </div>
@@ -921,8 +1047,8 @@ function partnerStateButtonStyle(variant) {
     padding: '0 16px',
     borderRadius: 10,
     border: isBrand ? 'none' : '1px solid var(--border)',
-    background: isBrand ? 'var(--brand)' : 'var(--surface)',
-    color: isBrand ? 'var(--surface)' : 'var(--text)',
+    background: isBrand ? 'var(--brand)' : '#fff',
+    color: isBrand ? '#fff' : 'var(--text)',
     fontSize: 13,
     fontWeight: 700,
     cursor: 'pointer',
@@ -934,10 +1060,13 @@ function groupJobPhotos(photos) {
     before: [],
     after: [],
     etc: [],
+    customerAs: [],
   };
 
   for (const photo of photos) {
-    if (photo.photo_type === 'before') {
+    if (photo.photo_source === 'customer_as') {
+      groups.customerAs.push(photo);
+    } else if (photo.photo_type === 'before') {
       groups.before.push(photo);
     } else if (photo.photo_type === 'after') {
       groups.after.push(photo);
@@ -953,10 +1082,10 @@ function filterCurrentEvidencePhotos(job) {
   if (!job?.photos) {
     return [];
   }
-  if (!job.evidence_required_after) {
+  if (!job.as_requested || !job.as_requested_at) {
     return job.photos;
   }
-  const requestedAt = Date.parse(job.evidence_required_after);
+  const requestedAt = Date.parse(job.as_requested_at);
   if (Number.isNaN(requestedAt)) {
     return job.photos;
   }
@@ -983,9 +1112,27 @@ function toPhotoUploadErrorMessage(error) {
   return '사진 업로드를 처리하지 못했습니다.';
 }
 
-function photoUploadLockMessage(status) {
+function toPhotoDeleteErrorMessage(error) {
+  if (error instanceof ApiError) {
+    if (error.detail === 'invalid_status_for_delete') {
+      return '현재 작업 상태에서는 사진을 삭제할 수 없습니다.';
+    }
+    if (error.detail === 'photo_delete_not_allowed') {
+      return '이 사진은 협력사 화면에서 삭제할 수 없습니다.';
+    }
+    if (error.detail === 'photo_not_found') {
+      return '삭제할 사진을 찾을 수 없습니다.';
+    }
+  }
+  return '사진을 삭제하지 못했습니다.';
+}
+
+function photoUploadLockMessage(status, asRequested = false) {
   if (status === '취소') {
     return '취소된 작업이라 사진을 업로드할 수 없습니다.';
+  }
+  if (status === '고객확인필요' && !asRequested) {
+    return '운영팀이 AS 접수를 확인하면 비포/애프터 사진 등록을 사용할 수 있습니다.';
   }
   if (['고객전달완료', '서비스완료'].includes(status)) {
     return '완료된 작업이라 사진 업로드가 잠겼습니다. 추가 사진이 필요하면 운영팀에 요청해주세요.';
@@ -1065,7 +1212,7 @@ function memoSaveButtonStyle(disabled) {
     height: 44,
     marginTop: 8,
     background: disabled ? 'var(--bg-subtle)' : 'var(--brand)',
-    color: disabled ? 'var(--text-tertiary)' : 'var(--surface)',
+    color: disabled ? 'var(--text-tertiary)' : '#fff',
     border: disabled ? '1px solid var(--border)' : 'none',
     borderRadius: 10,
     fontSize: 14,
@@ -1116,14 +1263,6 @@ function partnerStatusTone(status) {
 }
 
 function getPartnerStatusLock(status, asRequested = false) {
-  if (status === '고객확인필요' && !asRequested) {
-    return {
-      icon: 'clock',
-      tone: 'neutral',
-      title: '운영팀 확인 중입니다',
-      description: '운영팀에서 요청 내용을 확인한 뒤 작업 가능 여부와 일정을 안내드립니다.',
-    };
-  }
   if (status === '취소') {
     return {
       icon: 'x',
@@ -1148,6 +1287,14 @@ function getPartnerStatusLock(status, asRequested = false) {
       description: '고객 사진 링크 발송 단계로 넘어간 작업입니다. 잘못 올린 사진은 운영팀에 비공개 처리를 요청해주세요.',
     };
   }
+  if (status === '고객확인필요' && !asRequested) {
+    return {
+      icon: 'lock',
+      tone: 'warn',
+      title: '운영팀 확인 대기',
+      description: '고객 AS 접수 건입니다. 운영팀 접수완료 후 작업 액션을 사용할 수 있습니다.',
+    };
+  }
   return {
     icon: 'clock',
     tone: 'neutral',
@@ -1160,9 +1307,9 @@ function primaryCtaStyle(disabled) {
   return {
     width: '100%',
     height: 46,
-    background: disabled ? 'var(--bg-muted)' : 'var(--brand)',
-    color: disabled ? 'var(--text-tertiary)' : 'var(--surface)',
-    border: disabled ? '1px solid var(--border)' : '1px solid var(--brand)',
+    background: 'var(--brand)',
+    color: '#fff',
+    border: 'none',
     borderRadius: 10,
     fontSize: 14.5,
     fontWeight: 700,
@@ -1170,15 +1317,15 @@ function primaryCtaStyle(disabled) {
     alignItems: 'center',
     justifyContent: 'center',
     gap: 6,
-    cursor: disabled ? 'not-allowed' : 'pointer',
+    cursor: disabled ? 'default' : 'pointer',
   };
 }
 
 function secondaryCtaStyle(disabled) {
   return {
     ...primaryCtaStyle(disabled),
-    background: disabled ? 'var(--bg-muted)' : 'var(--surface)',
-    color: disabled ? 'var(--text-tertiary)' : 'var(--brand)',
-    border: `1px solid ${disabled ? 'var(--border)' : 'var(--brand)'}`,
+    background: '#fff',
+    color: 'var(--brand)',
+    border: '1px solid var(--brand)',
   };
 }

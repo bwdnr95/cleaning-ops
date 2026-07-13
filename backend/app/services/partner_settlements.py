@@ -4,7 +4,7 @@ from collections.abc import Iterable
 from datetime import date
 from decimal import Decimal
 
-from sqlalchemy import or_, select
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.time import utc_now
@@ -188,18 +188,10 @@ class PartnerSettlementService:
             )
             .order_by(Order.scheduled_date.desc().nulls_last(), Order.id.desc())
         )
-        # 방문일 미정(scheduled_date NULL) 건은 날짜 범위로 걸러내지 않고 항상 남긴다.
-        # SQL 에서 NULL 비교는 UNKNOWN 이라, 순수 `>= from`/`<= to` 만 쓰면 방문일 미정
-        # 미정산 건이 어떤 범위에서도 탈락해 배지/운영지표(날짜 무관 전체 합계)와 목록이
-        # 어긋난다. 날짜가 없는 건은 날짜로 거를 대상이 아니므로 명시적으로 통과시킨다.
         if from_date is not None:
-            stmt = stmt.where(
-                or_(Order.scheduled_date.is_(None), Order.scheduled_date >= from_date)
-            )
+            stmt = stmt.where(Order.scheduled_date >= from_date)
         if to_date is not None:
-            stmt = stmt.where(
-                or_(Order.scheduled_date.is_(None), Order.scheduled_date <= to_date)
-            )
+            stmt = stmt.where(Order.scheduled_date <= to_date)
         if status == "unpaid":
             stmt = stmt.where(unpaid_partner_condition())
         elif status == "paid":

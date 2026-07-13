@@ -21,6 +21,18 @@ const headStyle: React.CSSProperties = {
   fontWeight: 600,
 };
 
+const textCellStyle: React.CSSProperties = {
+  ...cellStyle,
+  maxWidth: 150,
+  overflow: 'hidden',
+  textOverflow: 'ellipsis',
+};
+
+const scheduleCellStyle: React.CSSProperties = {
+  ...textCellStyle,
+  maxWidth: 190,
+};
+
 // 체크박스 셀: 가운데 정렬 + 모바일 터치 여유.
 const checkCellStyle: React.CSSProperties = {
   ...cellStyle,
@@ -130,7 +142,7 @@ export function RecurringMonthlyTracker() {
             background: 'var(--surface)',
           }}
         >
-          <table style={{ width: '100%', minWidth: 820, fontSize: 13, borderCollapse: 'collapse' }}>
+          <table style={{ width: '100%', minWidth: 820, fontSize: 13, borderCollapse: 'collapse', tableLayout: 'fixed' }}>
             <thead>
               <tr>
                 <th style={headStyle}>계약</th>
@@ -146,9 +158,9 @@ export function RecurringMonthlyTracker() {
             <tbody>
               {rows.map((r) => (
                 <tr key={r.contract_id} data-testid={`monthly-row-${r.contract_id}`}>
-                  <td style={{ ...cellStyle, fontWeight: 600 }}>{r.label}</td>
-                  <td style={cellStyle}>{r.customer_name}</td>
-                  <td style={cellStyle}>{r.schedule_text}</td>
+                  <td style={{ ...textCellStyle, fontWeight: 600 }} title={r.label}>{r.label}</td>
+                  <td style={textCellStyle} title={r.customer_name}>{r.customer_name}</td>
+                  <td style={scheduleCellStyle} title={r.schedule_text}>{r.schedule_text}</td>
                   <td style={cellStyle}>{formatAmount(r.amount)}</td>
                   <td style={cellStyle}>{formatAmount(r.partner_amount)}</td>
                   <td style={checkCellStyle}>

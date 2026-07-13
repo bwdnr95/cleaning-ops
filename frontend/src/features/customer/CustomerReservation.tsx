@@ -3,12 +3,14 @@
 import { submitCustomerAsRequest, verifyCustomerOrder } from '../../api/customer';
 import { ApiError, toApiAssetUrl } from '../../api/client';
 import { BrandLogo } from '../../components/common/BrandLogo';
+import { PhotoLightbox } from '../../components/common/PhotoLightbox';
 import { Badge, Icon } from '../../components/common/ui';
 import { paymentStatusLabel } from '../../domain/paymentStatus';
 import { formatQuantity } from '../../domain/format';
 import { formatPhone } from '../../domain/phone';
-import { readCapturedCustomerToken } from '../../domain/customerTokenPrivacy';
 import { parseDateValue } from '../../domain/time';
+
+const CUSTOMER_TOKEN_STORAGE_KEY = 'cleaning_ops_customer_token';
 
 export function CustomerReservation() {
   const initialLink = React.useMemo(readInitialCustomerLink, []);
@@ -25,22 +27,13 @@ export function CustomerReservation() {
 
     try {
       const verifiedOrder = await verifyCustomerOrder(customerToken.trim(), phoneSuffix.trim());
+      sessionStorage.setItem(CUSTOMER_TOKEN_STORAGE_KEY, customerToken.trim());
       setOrder(verifiedOrder);
     } catch (requestError) {
       setError(toCustomerErrorMessage(requestError));
     } finally {
       setIsVerifying(false);
     }
-  };
-
-  const handleSubmitAftercare = async (orderId, memo) => {
-    const updatedOrder = await submitCustomerAsRequest(
-      customerToken.trim(),
-      phoneSuffix.trim(),
-      orderId,
-      memo,
-    );
-    setOrder(updatedOrder);
   };
 
   return (
@@ -61,12 +54,10 @@ export function CustomerReservation() {
       ) : (
         <ReservationContent
           order={order}
-          onReset={() => {
-            setOrder(null);
-            setPhoneSuffix('');
-            setError(null);
-          }}
-          onSubmitAftercare={handleSubmitAftercare}
+          customerToken={customerToken}
+          phoneSuffix={phoneSuffix}
+          onOrderUpdate={setOrder}
+          onReset={() => setOrder(null)}
         />
       )}
     </div>
@@ -77,7 +68,7 @@ function CustomerHeader() {
   return (
     <header style={headerStyle}>
       <BrandLogo size="md" />
-      <div style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--text-secondary)', fontWeight: 700, letterSpacing: '0.04em' }}>
+      <div style={{ marginLeft: 'auto', fontSize: 10.5, color: '#94a3b8', fontWeight: 600, letterSpacing: '0.04em' }}>
         예약 확인센터
       </div>
     </header>
@@ -95,12 +86,7 @@ function VerificationGate({
   onVerify,
 }) {
   return (
-    <div
-      role="region"
-      aria-label="고객 예약 인증"
-      className="scroll"
-      style={{ flex: 1, overflow: 'auto', padding: '28px 20px' }}
-    >
+    <main className="scroll" style={{ flex: 1, overflow: 'auto', padding: '28px 20px' }}>
       <form data-testid="customer-verify-form" onSubmit={onVerify} style={gateCardStyle}>
         <div style={shieldStyle}>
           <Icon name="shield" size={20} />
@@ -110,7 +96,7 @@ function VerificationGate({
           연락처 뒷자리로<br />
           예약 정보를 확인합니다
         </h1>
-        <p className="ko-copy" style={gateCopyStyle}>
+        <p style={gateCopyStyle}>
           문자로 받은 링크와 예약 연락처 마지막 4자리가 일치할 때만 예약 상세와 공개된 사진을 보여드립니다.
         </p>
 
@@ -130,7 +116,7 @@ function VerificationGate({
         )}
 
         {isTokenFromLink && (
-          <div className="ko-copy" style={linkNoticeStyle}>
+          <div style={linkNoticeStyle}>
             <Icon name="lock" size={13} />
             문자 링크가 확인되었습니다. 연락처 뒷자리만 입력해주세요.
           </div>
@@ -139,7 +125,6 @@ function VerificationGate({
         <label style={fieldStyle}>
           <span style={labelStyle}>전화번호 뒤 4자리</span>
           <input
-            className="customer-auth-input"
             data-testid="customer-phone-suffix"
             value={phoneSuffix}
             onChange={(event) => onPhoneSuffixChange(event.target.value.replace(/\D/g, '').slice(0, 4))}
@@ -152,16 +137,7 @@ function VerificationGate({
           />
         </label>
 
-        {error && (
-          <div
-            role="alert"
-            aria-live="assertive"
-            data-testid="customer-verify-error"
-            style={errorStyle}
-          >
-            {error}
-          </div>
-        )}
+        {error && <div data-testid="customer-verify-error" style={errorStyle}>{error}</div>}
 
         <button
           type="submit"
@@ -169,7 +145,7 @@ function VerificationGate({
           disabled={isVerifying || phoneSuffix.length !== 4 || !customerToken.trim()}
           style={{
             ...primaryButtonStyle,
-            background: isVerifying || phoneSuffix.length !== 4 || !customerToken.trim() ? 'var(--text-secondary)' : 'var(--text)',
+            background: isVerifying || phoneSuffix.length !== 4 || !customerToken.trim() ? '#475569' : '#0f172a',
             cursor: isVerifying ? 'default' : 'pointer',
           }}
         >
@@ -177,40 +153,29 @@ function VerificationGate({
         </button>
       </form>
 
-      <p className="ko-copy" style={privacyNoteStyle}>
+      <p style={privacyNoteStyle}>
         인증 전에는 예약 상세, 주소, 사진을 표시하지 않습니다.<br />
         링크가 만료되었거나 인증이 되지 않으면 고객센터로 문의해주세요.
       </p>
-    </div>
+    </main>
   );
 }
 
-function ReservationContent({ order, onReset, onSubmitAftercare }) {
+function ReservationContent({ order, customerToken, phoneSuffix, onOrderUpdate, onReset }) {
   const lines = order.lines || [];
   const primaryLine = lines[0] || null;
 
   return (
-    <div
-      role="region"
-      aria-label="예약 상세"
-      data-testid="customer-order-page"
-      className="scroll"
-      style={{ flex: 1, overflow: 'auto' }}
-      tabIndex={0}
-    >
+    <main data-testid="customer-order-page" className="scroll" style={{ flex: 1, overflow: 'auto' }}>
       <section style={{ padding: '24px 20px 16px' }}>
-        <div style={eyebrowStyle}>{statusHeadline(primaryLine)}</div>
+        <div style={eyebrowStyle}>{statusHeadline(primaryLine?.status)}</div>
         <h1 style={contentTitleStyle}>
           {order.customer_name} 님<br />
-          <span style={{ color: 'var(--text-secondary)', fontWeight: 600 }}>{visitHeadline(primaryLine)}</span>
+          <span style={{ color: '#475569', fontWeight: 600 }}>{visitHeadline(primaryLine)}</span>
         </h1>
 
         <div style={{ display: 'flex', gap: 6, marginTop: 14, flexWrap: 'wrap' }}>
-          {primaryLine && (
-            <Badge tone={customerStatusTone(primaryLine.status, primaryLine.aftercare_status)} dot>
-              {customerStatusLabel(primaryLine.status, primaryLine.aftercare_status)}
-            </Badge>
-          )}
+          {primaryLine && <Badge tone={customerStatusTone(primaryLine.status)} dot>{customerStatusLabel(primaryLine.status)}</Badge>}
           <Badge tone="brand">{lines.length}개 라인</Badge>
         </div>
       </section>
@@ -239,31 +204,33 @@ function ReservationContent({ order, onReset, onSubmitAftercare }) {
               key={line.id}
               line={line}
               customerVisiblePayment={order.customer_visible_payment}
-              onSubmitAftercare={(memo) => onSubmitAftercare(line.id, memo)}
+              customerToken={customerToken}
+              phoneSuffix={phoneSuffix}
+              onOrderUpdate={onOrderUpdate}
             />
           ))
         )}
       </section>
 
       <section style={{ padding: '0 16px 24px' }}>
-        <button type="button" style={secondaryButtonStyle} onClick={onReset}>
+        <button style={secondaryButtonStyle} onClick={onReset}>
           <Icon name="lock" size={13} /> 다시 인증하기
         </button>
       </section>
 
       <TrustFooter />
-    </div>
+    </main>
   );
 }
 
-function ReservationLineCard({ line, customerVisiblePayment, onSubmitAftercare }) {
+function ReservationLineCard({ line, customerVisiblePayment, customerToken, phoneSuffix, onOrderUpdate }) {
   const quantity = formatQuantity(line.size_or_quantity);
 
   return (
     <section data-testid={`customer-line-${line.id}`} style={summaryCardStyle}>
       <SummaryBlock title="방문 일시">
         <div style={{ fontSize: 18, fontWeight: 800, letterSpacing: '-0.02em' }}>{formatKoreanDate(line.scheduled_date)}</div>
-        <div style={{ fontSize: 13, color: 'var(--text-secondary)', marginTop: 3 }}>{line.requested_time || '시간 협의 중'}</div>
+        <div style={{ fontSize: 13, color: '#475569', marginTop: 3 }}>{line.requested_time || '시간 협의 중'}</div>
       </SummaryBlock>
       <CustomerRow icon="package" label="서비스">
         {line.service_name}
@@ -271,9 +238,7 @@ function ReservationLineCard({ line, customerVisiblePayment, onSubmitAftercare }
         {line.service_detail && <div style={mutedLineStyle}>{line.service_detail}</div>}
       </CustomerRow>
       <CustomerRow icon="bell" label="진행상황">
-        <Badge tone={customerStatusTone(line.status, line.aftercare_status)} dot>
-          {customerStatusLabel(line.status, line.aftercare_status)}
-        </Badge>
+        <Badge tone={customerStatusTone(line.status)} dot>{customerStatusLabel(line.status)}</Badge>
         {line.special_request && <div style={mutedLineStyle}>{line.special_request}</div>}
       </CustomerRow>
       {customerVisiblePayment && (
@@ -282,125 +247,21 @@ function ReservationLineCard({ line, customerVisiblePayment, onSubmitAftercare }
         </CustomerRow>
       )}
       <CustomerPhotos photos={line.photos || []} />
-      <CustomerAftercareAction
-        status={line.aftercare_status}
-        onSubmit={onSubmitAftercare}
-      />
-    </section>
-  );
-}
-
-function CustomerAftercareAction({ status, onSubmit }) {
-  const [isOpen, setIsOpen] = React.useState(false);
-  const [memo, setMemo] = React.useState('');
-  const [error, setError] = React.useState('');
-  const [isSubmitting, setIsSubmitting] = React.useState(false);
-
-  if (!status) {
-    return null;
-  }
-  if (status === 'pending') {
-    return (
-      <div data-testid="customer-aftercare-pending" style={aftercarePendingStyle} aria-live="polite">
-        <div style={aftercareTitleStyle}>AS 접수가 완료되었습니다</div>
-        <div style={aftercareCopyStyle}>운영팀 확인 후 협력사 처리 일정과 함께 안내드리겠습니다.</div>
-      </div>
-    );
-  }
-  if (status === 'in_progress') {
-    return (
-      <div data-testid="customer-aftercare-in-progress" style={aftercareProgressStyle} aria-live="polite">
-        <div style={aftercareTitleStyle}>AS 요청을 처리 중입니다</div>
-        <div style={aftercareCopyStyle}>협력사가 재방문 일정을 확인해 연락드릴 예정입니다.</div>
-      </div>
-    );
-  }
-
-  const trimmedMemo = memo.trim();
-  const handleSubmit = async (event) => {
-    event.preventDefault();
-    if (!trimmedMemo) {
-      setError('확인이 필요한 내용을 입력해주세요.');
-      return;
-    }
-    setError('');
-    setIsSubmitting(true);
-    try {
-      await onSubmit(trimmedMemo);
-    } catch (requestError) {
-      setError(toAftercareErrorMessage(requestError));
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
-
-  return (
-    <div data-testid="customer-aftercare-action" style={aftercareAvailableStyle}>
-      <div style={aftercareTitleStyle}>작업 후 확인이 필요하신가요?</div>
-      <div style={aftercareCopyStyle}>사진과 작업 결과를 확인한 뒤 보완이 필요한 내용을 접수할 수 있습니다.</div>
-      {!isOpen ? (
-        <button
-          type="button"
-          data-testid="customer-aftercare-open"
-          style={aftercareOpenButtonStyle}
-          onClick={() => setIsOpen(true)}
-        >
-          AS 접수
-        </button>
-      ) : (
-        <form onSubmit={(event) => void handleSubmit(event)} style={aftercareFormStyle}>
-          <label style={aftercareFieldStyle}>
-            <span style={labelStyle}>확인이 필요한 내용</span>
-            <textarea
-              data-testid="customer-aftercare-memo"
-              value={memo}
-              onChange={(event) => {
-                setMemo(event.target.value.slice(0, 2000));
-                if (error) setError('');
-              }}
-              rows={4}
-              maxLength={2000}
-              placeholder="보완이 필요한 위치와 내용을 적어주세요."
-              style={aftercareTextareaStyle}
-              disabled={isSubmitting}
-              required
-            />
-          </label>
-          {error && <div role="alert" style={aftercareErrorStyle}>{error}</div>}
-          <div style={aftercareActionsStyle}>
-            <button
-              type="button"
-              style={aftercareCancelButtonStyle}
-              onClick={() => {
-                setIsOpen(false);
-                setMemo('');
-                setError('');
-              }}
-              disabled={isSubmitting}
-            >
-              취소
-            </button>
-            <button
-              type="submit"
-              data-testid="customer-aftercare-submit"
-              style={{
-                ...aftercareSubmitButtonStyle,
-                opacity: isSubmitting || !trimmedMemo ? 0.55 : 1,
-              }}
-              disabled={isSubmitting || !trimmedMemo}
-            >
-              {isSubmitting ? '접수 중' : '접수하기'}
-            </button>
-          </div>
-        </form>
+      {canCustomerRequestAs(line.status) && (
+        <CustomerAsRequestForm
+          line={line}
+          customerToken={customerToken}
+          phoneSuffix={phoneSuffix}
+          onOrderUpdate={onOrderUpdate}
+        />
       )}
-    </div>
+    </section>
   );
 }
 
 function SummaryBlock({ title, children }) {
   return (
-    <div style={{ padding: '16px 18px', borderBottom: '1px solid var(--divider)' }}>
+    <div style={{ padding: '16px 18px', borderBottom: '1px solid #f1f5f4' }}>
       <div style={smallLabelStyle}>{title}</div>
       {children}
     </div>
@@ -413,14 +274,14 @@ function CustomerRow({ icon, label, children, last = false }) {
       display: 'flex',
       gap: 12,
       padding: '13px 18px',
-      borderBottom: last ? 'none' : '1px solid var(--divider)',
+      borderBottom: last ? 'none' : '1px solid #f1f5f4',
     }}>
       <span style={rowIconStyle}>
         <Icon name={icon} size={13} />
       </span>
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={smallLabelStyle}>{label}</div>
-        <div style={{ fontSize: 13.5, color: 'var(--text)', lineHeight: 1.5 }}>{children}</div>
+        <div style={{ fontSize: 13.5, color: '#0f172a', lineHeight: 1.5 }}>{children}</div>
       </div>
     </div>
   );
@@ -428,7 +289,7 @@ function CustomerRow({ icon, label, children, last = false }) {
 
 function PaymentSummary({ line }) {
   if (line.total_amount == null) {
-    return <span style={{ color: 'var(--text-tertiary)', fontSize: 12.5 }}>결제 안내는 별도로 안내드립니다.</span>;
+    return <span style={{ color: '#64748b', fontSize: 12.5 }}>결제 안내는 별도로 안내드립니다.</span>;
   }
 
   return (
@@ -448,10 +309,10 @@ function VisitGuide() {
   return (
     <section style={{ padding: '16px 16px 8px' }}>
       <div style={guideStyle}>
-        <div style={{ ...smallLabelStyle, color: 'var(--warn-fg)', display: 'flex', alignItems: 'center', gap: 5 }}>
+        <div style={{ ...smallLabelStyle, color: '#b45309', display: 'flex', alignItems: 'center', gap: 5 }}>
           <Icon name="bell" size={11} /> 방문 전 안내
         </div>
-        <ul style={{ margin: '8px 0 0', padding: '0 0 0 16px', fontSize: 12.5, color: 'var(--warn-fg)', lineHeight: 1.65, wordBreak: 'keep-all' }}>
+        <ul style={guideListStyle}>
           <li>작업 공간 주변 물건은 가능한 범위에서 미리 이동해주세요.</li>
           <li>현장 상황에 따라 작업 시간은 조금 달라질 수 있습니다.</li>
           <li>완료 사진은 이 페이지에 표시됩니다.</li>
@@ -462,6 +323,7 @@ function VisitGuide() {
 }
 
 function CustomerPhotos({ photos }) {
+  const [openPhotoId, setOpenPhotoId] = React.useState<string | null>(null);
   const groups = [
     { key: 'before', title: '비포' },
     { key: 'after', title: '애프터' },
@@ -470,6 +332,15 @@ function CustomerPhotos({ photos }) {
     ...group,
     photos: photos.filter((photo) => photo.photo_type === group.key),
   })).filter((group) => group.photos.length > 0);
+  const lightboxPhotos = React.useMemo(
+    () => photos.map((photo) => ({
+      id: photo.id,
+      src: toApiAssetUrl(photo.file_url),
+      alt: photo.file_name || `${customerPhotoTypeLabel(photo.photo_type)} 사진`,
+      caption: photo.file_name || customerPhotoTypeLabel(photo.photo_type),
+    })),
+    [photos],
+  );
 
   return (
     <section data-testid="customer-photos" style={{ padding: '12px 16px 24px' }}>
@@ -488,26 +359,255 @@ function CustomerPhotos({ photos }) {
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 8 }}>
                 {group.photos.map((photo) => (
                   <figure key={photo.id} style={{ margin: 0 }}>
-                    <img
+                    <button
+                      type="button"
                       data-testid={`customer-photo-${photo.id}`}
-                      src={toApiAssetUrl(photo.file_url)}
-                      alt={photo.file_name || `${group.title} 사진`}
-                      loading="lazy"
-                      style={photoImageStyle}
-                    />
+                      aria-label={`${group.title} 사진 크게 보기`}
+                      onClick={() => setOpenPhotoId(photo.id)}
+                      style={{ display: 'block', width: '100%', padding: 0, border: 'none', background: 'transparent', cursor: 'zoom-in' }}
+                    >
+                      <img
+                        src={toApiAssetUrl(photo.file_url)}
+                        alt={photo.file_name || `${group.title} 사진`}
+                        loading="lazy"
+                        style={photoImageStyle}
+                      />
+                    </button>
                     {photo.file_name && <figcaption style={captionStyle}>{photo.file_name}</figcaption>}
                   </figure>
                 ))}
               </div>
             </div>
           ))}
-          <div style={{ fontSize: 11.5, color: 'var(--text-tertiary)', lineHeight: 1.45 }}>
+          <div style={{ fontSize: 11.5, color: '#94a3b8', lineHeight: 1.45 }}>
             협력사가 업로드해 공개된 사진만 표시됩니다.
           </div>
         </div>
       )}
+      <PhotoLightbox
+        photos={lightboxPhotos}
+        openPhotoId={openPhotoId}
+        onOpenPhoto={setOpenPhotoId}
+        onClose={() => setOpenPhotoId(null)}
+      />
     </section>
   );
+}
+
+function customerPhotoTypeLabel(photoType) {
+  if (photoType === 'before') {
+    return '비포';
+  }
+  if (photoType === 'after') {
+    return '애프터';
+  }
+  return '기타';
+}
+
+function CustomerAsRequestForm({ line, customerToken, phoneSuffix, onOrderUpdate }) {
+  const [memo, setMemo] = React.useState('');
+  const [files, setFiles] = React.useState<File[]>([]);
+  const [error, setError] = React.useState(null);
+  const [notice, setNotice] = React.useState(null);
+  const [isSubmitting, setIsSubmitting] = React.useState(false);
+  const cameraInputRef = React.useRef<HTMLInputElement | null>(null);
+  const albumInputRef = React.useRef<HTMLInputElement | null>(null);
+
+  const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const selectedFiles = Array.from(event.target.files || []);
+    setFiles((currentFiles) => mergeCustomerAsFiles(currentFiles, selectedFiles));
+    event.target.value = '';
+  };
+
+  const handleFileRemove = (fileKey) => {
+    setFiles((currentFiles) => currentFiles.filter((file) => customerAsFileKey(file) !== fileKey));
+  };
+
+  const handleSubmit = async (event) => {
+    event.preventDefault();
+    const trimmedMemo = memo.trim();
+    if (!trimmedMemo) {
+      setError('AS 요청 내용을 입력해주세요.');
+      return;
+    }
+
+    setError(null);
+    setNotice(null);
+    setIsSubmitting(true);
+    try {
+      const updatedOrder = await submitCustomerAsRequest(customerToken, {
+        orderId: line.id,
+        phoneSuffix,
+        memo: trimmedMemo,
+        files,
+      });
+      onOrderUpdate(updatedOrder);
+      setMemo('');
+      setFiles([]);
+      setNotice('AS 요청이 접수되었습니다. 운영팀 확인 후 안내드리겠습니다.');
+    } catch (requestError) {
+      setError(toCustomerAsErrorMessage(requestError));
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  return (
+    <section data-testid={`customer-as-request-${line.id}`} style={asRequestSectionStyle}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
+        <Icon name="bell" size={13} />
+        <span style={{ fontSize: 13, fontWeight: 800 }}>AS 접수</span>
+        {line.status === '고객확인필요' && <Badge tone="warn">확인 중</Badge>}
+      </div>
+      <div style={asNoticeStyle}>
+        인테리어 추가 시공 및 입주 이후 사항은 AS 대상에 해당되지 않습니다.
+      </div>
+      <form onSubmit={handleSubmit} style={{ display: 'grid', gap: 8 }}>
+        <textarea
+          data-testid={`customer-as-memo-${line.id}`}
+          value={memo}
+          maxLength={1000}
+          rows={4}
+          placeholder="AS가 필요한 부분을 적어주세요."
+          onChange={(event) => setMemo(event.target.value)}
+          style={asTextareaStyle}
+          disabled={isSubmitting}
+          required
+        />
+        <div style={asFileActionsStyle}>
+          <button
+            type="button"
+            style={asFileButtonStyle}
+            disabled={isSubmitting}
+            onClick={() => cameraInputRef.current?.click()}
+          >
+            <Icon name="camera" size={13} />
+            촬영
+          </button>
+          <button
+            type="button"
+            style={asFileButtonStyle}
+            disabled={isSubmitting}
+            onClick={() => albumInputRef.current?.click()}
+          >
+            <Icon name="image" size={13} />
+            앨범 선택
+          </button>
+          <input
+            ref={cameraInputRef}
+            data-testid={`customer-as-camera-files-${line.id}`}
+            type="file"
+            accept="image/*"
+            capture="environment"
+            onChange={handleFileChange}
+            style={{ display: 'none' }}
+            disabled={isSubmitting}
+          />
+          <input
+            ref={albumInputRef}
+            data-testid={`customer-as-files-${line.id}`}
+            type="file"
+            accept="image/jpeg,image/png,image/webp"
+            multiple
+            onChange={handleFileChange}
+            style={{ display: 'none' }}
+            disabled={isSubmitting}
+          />
+        </div>
+        {files.length > 0 && (
+          <CustomerAsSelectedPhotos
+            files={files}
+            disabled={isSubmitting}
+            onRemove={handleFileRemove}
+          />
+        )}
+        {error && <div data-testid={`customer-as-error-${line.id}`} style={errorStyle}>{error}</div>}
+        {notice && <div data-testid={`customer-as-notice-${line.id}`} style={asSuccessStyle}>{notice}</div>}
+        <button
+          type="submit"
+          data-testid={`customer-as-submit-${line.id}`}
+          disabled={isSubmitting || !memo.trim()}
+          style={{
+            ...primaryButtonStyle,
+            height: 44,
+            background: isSubmitting || !memo.trim() ? 'var(--text-quaternary)' : 'var(--text)',
+            cursor: isSubmitting ? 'default' : 'pointer',
+          }}
+        >
+          {isSubmitting ? '접수 중' : 'AS 접수하기'}
+        </button>
+      </form>
+    </section>
+  );
+}
+
+function CustomerAsSelectedPhotos({ files, disabled, onRemove }) {
+  const previews = React.useMemo(
+    () => {
+      const canCreateObjectUrl = typeof URL !== 'undefined' && typeof URL.createObjectURL === 'function';
+      return files.map((file) => ({
+        key: customerAsFileKey(file),
+        name: file.name || '촬영 사진',
+        url: canCreateObjectUrl ? URL.createObjectURL(file) : '',
+      }));
+    },
+    [files],
+  );
+
+  React.useEffect(() => () => {
+    if (typeof URL !== 'undefined' && typeof URL.revokeObjectURL === 'function') {
+      previews.forEach((preview) => {
+        if (preview.url) {
+          URL.revokeObjectURL(preview.url);
+        }
+      });
+    }
+  }, [previews]);
+
+  return (
+    <div style={asPreviewWrapStyle}>
+      <div style={asFileSummaryStyle}>{files.length}장 선택됨</div>
+      <div style={asPreviewGridStyle}>
+        {previews.map((preview, index) => (
+          <figure key={preview.key} style={asPreviewItemStyle}>
+            {preview.url ? (
+              <img src={preview.url} alt={preview.name} style={asPreviewImageStyle} />
+            ) : (
+              <div style={asPreviewPlaceholderStyle}>이미지</div>
+            )}
+            <figcaption style={asPreviewCaptionStyle}>{preview.name}</figcaption>
+            <button
+              type="button"
+              data-testid={`customer-as-remove-file-${index}`}
+              aria-label={`${preview.name} 삭제`}
+              disabled={disabled}
+              onClick={() => onRemove(preview.key)}
+              style={asPreviewRemoveButtonStyle(disabled)}
+            >
+              <Icon name="x" size={13} />
+            </button>
+          </figure>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function mergeCustomerAsFiles(currentFiles: File[], selectedFiles: File[]): File[] {
+  const nextFiles = [...currentFiles];
+  const seen = new Set(currentFiles.map(customerAsFileKey));
+  for (const file of selectedFiles) {
+    const key = customerAsFileKey(file);
+    if (!seen.has(key)) {
+      seen.add(key);
+      nextFiles.push(file);
+    }
+  }
+  return nextFiles;
+}
+
+function customerAsFileKey(file: File): string {
+  return `${file.name}:${file.size}:${file.lastModified}`;
 }
 
 function PhotoPending() {
@@ -516,10 +616,10 @@ function PhotoPending() {
       <div style={photoPendingIconStyle}>
         <Icon name="camera" size={18} />
       </div>
-      <div style={{ fontSize: 13, color: 'var(--text-secondary)', fontWeight: 700, marginBottom: 3 }}>
+      <div style={{ fontSize: 13, color: '#475569', fontWeight: 700, marginBottom: 3 }}>
         협력사가 사진을 올리면 이곳에 표시됩니다
       </div>
-      <div style={{ fontSize: 11.5, color: 'var(--text-tertiary)' }}>
+      <div style={{ fontSize: 11.5, color: '#94a3b8' }}>
         업로드된 공개 사진만 볼 수 있습니다.
       </div>
     </div>
@@ -536,10 +636,10 @@ function TrustFooter() {
           { icon: 'sparkles', label: '고객센터', sub: '1688-9512' },
         ].map((item) => (
           <div key={item.label} style={{ textAlign: 'center' }}>
-            <div style={{ display: 'inline-flex', color: 'var(--text-secondary)', marginBottom: 4 }}>
+            <div style={{ display: 'inline-flex', color: '#475569', marginBottom: 4 }}>
               <Icon name={item.icon} size={14} />
             </div>
-            <div style={{ fontSize: 10.5, color: 'var(--text-secondary)', fontWeight: 600 }}>{item.label}</div>
+            <div style={{ fontSize: 10.5, color: '#94a3b8', fontWeight: 600 }}>{item.label}</div>
             <div style={{ fontSize: 12, fontWeight: 700 }}>{item.sub}</div>
           </div>
         ))}
@@ -549,7 +649,7 @@ function TrustFooter() {
         <Icon name="phone" size={14} /> 1688-9512
       </a>
 
-      <div style={{ textAlign: 'center', fontSize: 10.5, color: 'var(--text-secondary)', marginTop: 16, lineHeight: 1.5 }}>
+      <div style={{ textAlign: 'center', fontSize: 10.5, color: '#94a3b8', marginTop: 16, lineHeight: 1.5 }}>
         이 페이지는 예약 고객 전용 링크입니다.<br />
         연락처 뒷자리 인증으로 보호됩니다.
       </div>
@@ -558,12 +658,29 @@ function TrustFooter() {
 }
 
 function readInitialCustomerLink() {
-  const capturedToken = readCapturedCustomerToken();
+  const pathToken = readTokenFromPath(window.location.pathname);
+  const params = new URLSearchParams(window.location.search);
+  const queryToken = params.get('t') || params.get('token') || params.get('customer_token');
+  const storedToken = sessionStorage.getItem(CUSTOMER_TOKEN_STORAGE_KEY);
+  const token = pathToken || queryToken || storedToken || '';
 
   return {
-    token: capturedToken,
-    isFromUrl: Boolean(capturedToken),
+    token,
+    isFromUrl: Boolean(pathToken || queryToken),
   };
+}
+
+function readTokenFromPath(pathname) {
+  const match = pathname.match(/^\/(?:c|customer)\/([^/?#]+)/);
+  if (!match) {
+    return '';
+  }
+
+  try {
+    return decodeURIComponent(match[1]);
+  } catch {
+    return match[1];
+  }
 }
 
 function toCustomerErrorMessage(error) {
@@ -583,30 +700,40 @@ function toCustomerErrorMessage(error) {
   return '예약 정보를 확인하지 못했습니다.';
 }
 
-function toAftercareErrorMessage(error) {
+function toCustomerAsErrorMessage(error) {
   if (error instanceof ApiError) {
+    if (error.status === 413 && error.detail === 'too_many_as_photos') {
+      return 'AS 사진은 한 번에 최대 10장까지 첨부할 수 있습니다.';
+    }
+    if (error.status === 413 && error.detail === 'as_photos_total_too_large') {
+      return '첨부 사진의 전체 용량이 너무 큽니다.';
+    }
+    if (error.status === 413) {
+      return '첨부 사진 용량이 너무 큽니다.';
+    }
+    if (error.status === 400 && error.detail === 'unsupported_photo_type') {
+      return 'JPG/PNG/WebP 사진만 첨부할 수 있습니다.';
+    }
+    if (error.status === 409 && error.detail === 'as_request_already_pending') {
+      return '이미 접수된 AS 요청을 운영팀에서 확인 중입니다.';
+    }
+    if (error.status === 409 && error.detail === 'as_request_already_accepted') {
+      return '이미 AS 접수가 완료되어 담당자가 확인 중입니다.';
+    }
     if (error.status === 409) {
-      return '이미 접수된 AS 요청이 있습니다. 운영팀 확인을 기다려주세요.';
+      return '현재 상태에서는 AS 접수를 할 수 없습니다.';
     }
     if (error.status === 404) {
-      return '예약 인증 정보를 다시 확인해주세요.';
+      return '예약 정보를 다시 확인해주세요.';
     }
-    if (error.status === 422) {
-      return '확인이 필요한 내용을 입력해주세요.';
-    }
-    return 'AS를 접수하지 못했습니다. 잠시 후 다시 시도해주세요.';
   }
-  return 'AS를 접수하지 못했습니다.';
+  return 'AS 요청을 접수하지 못했습니다. 잠시 후 다시 시도해주세요.';
 }
 
-function statusHeadline(line) {
-  if (line?.aftercare_status === 'pending') {
-    return 'AS 접수를 확인하고 있습니다';
+function statusHeadline(status) {
+  if (status === '고객확인필요') {
+    return 'AS 요청을 확인 중입니다';
   }
-  if (line?.aftercare_status === 'in_progress') {
-    return 'AS 요청을 처리 중입니다';
-  }
-  const status = line?.status;
   if (['고객전달필요', '고객전달완료', '서비스완료'].includes(status)) {
     return '작업 결과를 확인해주세요';
   }
@@ -619,13 +746,7 @@ function statusHeadline(line) {
   return '예약이 확인되었습니다';
 }
 
-function customerStatusLabel(status, aftercareStatus) {
-  if (aftercareStatus === 'pending') {
-    return 'AS 접수 확인 중';
-  }
-  if (aftercareStatus === 'in_progress') {
-    return 'AS 처리 중';
-  }
+function customerStatusLabel(status) {
   if (status === '취소') {
     return '예약 취소';
   }
@@ -638,19 +759,16 @@ function customerStatusLabel(status, aftercareStatus) {
   if (status === '사진검수대기') {
     return '확인 중';
   }
+  if (status === '고객확인필요') {
+    return 'AS 확인 중';
+  }
   if (['일정확정', '전날안내필요', '전날안내완료', '작업예정'].includes(status)) {
     return '방문 예정';
   }
   return '예약 확인 중';
 }
 
-function customerStatusTone(status, aftercareStatus) {
-  if (aftercareStatus === 'pending') {
-    return 'warn';
-  }
-  if (aftercareStatus === 'in_progress') {
-    return 'info';
-  }
+function customerStatusTone(status) {
   if (status === '취소') {
     return 'danger';
   }
@@ -660,25 +778,21 @@ function customerStatusTone(status, aftercareStatus) {
   if (status === '작업진행') {
     return 'info';
   }
+  if (status === '고객확인필요') {
+    return 'warn';
+  }
   return 'neutral';
 }
 
-function visitHeadline(line) {
-  if (!line || !line.scheduled_date) {
+function canCustomerRequestAs(status) {
+  return ['고객전달필요', '고객전달완료', '서비스완료'].includes(status);
+}
+
+function visitHeadline(order) {
+  if (!order || !order.scheduled_date) {
     return '방문 일정은 확정 후 안내드립니다.';
   }
-
-  const formattedDate = formatKoreanDate(line.scheduled_date);
-  if (['pending', 'in_progress'].includes(line.aftercare_status)) {
-    return `기존\u00a0방문일 · ${formattedDate}`;
-  }
-  if (['고객전달필요', '고객전달완료', '서비스완료'].includes(line.status)) {
-    return `${formattedDate} 작업이\u00a0완료되었습니다`;
-  }
-  if (line.status === '취소') {
-    return `${formattedDate} 예약이\u00a0취소되었습니다`;
-  }
-  return `${formattedDate} 방문\u00a0예정입니다`;
+  return `${formatKoreanDate(order.scheduled_date)} 방문 예정입니다`;
 }
 
 function formatKoreanDate(value) {
@@ -704,21 +818,18 @@ function css(style) {
 const pageStyle = css({
   minHeight: '100%',
   height: '100%',
-  width: '100%',
-  maxWidth: 768,
-  margin: '0 auto',
   display: 'flex',
   flexDirection: 'column',
-  background: 'var(--bg-subtle)',
+  background: '#f7f6f3',
   overflow: 'hidden',
   fontFamily: 'var(--font)',
-  color: 'var(--text)',
+  color: '#0f172a',
 });
 
 const headerStyle = css({
   padding: '18px 20px 14px',
-  background: 'var(--surface)',
-  borderBottom: '1px solid var(--border)',
+  background: 'linear-gradient(180deg, #ffffff 0%, #f7f6f3 100%)',
+  borderBottom: '1px solid rgba(15,23,42,0.06)',
   display: 'flex',
   alignItems: 'center',
   gap: 9,
@@ -726,18 +837,19 @@ const headerStyle = css({
 });
 
 const gateCardStyle = css({
-  background: 'var(--surface)',
-  border: '1px solid var(--border)',
-  borderRadius: 8,
+  background: '#fff',
+  border: '1px solid rgba(15,23,42,0.06)',
+  borderRadius: 16,
   padding: 20,
+  boxShadow: '0 1px 3px rgba(15,23,42,0.04), 0 10px 24px rgba(15,23,42,0.05)',
 });
 
 const shieldStyle = css({
   width: 42,
   height: 42,
   borderRadius: 12,
-  background: 'var(--bg-muted)',
-  color: 'var(--text)',
+  background: '#f1f5f4',
+  color: '#0f172a',
   display: 'flex',
   alignItems: 'center',
   justifyContent: 'center',
@@ -746,7 +858,7 @@ const shieldStyle = css({
 
 const eyebrowStyle = css({
   fontSize: 11.5,
-  color: 'var(--text-secondary)',
+  color: '#64748b',
   letterSpacing: '0.04em',
   fontWeight: 800,
   marginBottom: 6,
@@ -762,7 +874,7 @@ const gateTitleStyle = css({
 
 const gateCopyStyle = css({
   margin: '10px 0 18px',
-  color: 'var(--text-secondary)',
+  color: '#64748b',
   fontSize: 13,
   lineHeight: 1.55,
 });
@@ -775,7 +887,7 @@ const fieldStyle = css({
 });
 
 const labelStyle = css({
-  color: 'var(--text-secondary)',
+  color: '#475569',
   fontSize: 12,
   fontWeight: 800,
 });
@@ -783,12 +895,13 @@ const labelStyle = css({
 const inputStyle = css({
   width: '100%',
   height: 46,
-  border: '1px solid var(--border-strong)',
+  border: '1px solid #d4d9e1',
   borderRadius: 10,
   padding: '0 12px',
   fontSize: 16,
-  background: 'var(--surface)',
-  color: 'var(--text)',
+  outline: 'none',
+  background: '#fff',
+  color: '#0f172a',
 });
 
 const linkNoticeStyle = css({
@@ -798,8 +911,8 @@ const linkNoticeStyle = css({
   marginBottom: 12,
   padding: '10px 12px',
   borderRadius: 10,
-  background: 'var(--bg-muted)',
-  color: 'var(--text-secondary)',
+  background: '#f1f5f4',
+  color: '#475569',
   fontSize: 12,
   lineHeight: 1.45,
 });
@@ -807,9 +920,9 @@ const linkNoticeStyle = css({
 const errorStyle = css({
   padding: '10px 12px',
   borderRadius: 10,
-  background: 'var(--danger-bg)',
-  border: '1px solid var(--danger-border)',
-  color: 'var(--danger-fg)',
+  background: '#fef2f2',
+  border: '1px solid #fecaca',
+  color: '#b91c1c',
   fontSize: 12.5,
   lineHeight: 1.45,
   marginBottom: 12,
@@ -820,7 +933,7 @@ const primaryButtonStyle = css({
   height: 46,
   borderRadius: 12,
   border: 'none',
-  color: 'var(--surface)',
+  color: '#fff',
   fontSize: 14,
   fontWeight: 800,
 });
@@ -828,7 +941,7 @@ const primaryButtonStyle = css({
 const privacyNoteStyle = css({
   margin: '16px 0 0',
   padding: '0 12px',
-  color: 'var(--text-secondary)',
+  color: '#64748b',
   fontSize: 11.5,
   lineHeight: 1.5,
   textAlign: 'center',
@@ -841,18 +954,20 @@ const contentTitleStyle = css({
   letterSpacing: '-0.025em',
   lineHeight: 1.3,
   wordBreak: 'keep-all',
+  overflowWrap: 'break-word',
 });
 
 const summaryCardStyle = css({
-  background: 'var(--surface)',
-  borderRadius: 8,
-  border: '1px solid var(--border)',
+  background: '#fff',
+  borderRadius: 14,
+  border: '1px solid rgba(15,23,42,0.06)',
+  boxShadow: '0 1px 3px rgba(15,23,42,0.04), 0 4px 12px rgba(15,23,42,0.04)',
   overflow: 'hidden',
 });
 
 const smallLabelStyle = css({
   fontSize: 10.5,
-  color: 'var(--text-secondary)',
+  color: '#94a3b8',
   fontWeight: 800,
   letterSpacing: '0.06em',
   marginBottom: 4,
@@ -863,8 +978,8 @@ const rowIconStyle = css({
   height: 28,
   borderRadius: 7,
   flexShrink: 0,
-  background: 'var(--bg-muted)',
-  color: 'var(--text)',
+  background: '#f1f5f4',
+  color: '#0f172a',
   display: 'flex',
   alignItems: 'center',
   justifyContent: 'center',
@@ -872,30 +987,41 @@ const rowIconStyle = css({
 });
 
 const mutedInlineStyle = css({
-  color: 'var(--text-tertiary)',
+  color: '#64748b',
   fontSize: 12.5,
 });
 
 const mutedLineStyle = css({
-  color: 'var(--text-tertiary)',
+  color: '#64748b',
   fontSize: 12,
   marginTop: 3,
   lineHeight: 1.45,
   whiteSpace: 'pre-wrap',
-  wordBreak: 'break-word',
+  wordBreak: 'keep-all',
+  overflowWrap: 'break-word',
 });
 
 const guideStyle = css({
-  background: 'var(--warn-bg)',
-  border: '1px solid var(--warn-border)',
-  borderRadius: 8,
+  background: '#fffaeb',
+  border: '1px solid #fde68a',
+  borderRadius: 12,
   padding: '12px 14px',
 });
 
+const guideListStyle = css({
+  margin: '8px 0 0',
+  padding: '0 0 0 16px',
+  fontSize: 12.5,
+  color: '#78350f',
+  lineHeight: 1.65,
+  wordBreak: 'keep-all',
+  overflowWrap: 'break-word',
+});
+
 const photoCardStyle = css({
-  background: 'var(--surface)',
-  borderRadius: 8,
-  border: '1px solid var(--border)',
+  background: '#fff',
+  borderRadius: 12,
+  border: '1px solid rgba(15,23,42,0.06)',
   padding: 12,
   display: 'flex',
   flexDirection: 'column',
@@ -907,24 +1033,24 @@ const photoImageStyle = css({
   aspectRatio: '1',
   objectFit: 'cover',
   borderRadius: 10,
-  border: '1px solid var(--border)',
-  background: 'var(--bg-muted)',
+  border: '1px solid #e4e8ee',
+  background: '#f1f5f4',
   display: 'block',
 });
 
 const captionStyle = css({
   marginTop: 4,
   fontSize: 10.5,
-  color: 'var(--text-secondary)',
+  color: '#94a3b8',
   overflow: 'hidden',
   textOverflow: 'ellipsis',
   whiteSpace: 'nowrap',
 });
 
 const photoPendingStyle = css({
-  background: 'var(--surface)',
-  borderRadius: 8,
-  border: '1px dashed var(--border-strong)',
+  background: '#fff',
+  borderRadius: 12,
+  border: '1px dashed #d4d9e1',
   padding: '32px 20px',
   textAlign: 'center',
 });
@@ -933,130 +1059,159 @@ const photoPendingIconStyle = css({
   width: 40,
   height: 40,
   borderRadius: 10,
-  background: 'var(--bg-muted)',
-  color: 'var(--text-tertiary)',
+  background: '#f1f5f4',
+  color: '#94a3b8',
   display: 'inline-flex',
   alignItems: 'center',
   justifyContent: 'center',
   marginBottom: 8,
 });
 
-const aftercareAvailableStyle = css({
-  padding: 16,
-  borderTop: '1px solid var(--border)',
+const asRequestSectionStyle = css({
+  margin: '0 16px 16px',
+  padding: 12,
+  borderRadius: 12,
+  border: '1px solid var(--border)',
   background: 'var(--surface)',
 });
 
-const aftercarePendingStyle = css({
-  padding: 16,
-  borderTop: '1px solid var(--border)',
-  background: 'var(--warn-bg)',
-  color: 'var(--warn-fg)',
-});
-
-const aftercareProgressStyle = css({
-  padding: 16,
-  borderTop: '1px solid var(--border)',
-  background: 'var(--info-bg)',
-  color: 'var(--info-fg)',
-});
-
-const aftercareTitleStyle = css({
-  fontSize: 13.5,
-  fontWeight: 800,
-  lineHeight: 1.4,
-});
-
-const aftercareCopyStyle = css({
-  marginTop: 4,
-  color: 'currentColor',
-  fontSize: 12,
-  lineHeight: 1.55,
-});
-
-const aftercareOpenButtonStyle = css({
-  width: '100%',
-  height: 42,
-  marginTop: 12,
-  border: 'none',
+const asNoticeStyle = css({
+  padding: '9px 10px',
   borderRadius: 10,
-  background: 'var(--text)',
-  color: 'var(--surface)',
-  fontSize: 13,
-  fontWeight: 800,
-  cursor: 'pointer',
+  background: 'var(--warn-bg)',
+  border: '1px solid var(--warn-border)',
+  color: 'var(--warn-fg)',
+  fontSize: 12,
+  lineHeight: 1.5,
+  fontWeight: 700,
+  marginBottom: 10,
 });
 
-const aftercareFormStyle = css({
-  display: 'grid',
-  gap: 12,
-  marginTop: 12,
-});
-
-const aftercareFieldStyle = css({
-  display: 'grid',
-  gap: 6,
-});
-
-const aftercareTextareaStyle = css({
+const asTextareaStyle = css({
   width: '100%',
-  minHeight: 108,
+  minHeight: 96,
   border: '1px solid var(--border-strong)',
   borderRadius: 10,
-  padding: 12,
-  resize: 'vertical',
-  background: 'var(--surface)',
-  color: 'var(--text)',
-  fontFamily: 'var(--font)',
-  fontSize: 16,
+  padding: 10,
+  fontSize: 13,
   lineHeight: 1.5,
+  fontFamily: 'inherit',
+  resize: 'vertical',
+  color: 'var(--text)',
+  background: 'var(--surface)',
 });
 
-const aftercareErrorStyle = css({
-  padding: '10px 12px',
-  border: '1px solid var(--danger-bg)',
-  borderRadius: 8,
-  background: 'var(--danger-bg)',
-  color: 'var(--danger-fg)',
-  fontSize: 12,
-  lineHeight: 1.45,
-});
-
-const aftercareActionsStyle = css({
+const asFileActionsStyle = css({
   display: 'grid',
-  gridTemplateColumns: '1fr 1.5fr',
+  gridTemplateColumns: '1fr 1fr',
   gap: 8,
 });
 
-const aftercareCancelButtonStyle = css({
-  height: 42,
-  border: '1px solid var(--border-strong)',
+const asFileButtonStyle = css({
+  width: '100%',
+  minHeight: 44,
   borderRadius: 10,
+  border: '1px dashed var(--border-strong)',
   background: 'var(--surface)',
   color: 'var(--text-secondary)',
-  fontSize: 13,
-  fontWeight: 700,
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  gap: 6,
+  fontSize: 12.5,
+  fontWeight: 800,
   cursor: 'pointer',
 });
 
-const aftercareSubmitButtonStyle = css({
-  height: 42,
-  border: 'none',
-  borderRadius: 10,
-  background: 'var(--text)',
-  color: 'var(--surface)',
-  fontSize: 13,
+const asFileSummaryStyle = css({
+  color: 'var(--text-tertiary)',
+  fontSize: 11.5,
+  fontWeight: 700,
+});
+
+const asPreviewWrapStyle = css({
+  display: 'grid',
+  gap: 8,
+});
+
+const asPreviewGridStyle = css({
+  display: 'grid',
+  gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
+  gap: 8,
+});
+
+const asPreviewItemStyle = css({
+  margin: 0,
+  position: 'relative',
+  minWidth: 0,
+});
+
+const asPreviewImageStyle = css({
+  width: '100%',
+  aspectRatio: '1',
+  objectFit: 'cover',
+  display: 'block',
+  borderRadius: 8,
+  border: '1px solid var(--border)',
+  background: 'var(--bg-subtle)',
+});
+
+const asPreviewPlaceholderStyle = css({
+  ...asPreviewImageStyle,
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  color: 'var(--text-tertiary)',
+  fontSize: 11,
   fontWeight: 800,
-  cursor: 'pointer',
+});
+
+const asPreviewCaptionStyle = css({
+  marginTop: 4,
+  fontSize: 10.5,
+  lineHeight: 1.25,
+  color: 'var(--text-tertiary)',
+  overflow: 'hidden',
+  textOverflow: 'ellipsis',
+  whiteSpace: 'nowrap',
+});
+
+function asPreviewRemoveButtonStyle(disabled): React.CSSProperties {
+  return {
+    position: 'absolute',
+    top: -6,
+    right: -6,
+    width: 24,
+    height: 24,
+    borderRadius: 999,
+    border: '1px solid rgba(15,23,42,0.12)',
+    background: '#fff',
+    color: 'var(--danger-fg)',
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    boxShadow: '0 2px 8px rgba(15,23,42,0.16)',
+    cursor: disabled ? 'default' : 'pointer',
+  };
+}
+
+const asSuccessStyle = css({
+  padding: '10px 12px',
+  borderRadius: 10,
+  background: 'var(--success-bg)',
+  border: '1px solid var(--success-border)',
+  color: 'var(--success-fg)',
+  fontSize: 12.5,
+  lineHeight: 1.45,
 });
 
 const secondaryButtonStyle = css({
   width: '100%',
   height: 42,
   borderRadius: 10,
-  border: '1px solid var(--border-strong)',
-  background: 'var(--surface)',
-  color: 'var(--text)',
+  border: '1px solid #d4d9e1',
+  background: '#fff',
+  color: '#0f172a',
   fontSize: 13,
   fontWeight: 800,
   display: 'flex',
@@ -1070,16 +1225,16 @@ const trustGridStyle = css({
   gridTemplateColumns: '1fr 1fr 1fr',
   gap: 8,
   padding: '14px 4px',
-  borderTop: '1px solid var(--border)',
-  borderBottom: '1px solid var(--border)',
+  borderTop: '1px solid rgba(15,23,42,0.06)',
+  borderBottom: '1px solid rgba(15,23,42,0.06)',
 });
 
 const callButtonStyle = css({
   marginTop: 14,
   height: 42,
   borderRadius: 10,
-  background: 'var(--text)',
-  color: 'var(--surface)',
+  background: '#0f172a',
+  color: '#fff',
   border: 'none',
   fontSize: 13,
   fontWeight: 800,

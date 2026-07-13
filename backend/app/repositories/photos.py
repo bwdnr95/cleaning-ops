@@ -1,9 +1,9 @@
 from datetime import datetime
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.domain.constants import OrderStatus, PhotoType
+from app.domain.constants import PhotoType
 from app.models.order import Order
 from app.models.photo import OrderPhoto
 from app.repositories.base import Repository
@@ -64,14 +64,7 @@ class PhotoRepository(Repository[OrderPhoto]):
         stmt = (
             select(Order)
             .join(OrderPhoto, OrderPhoto.order_id == Order.id)
-            .where(
-                Order.deleted_at.is_(None),
-                or_(
-                    OrderPhoto.is_customer_visible.is_(False),
-                    Order.status == OrderStatus.CUSTOMER_DELIVERY_NEEDED,
-                    Order.status == OrderStatus.CUSTOMER_DELIVERY_DONE,
-                )
-            )
+            .where(Order.deleted_at.is_(None))
             .distinct()
             .order_by(Order.scheduled_date.asc().nulls_last(), Order.id.asc())
         )
@@ -80,6 +73,6 @@ class PhotoRepository(Repository[OrderPhoto]):
             all_photos = self.list_for_order(order.id)
             pending_photos = [photo for photo in all_photos if not photo.is_customer_visible]
             approved_count = len(all_photos) - len(pending_photos)
-            if pending_photos or (order.status in {OrderStatus.CUSTOMER_DELIVERY_NEEDED, OrderStatus.CUSTOMER_DELIVERY_DONE} and approved_count > 0):
+            if all_photos:
                 items.append((order, all_photos, approved_count))
         return items

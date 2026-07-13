@@ -1,8 +1,12 @@
-"""Allow customer AS photos without an authenticated uploader."""
+"""고객 AS 사진 업로더 nullable 허용
 
-import sqlalchemy as sa
+Revision ID: 0027_nullable_customer_photo_uploader
+Revises: 0026_recurring_partner_billing
+Create Date: 2026-07-08
+"""
 
 from alembic import op
+import sqlalchemy as sa
 
 revision = "0027_nullable_customer_photo_uploader"
 down_revision = "0026_recurring_partner_billing"

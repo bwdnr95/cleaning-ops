@@ -1,12 +1,13 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response
 from sqlalchemy.orm import Session
 
 from app.api.deps import CurrentUser, get_session, require_admin
-from app.domain.constants import MessageType, OrderStatus, TimelineEventType
+from app.domain.constants import MessageType, OrderStatus
 from app.repositories.messages import MessageRepository
 from app.repositories.photos import PhotoRepository
 from app.schemas.photo import AdminPhotoReviewItem, PhotoRead
 from app.services.photos import PhotoService
+from app.services.storage import get_storage_provider
 from app.services.timeline import TimelineService
 
 router = APIRouter()
@@ -23,9 +24,9 @@ def list_photo_review_queue(
     items = []
     for order, photos, approved_count in photo_repo.list_review_queue():
         pending_count = len([photo for photo in photos if not photo.is_customer_visible])
-        evidence_created_after = timeline.latest_created_at(
+        evidence_created_after = timeline.latest_accepted_as_created_at(
             order_id=order.id,
-            event_type=TimelineEventType.AS_REQUESTED,
+            active_as_request_id=order.active_as_request_id,
         )
         items.append(
             AdminPhotoReviewItem(
@@ -54,6 +55,26 @@ def list_photo_review_queue(
             )
         )
     return items
+
+
+@router.get("/{photo_id}/file")
+def get_admin_photo_file(
+    photo_id: str,
+    db: Session = Depends(get_session),
+    _: CurrentUser = Depends(require_admin),
+) -> Response:
+    photo = PhotoRepository(db).get(photo_id)
+    if photo is None or not photo.storage_key:
+        raise HTTPException(status_code=404, detail="photo_not_found")
+    try:
+        data = get_storage_provider().read(photo.storage_key)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="photo_file_not_found") from exc
+    return Response(
+        content=data,
+        media_type=photo.content_type or "application/octet-stream",
+        headers={"cache-control": "private, max-age=60"},
+    )
 
 
 @router.post("/{photo_id}/approve", response_model=PhotoRead)

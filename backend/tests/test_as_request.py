@@ -7,19 +7,11 @@
 from __future__ import annotations
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy.exc import SQLAlchemyError
 
-from app.db.seed import DEV_ORDER_ID, DEV_PARTNER_ID, DEV_PARTNER_USER_ID
-from app.domain.constants import MessageType, OrderStatus, PhotoType, TimelineEventType
-from app.models.message import MessageLog
-from app.models.partner import Partner
-from app.schemas.order import OrderUpdate
-from app.schemas.photo import PhotoCreate
-from app.services.orders import OrderService
-from app.services.photos import PhotoService
-
-PNG_BYTES = b"\x89PNG\r\n\x1a\ncleanops-test-image"
-CUSTOMER_HEADERS = {"X-Customer-Token": "ct2_seed-customer-token-2450"}
+from app.db.seed import DEV_CUSTOMER_TOKEN, DEV_ORDER_ID, DEV_PARTNER_ID, DEV_PARTNER_USER_ID
+from app.domain.constants import MessageType, OrderStatus, TimelineEventType
+from app.services.storage import StoredFile
 
 
 def test_as_request_sets_flags_notifies_and_shows_on_partner_link(
@@ -58,24 +50,6 @@ def test_as_request_sets_flags_notifies_and_shows_on_partner_link(
         for log in detail["message_logs"]
     )
 
-    retry = client.post(
-        f"/api/admin/orders/{DEV_ORDER_ID}/as-request",
-        json={"memo": "화장실 코너 재시공 필요"},
-        headers=admin_h,
-    )
-    assert retry.status_code == 409
-    detail_after_retry = client.get(
-        f"/api/admin/orders/{DEV_ORDER_ID}", headers=admin_h
-    ).json()
-    assert sum(
-        log["message_type"] == MessageType.PARTNER_AS_REQUEST.value
-        for log in detail_after_retry["message_logs"]
-    ) == 1
-    assert sum(
-        log["message_type"] == MessageType.CUSTOMER_AS_NOTICE.value
-        for log in detail_after_retry["message_logs"]
-    ) == 1
-
     # 운영자 결정(2026-07-03): AS 안내도 협력사가 고객에게 직접 재방문 조율하도록 실번호를 전달한다.
     messages = client.get("/api/admin/messages", headers=admin_h).json()
     as_log = next(
@@ -91,6 +65,813 @@ def test_as_request_sets_flags_notifies_and_shows_on_partner_link(
     job = client.get(f"/api/partner/jobs/{DEV_ORDER_ID}", headers=partner_h).json()
     assert job["as_requested"] is True
     assert job["as_memo"] == "화장실 코너 재시공 필요"
+
+
+def test_customer_as_request_waits_for_admin_acceptance_before_partner_notice(
+    client, seed_admin_token, seed_partner_token
+):
+    admin_h = {"Authorization": f"Bearer {seed_admin_token}"}
+    partner_h = {"Authorization": f"Bearer {seed_partner_token}"}
+    status_res = client.patch(
+        f"/api/admin/orders/{DEV_ORDER_ID}",
+        json={"status": OrderStatus.CUSTOMER_DELIVERY_DONE.value},
+        headers=admin_h,
+    )
+    assert status_res.status_code == 200, status_res.text
+
+    png_bytes = b"\x89PNG\r\n\x1a\ncustomer-as"
+    res = client.post(
+        f"/api/customer/orders/{DEV_CUSTOMER_TOKEN}/as-request",
+        data={
+            "phone_suffix": "5432",
+            "order_id": DEV_ORDER_ID,
+            "memo": "욕실 코너 오염이 남아 있습니다.",
+        },
+        files=[("files", ("as.png", png_bytes, "image/png"))],
+    )
+    assert res.status_code == 200, res.text
+    line = next(item for item in res.json()["lines"] if item["id"] == DEV_ORDER_ID)
+    assert line["status"] == OrderStatus.CUSTOMER_CHECK_NEEDED.value
+    assert "as_memo" not in line
+
+    detail = client.get(f"/api/admin/orders/{DEV_ORDER_ID}", headers=admin_h).json()
+    assert detail["as_requested"] is False
+    assert detail["as_memo"] == "욕실 코너 오염이 남아 있습니다."
+    assert any(
+        ev["event_type"] == TimelineEventType.AS_REQUESTED.value
+        and ev["description"] == "욕실 코너 오염이 남아 있습니다."
+        and ev["event_metadata"]["source"] == "customer"
+        for ev in detail["timeline"]
+    )
+    as_photos = [photo for photo in detail["photos"] if photo["file_name"] == "as.png"]
+    assert len(as_photos) == 1
+    assert as_photos[0]["photo_source"] == "customer_as"
+    assert as_photos[0]["uploaded_by_user_id"] is None
+    assert as_photos[0]["is_customer_visible"] is False
+    assert as_photos[0]["file_url"] == f"/api/admin/photos/{as_photos[0]['id']}/file"
+    assert not as_photos[0]["file_url"].startswith("/uploads/")
+    assert client.get(as_photos[0]["file_url"]).status_code == 401
+    file_res = client.get(as_photos[0]["file_url"], headers=admin_h)
+    assert file_res.status_code == 200
+    assert file_res.content == png_bytes
+    assert all(log["message_type"] != MessageType.PARTNER_AS_REQUEST.value for log in detail["message_logs"])
+    assert all(log["message_type"] != MessageType.CUSTOMER_AS_NOTICE.value for log in detail["message_logs"])
+
+    partner_job = client.get(f"/api/partner/jobs/{DEV_ORDER_ID}", headers=partner_h).json()
+    assert partner_job["as_requested"] is False
+    assert partner_job["as_memo"] is None
+    assert all(photo["file_name"] != "as.png" for photo in partner_job["photos"])
+    premature_start = client.post(f"/api/partner/jobs/{DEV_ORDER_ID}/start", headers=partner_h)
+    assert premature_start.status_code == 409
+    assert premature_start.json()["detail"] == "invalid_status_transition"
+    premature_upload = client.post(
+        f"/api/partner/jobs/{DEV_ORDER_ID}/photos",
+        headers=partner_h,
+        data={"photo_type": "before"},
+        files={"file": ("premature-before.png", png_bytes, "image/png")},
+    )
+    assert premature_upload.status_code == 409
+    assert premature_upload.json()["detail"] == "invalid_status_for_upload"
+
+    accepted = client.post(
+        f"/api/admin/orders/{DEV_ORDER_ID}/as-request",
+        json={"memo": detail["as_memo"]},
+        headers=admin_h,
+    )
+    assert accepted.status_code == 200, accepted.text
+    partner_after_accept = client.get(f"/api/partner/jobs/{DEV_ORDER_ID}", headers=partner_h).json()
+    assert partner_after_accept["as_requested"] is True
+    assert partner_after_accept["as_memo"] == "욕실 코너 오염이 남아 있습니다."
+    partner_as_photo = next(photo for photo in partner_after_accept["photos"] if photo["file_name"] == "as.png")
+    assert partner_as_photo["photo_source"] == "customer_as"
+    assert partner_as_photo["file_url"] == f"/api/partner/jobs/{DEV_ORDER_ID}/photos/{partner_as_photo['id']}/file"
+    assert client.get(partner_as_photo["file_url"]).status_code == 401
+    partner_file_res = client.get(partner_as_photo["file_url"], headers=partner_h)
+    assert partner_file_res.status_code == 200
+    assert partner_file_res.content == png_bytes
+    delete_customer_as_photo = client.delete(
+        f"/api/partner/jobs/{DEV_ORDER_ID}/photos/{partner_as_photo['id']}",
+        headers=partner_h,
+    )
+    assert delete_customer_as_photo.status_code == 403
+    assert delete_customer_as_photo.json()["detail"] == "photo_delete_not_allowed"
+
+    duplicate_admin_as = client.post(
+        f"/api/admin/orders/{DEV_ORDER_ID}/as-request",
+        json={"memo": "중복 AS 전송 시도"},
+        headers=admin_h,
+    )
+    assert duplicate_admin_as.status_code == 409
+    assert duplicate_admin_as.json()["detail"] == "as_request_already_accepted"
+    partner_after_duplicate = client.get(f"/api/partner/jobs/{DEV_ORDER_ID}", headers=partner_h).json()
+    assert any(photo["file_name"] == "as.png" for photo in partner_after_duplicate["photos"])
+
+    wrong_partner = client.post(
+        "/api/admin/partners",
+        json={
+            "name": "다른 협력사",
+            "phone": "01044443333",
+            "manager_name": "타협력",
+            "login_phone": "01044443333",
+            "login_password": "PartnerB123!",
+        },
+        headers=admin_h,
+    )
+    assert wrong_partner.status_code == 201, wrong_partner.text
+    wrong_login = client.post(
+        "/api/auth/partner/login",
+        json={"identifier": "01044443333", "password": "PartnerB123!"},
+    )
+    assert wrong_login.status_code == 200, wrong_login.text
+    wrong_partner_h = {"Authorization": f"Bearer {wrong_login.json()['access_token']}"}
+    wrong_partner_file_res = client.get(partner_as_photo["file_url"], headers=wrong_partner_h)
+    assert wrong_partner_file_res.status_code == 404
+    assert wrong_partner_file_res.json()["detail"] == "order_not_found"
+
+    repeated = client.post(
+        f"/api/customer/orders/{DEV_CUSTOMER_TOKEN}/as-request",
+        data={
+            "phone_suffix": "5432",
+            "order_id": DEV_ORDER_ID,
+            "memo": "승인 뒤 재접수 시도",
+        },
+    )
+    assert repeated.status_code == 409
+    partner_after_repeat = client.get(f"/api/partner/jobs/{DEV_ORDER_ID}", headers=partner_h).json()
+    assert partner_after_repeat["as_requested"] is True
+    assert partner_after_repeat["as_memo"] == "욕실 코너 오염이 남아 있습니다."
+
+
+def test_customer_as_request_rejects_repeat_before_admin_acceptance_and_deletes_file(
+    client, seed_admin_token, monkeypatch
+):
+    from app.api.routes.customer import orders as customer_orders
+
+    class FakeStorage:
+        def __init__(self) -> None:
+            self.saved_keys: list[str] = []
+            self.deleted_keys: list[str] = []
+
+        def save_private(self, *, data: bytes, file_name: str, content_type: str) -> StoredFile:
+            storage_key = f"private/photos/{len(self.saved_keys) + 1}-{file_name}"
+            self.saved_keys.append(storage_key)
+            return StoredFile(
+                storage_key=storage_key,
+                file_url="",
+                file_name=file_name,
+                file_size=len(data),
+                content_type=content_type,
+            )
+
+        def delete(self, storage_key: str) -> None:
+            self.deleted_keys.append(storage_key)
+
+    storage = FakeStorage()
+    monkeypatch.setattr(customer_orders, "get_storage_provider", lambda: storage)
+    admin_h = {"Authorization": f"Bearer {seed_admin_token}"}
+    status_res = client.patch(
+        f"/api/admin/orders/{DEV_ORDER_ID}",
+        json={"status": OrderStatus.CUSTOMER_DELIVERY_DONE.value},
+        headers=admin_h,
+    )
+    assert status_res.status_code == 200, status_res.text
+
+    first_res = client.post(
+        f"/api/customer/orders/{DEV_CUSTOMER_TOKEN}/as-request",
+        data={
+            "phone_suffix": "5432",
+            "order_id": DEV_ORDER_ID,
+            "memo": "첫 번째 AS 요청입니다.",
+        },
+        files=[("files", ("first.png", b"\x89PNG\r\n\x1a\nfirst", "image/png"))],
+    )
+    assert first_res.status_code == 200, first_res.text
+
+    repeat_res = client.post(
+        f"/api/customer/orders/{DEV_CUSTOMER_TOKEN}/as-request",
+        data={
+            "phone_suffix": "5432",
+            "order_id": DEV_ORDER_ID,
+            "memo": "두 번째 AS 요청입니다.",
+        },
+        files=[("files", ("second.png", b"\x89PNG\r\n\x1a\nsecond", "image/png"))],
+    )
+    assert repeat_res.status_code == 409
+    assert repeat_res.json()["detail"] == "as_request_already_pending"
+    assert storage.saved_keys == ["private/photos/1-first.png"]
+    assert storage.deleted_keys == []
+
+    detail = client.get(f"/api/admin/orders/{DEV_ORDER_ID}", headers=admin_h).json()
+    assert detail["as_requested"] is False
+    assert detail["as_memo"] == "첫 번째 AS 요청입니다."
+    photo_names = [photo["file_name"] for photo in detail["photos"]]
+    assert "first.png" in photo_names
+    assert "second.png" not in photo_names
+
+
+def test_customer_as_request_rejects_too_many_files_before_storage(
+    client, seed_admin_token, monkeypatch
+):
+    from app.api.routes.customer import orders as customer_orders
+
+    class FakeStorage:
+        def __init__(self) -> None:
+            self.saved_keys: list[str] = []
+
+        def save_private(self, *, data: bytes, file_name: str, content_type: str) -> StoredFile:
+            self.saved_keys.append(file_name)
+            return StoredFile(
+                storage_key=f"private/photos/{file_name}",
+                file_url="",
+                file_name=file_name,
+                file_size=len(data),
+                content_type=content_type,
+            )
+
+    storage = FakeStorage()
+    monkeypatch.setattr(customer_orders, "get_storage_provider", lambda: storage)
+    admin_h = {"Authorization": f"Bearer {seed_admin_token}"}
+    status_res = client.patch(
+        f"/api/admin/orders/{DEV_ORDER_ID}",
+        json={"status": OrderStatus.CUSTOMER_DELIVERY_DONE.value},
+        headers=admin_h,
+    )
+    assert status_res.status_code == 200, status_res.text
+
+    png_bytes = b"\x89PNG\r\n\x1a\nas"
+    res = client.post(
+        f"/api/customer/orders/{DEV_CUSTOMER_TOKEN}/as-request",
+        data={
+            "phone_suffix": "5432",
+            "order_id": DEV_ORDER_ID,
+            "memo": "사진이 너무 많습니다.",
+        },
+        files=[
+            ("files", (f"as-{index}.png", png_bytes, "image/png"))
+            for index in range(customer_orders.settings.customer_as_max_files + 1)
+        ],
+    )
+    assert res.status_code == 413
+    assert res.json()["detail"] == "too_many_as_photos"
+    assert storage.saved_keys == []
+
+
+def test_customer_as_request_rejects_total_file_size_before_storage(
+    client, seed_admin_token, monkeypatch
+):
+    from app.api.routes.customer import orders as customer_orders
+
+    class FakeStorage:
+        def __init__(self) -> None:
+            self.saved_keys: list[str] = []
+
+        def save_private(self, *, data: bytes, file_name: str, content_type: str) -> StoredFile:
+            self.saved_keys.append(file_name)
+            return StoredFile(
+                storage_key=f"private/photos/{file_name}",
+                file_url="",
+                file_name=file_name,
+                file_size=len(data),
+                content_type=content_type,
+            )
+
+    storage = FakeStorage()
+    monkeypatch.setattr(customer_orders, "get_storage_provider", lambda: storage)
+    monkeypatch.setattr(customer_orders.settings, "customer_as_max_upload_bytes", 24)
+    admin_h = {"Authorization": f"Bearer {seed_admin_token}"}
+    status_res = client.patch(
+        f"/api/admin/orders/{DEV_ORDER_ID}",
+        json={"status": OrderStatus.CUSTOMER_DELIVERY_DONE.value},
+        headers=admin_h,
+    )
+    assert status_res.status_code == 200, status_res.text
+
+    res = client.post(
+        f"/api/customer/orders/{DEV_CUSTOMER_TOKEN}/as-request",
+        data={
+            "phone_suffix": "5432",
+            "order_id": DEV_ORDER_ID,
+            "memo": "사진 총량 초과",
+        },
+        files=[
+            ("files", ("one.png", b"\x89PNG\r\n\x1a\n11111111", "image/png")),
+            ("files", ("two.png", b"\x89PNG\r\n\x1a\n22222222", "image/png")),
+        ],
+    )
+    assert res.status_code == 413
+    assert res.json()["detail"] == "as_photos_total_too_large"
+    assert storage.saved_keys == []
+
+
+def test_customer_as_upload_reads_oversized_file_in_bounded_chunks(monkeypatch):
+    import anyio
+    from fastapi import HTTPException
+
+    from app.api.routes.customer import orders as customer_orders
+
+    class VirtualUploadFile:
+        def __init__(self, *, total_bytes: int) -> None:
+            self.filename = "oversized.png"
+            self.content_type = "image/png"
+            self.total_bytes = total_bytes
+            self.offset = 0
+            self.read_sizes: list[int] = []
+
+        async def read(self, size: int = -1) -> bytes:
+            self.read_sizes.append(size)
+            if self.offset >= self.total_bytes:
+                return b""
+            if size < 0:
+                chunk_size = self.total_bytes - self.offset
+            else:
+                chunk_size = min(size, self.total_bytes - self.offset)
+            self.offset += chunk_size
+            return b"x" * chunk_size
+
+    class FakeStorage:
+        def __init__(self) -> None:
+            self.saved_keys: list[str] = []
+
+        def save_private(self, *, data: bytes, file_name: str, content_type: str) -> StoredFile:
+            self.saved_keys.append(file_name)
+            return StoredFile(
+                storage_key=f"private/photos/{file_name}",
+                file_url="",
+                file_name=file_name,
+                file_size=len(data),
+                content_type=content_type,
+            )
+
+    async def store_file() -> None:
+        await customer_orders._store_customer_as_files([upload], storage=storage)
+
+    monkeypatch.setattr(customer_orders.settings, "photo_max_upload_bytes", 12)
+    monkeypatch.setattr(customer_orders.settings, "customer_as_max_upload_bytes", 100)
+    upload = VirtualUploadFile(total_bytes=13)
+    storage = FakeStorage()
+
+    with pytest.raises(HTTPException) as excinfo:
+        anyio.run(store_file)
+
+    assert excinfo.value.status_code == 413
+    assert excinfo.value.detail == "photo_too_large"
+    assert upload.read_sizes
+    assert all(read_size > 0 for read_size in upload.read_sizes)
+    assert max(upload.read_sizes) <= customer_orders.settings.photo_max_upload_bytes + 1
+    assert storage.saved_keys == []
+
+
+def test_customer_as_request_rejects_large_body_before_multipart_parse(client, monkeypatch):
+    from app.api.routes.customer import orders as customer_orders
+
+    monkeypatch.setattr(customer_orders.settings, "customer_as_max_upload_bytes", 12)
+    monkeypatch.setattr(customer_orders.settings, "customer_as_request_body_overhead_bytes", 0)
+
+    res = client.post(
+        f"/api/customer/orders/{DEV_CUSTOMER_TOKEN}/as-request",
+        content=b"x" * 13,
+        headers={"content-type": "multipart/form-data; boundary=too-large"},
+    )
+
+    assert res.status_code == 413
+    assert res.json()["detail"] == "as_photos_total_too_large"
+
+
+def test_customer_as_request_revalidates_stale_session_after_upload(db_session):
+    from sqlalchemy.orm import sessionmaker
+
+    from app.models.order import Order
+    from app.services.orders import OrderService
+
+    order = db_session.get(Order, DEV_ORDER_ID)
+    assert order is not None
+    order.status = OrderStatus.CUSTOMER_DELIVERY_DONE
+    db_session.commit()
+
+    session_factory = sessionmaker(bind=db_session.get_bind(), autoflush=False, autocommit=False)
+    first_session = session_factory()
+    second_session = session_factory()
+    try:
+        first_service = OrderService(first_session)
+        second_service = OrderService(second_session)
+        first_service.validate_customer_as_request(DEV_ORDER_ID, memo="느린 업로드")
+
+        second_service.submit_customer_as_request(
+            DEV_ORDER_ID,
+            memo="먼저 완료된 요청",
+            stored_files=[
+                StoredFile(
+                    storage_key="private/photos/first-wins.png",
+                    file_url="",
+                    file_name="first-wins.png",
+                    file_size=10,
+                    content_type="image/png",
+                )
+            ],
+        )
+
+        with pytest.raises(ValueError, match="as_request_already_pending"):
+            first_service.submit_customer_as_request(
+                DEV_ORDER_ID,
+                memo="느린 업로드",
+                stored_files=[
+                    StoredFile(
+                        storage_key="private/photos/slow-loser.png",
+                        file_url="",
+                        file_name="slow-loser.png",
+                        file_size=10,
+                        content_type="image/png",
+                    )
+                ],
+            )
+    finally:
+        first_session.close()
+        second_session.close()
+
+
+def test_pending_customer_as_request_does_not_reset_customer_photo_evidence_cutoff(db_session):
+    from datetime import UTC, datetime
+
+    from app.domain.constants import PhotoType, RecipientType
+    from app.models.order import Order
+    from app.models.photo import OrderPhoto
+    from app.schemas.message import MessageSendRequest
+    from app.services.messages import MessageService
+    from app.services.orders import OrderService
+
+    order = db_session.get(Order, DEV_ORDER_ID)
+    assert order is not None
+    order.status = OrderStatus.CUSTOMER_DELIVERY_NEEDED
+    visible_time = datetime(2026, 7, 1, 9, 0, tzinfo=UTC)
+    for photo_type in (PhotoType.BEFORE, PhotoType.AFTER):
+        db_session.add(
+            OrderPhoto(
+                id=f"pending-cutoff-{photo_type}",
+                order_id=DEV_ORDER_ID,
+                uploaded_by_user_id=DEV_PARTNER_USER_ID,
+                photo_type=photo_type,
+                storage_key=f"photos/pending-cutoff-{photo_type}.png",
+                file_url=f"/uploads/pending-cutoff-{photo_type}.png",
+                file_name=f"pending-cutoff-{photo_type}.png",
+                file_size=10,
+                content_type="image/png",
+                is_customer_visible=True,
+                created_at=visible_time,
+            )
+        )
+    db_session.commit()
+
+    OrderService(db_session).submit_customer_as_request(
+        DEV_ORDER_ID,
+        memo="운영 승인 전 고객 AS",
+        stored_files=[
+            StoredFile(
+                storage_key="private/photos/pending-customer-as.png",
+                file_url="",
+                file_name="pending-customer-as.png",
+                file_size=10,
+                content_type="image/png",
+            )
+        ],
+    )
+    order = db_session.get(Order, DEV_ORDER_ID)
+    assert order is not None
+    order.status = OrderStatus.CUSTOMER_DELIVERY_NEEDED
+    db_session.commit()
+
+    sent = MessageService(db_session).send(
+        MessageSendRequest(
+            order_id=DEV_ORDER_ID,
+            message_type=MessageType.CUSTOMER_PHOTO_READY,
+            recipient_type=RecipientType.CUSTOMER,
+        ),
+        actor_user_id="seed-admin-user",
+    )
+    assert sent.message_type == MessageType.CUSTOMER_PHOTO_READY
+
+
+def test_partner_dto_scopes_customer_as_photos_to_active_request(db_session):
+    from app.models.order import Order
+    from app.repositories.photos import PhotoRepository
+    from app.repositories.timeline import TimelineRepository
+    from app.services.orders import (
+        OrderService,
+        active_customer_as_photo_ids,
+        to_partner_job_dto,
+    )
+
+    osvc = OrderService(db_session)
+    order = db_session.get(Order, DEV_ORDER_ID)
+    assert order is not None
+    order.status = OrderStatus.CUSTOMER_DELIVERY_DONE
+    db_session.commit()
+
+    osvc.submit_customer_as_request(
+        DEV_ORDER_ID,
+        memo="첫 번째 고객 AS",
+        stored_files=[
+            StoredFile(
+                storage_key="private/photos/old-as.png",
+                file_url="",
+                file_name="old-as.png",
+                file_size=10,
+                content_type="image/png",
+            )
+        ],
+    )
+    osvc.request_as(DEV_ORDER_ID, memo="첫 번째 고객 AS", actor_user_id="seed-admin-user")
+
+    order = db_session.get(Order, DEV_ORDER_ID)
+    assert order is not None
+    order.as_requested = False
+    order.status = OrderStatus.CUSTOMER_DELIVERY_DONE
+    db_session.commit()
+
+    osvc.submit_customer_as_request(
+        DEV_ORDER_ID,
+        memo="두 번째 고객 AS",
+        stored_files=[
+            StoredFile(
+                storage_key="private/photos/new-as.png",
+                file_url="",
+                file_name="new-as.png",
+                file_size=10,
+                content_type="image/png",
+            )
+        ],
+    )
+    osvc.request_as(DEV_ORDER_ID, memo="두 번째 고객 AS", actor_user_id="seed-admin-user")
+
+    order = db_session.get(Order, DEV_ORDER_ID)
+    assert order is not None
+    events = TimelineRepository(db_session).list_for_order(DEV_ORDER_ID)
+    photos = PhotoRepository(db_session).list_for_order(DEV_ORDER_ID)
+    visible_customer_as_ids = active_customer_as_photo_ids(order, events)
+    visible_customer_as_names = {
+        photo.file_name for photo in photos if photo.id in visible_customer_as_ids
+    }
+    assert visible_customer_as_names == {"new-as.png"}
+
+    dto = to_partner_job_dto(
+        order,
+        photos=photos,
+        as_requested_at=events[-1].created_at,
+        visible_customer_as_photo_ids=visible_customer_as_ids,
+    )
+    partner_photo_names = {photo.file_name for photo in dto.photos}
+    assert "new-as.png" in partner_photo_names
+    assert "old-as.png" not in partner_photo_names
+
+
+def test_admin_as_after_completed_customer_as_does_not_reuse_old_request_id(db_session):
+    from app.models.order import Order
+    from app.repositories.photos import PhotoRepository
+    from app.repositories.timeline import TimelineRepository
+    from app.services.orders import (
+        OrderService,
+        active_customer_as_photo_ids,
+        to_partner_job_dto,
+    )
+
+    osvc = OrderService(db_session)
+    order = db_session.get(Order, DEV_ORDER_ID)
+    assert order is not None
+    order.status = OrderStatus.CUSTOMER_DELIVERY_DONE
+    db_session.commit()
+
+    osvc.submit_customer_as_request(
+        DEV_ORDER_ID,
+        memo="이전 고객 AS",
+        stored_files=[
+            StoredFile(
+                storage_key="private/photos/previous-customer-as.png",
+                file_url="",
+                file_name="previous-customer-as.png",
+                file_size=10,
+                content_type="image/png",
+            )
+        ],
+    )
+    first_acceptance = osvc.request_as(
+        DEV_ORDER_ID,
+        memo="이전 고객 AS",
+        actor_user_id="seed-admin-user",
+    )
+    old_request_id = first_acceptance.active_as_request_id
+    assert old_request_id is not None
+
+    order = db_session.get(Order, DEV_ORDER_ID)
+    assert order is not None
+    order.as_requested = False
+    order.status = OrderStatus.CUSTOMER_CHECK_NEEDED
+    db_session.commit()
+
+    second_acceptance = osvc.request_as(
+        DEV_ORDER_ID,
+        memo="새 운영 AS",
+        actor_user_id="seed-admin-user",
+    )
+    assert second_acceptance.active_as_request_id != old_request_id
+
+    events = TimelineRepository(db_session).list_for_order(DEV_ORDER_ID)
+    photos = PhotoRepository(db_session).list_for_order(DEV_ORDER_ID)
+    visible_customer_as_ids = active_customer_as_photo_ids(second_acceptance, events)
+    visible_customer_as_names = {
+        photo.file_name for photo in photos if photo.id in visible_customer_as_ids
+    }
+    assert visible_customer_as_names == set()
+
+    dto = to_partner_job_dto(
+        second_acceptance,
+        photos=photos,
+        as_requested_at=events[-1].created_at,
+        visible_customer_as_photo_ids=visible_customer_as_ids,
+    )
+    assert all(photo.file_name != "previous-customer-as.png" for photo in dto.photos)
+
+
+def test_admin_acceptance_reloads_pending_customer_as_from_stale_session(db_session):
+    from sqlalchemy.orm import sessionmaker
+
+    from app.models.order import Order
+    from app.repositories.photos import PhotoRepository
+    from app.repositories.timeline import TimelineRepository
+    from app.services.orders import (
+        OrderService,
+        active_customer_as_photo_ids,
+        to_partner_job_dto,
+    )
+
+    order = db_session.get(Order, DEV_ORDER_ID)
+    assert order is not None
+    order.status = OrderStatus.CUSTOMER_DELIVERY_DONE
+    db_session.commit()
+
+    SessionLocal = sessionmaker(
+        bind=db_session.get_bind(),
+        autoflush=False,
+        autocommit=False,
+        expire_on_commit=False,
+    )
+    with SessionLocal() as admin_db, SessionLocal() as customer_db:
+        stale_admin_order = admin_db.get(Order, DEV_ORDER_ID)
+        assert stale_admin_order is not None
+        assert stale_admin_order.active_as_request_id is None
+        admin_db.commit()
+
+        submitted = OrderService(customer_db).submit_customer_as_request(
+            DEV_ORDER_ID,
+            memo="고객이 먼저 접수한 AS",
+            stored_files=[
+                StoredFile(
+                    storage_key="private/photos/stale-admin-as.png",
+                    file_url="",
+                    file_name="stale-admin-as.png",
+                    file_size=10,
+                    content_type="image/png",
+                )
+            ],
+        )
+        customer_as_request_id = submitted.active_as_request_id
+        assert customer_as_request_id is not None
+
+        accepted = OrderService(admin_db).request_as(
+            DEV_ORDER_ID,
+            memo="고객이 먼저 접수한 AS",
+            actor_user_id="seed-admin-user",
+        )
+
+        assert accepted.active_as_request_id == customer_as_request_id
+        events = TimelineRepository(admin_db).list_for_order(DEV_ORDER_ID)
+        photos = PhotoRepository(admin_db).list_for_order(DEV_ORDER_ID)
+        visible_customer_as_ids = active_customer_as_photo_ids(accepted, events)
+        visible_customer_as_names = {
+            photo.file_name for photo in photos if photo.id in visible_customer_as_ids
+        }
+        assert visible_customer_as_names == {"stale-admin-as.png"}
+
+        dto = to_partner_job_dto(
+            accepted,
+            photos=photos,
+            as_requested_at=events[-1].created_at,
+            visible_customer_as_photo_ids=visible_customer_as_ids,
+        )
+        assert any(photo.file_name == "stale-admin-as.png" for photo in dto.photos)
+
+
+def test_customer_as_request_deletes_uploaded_files_when_db_write_fails(client, seed_admin_token, monkeypatch):
+    from app.api.routes.customer import orders as customer_orders
+
+    class FakeStorage:
+        def __init__(self) -> None:
+            self.deleted_keys: list[str] = []
+
+        def save_private(self, *, data: bytes, file_name: str, content_type: str) -> StoredFile:
+            return StoredFile(
+                storage_key="private/photos/customer-as.png",
+                file_url="",
+                file_name=file_name,
+                file_size=len(data),
+                content_type=content_type,
+            )
+
+        def delete(self, storage_key: str) -> None:
+            self.deleted_keys.append(storage_key)
+
+    storage = FakeStorage()
+    admin_h = {"Authorization": f"Bearer {seed_admin_token}"}
+    status_res = client.patch(
+        f"/api/admin/orders/{DEV_ORDER_ID}",
+        json={"status": OrderStatus.CUSTOMER_DELIVERY_DONE.value},
+        headers=admin_h,
+    )
+    assert status_res.status_code == 200, status_res.text
+
+    def fail_submit(
+        _self,
+        _order_id: str,
+        *,
+        memo: str,
+        stored_files: list[StoredFile],
+    ) -> None:
+        assert memo == "DB 실패 경로"
+        assert len(stored_files) == 1
+        raise SQLAlchemyError("forced commit failure")
+
+    monkeypatch.setattr(customer_orders, "get_storage_provider", lambda: storage)
+    monkeypatch.setattr(
+        customer_orders.OrderService,
+        "submit_customer_as_request",
+        fail_submit,
+    )
+
+    png_bytes = b"\x89PNG\r\n\x1a\ncustomer-as"
+    res = client.post(
+        f"/api/customer/orders/{DEV_CUSTOMER_TOKEN}/as-request",
+        data={
+            "phone_suffix": "5432",
+            "order_id": DEV_ORDER_ID,
+            "memo": "DB 실패 경로",
+        },
+        files=[("files", ("as.png", png_bytes, "image/png"))],
+    )
+
+    assert res.status_code == 500
+    assert res.json()["detail"] == "customer_as_request_failed"
+    assert storage.deleted_keys == ["private/photos/customer-as.png"]
+
+
+def test_customer_as_request_deletes_partial_uploads_when_second_file_store_fails(
+    client, seed_admin_token, monkeypatch
+):
+    from app.api.routes.customer import orders as customer_orders
+
+    class FailingSecondSaveStorage:
+        def __init__(self) -> None:
+            self.save_count = 0
+            self.deleted_keys: list[str] = []
+
+        def save_private(self, *, data: bytes, file_name: str, content_type: str) -> StoredFile:
+            self.save_count += 1
+            if self.save_count == 2:
+                raise OSError("forced storage failure")
+            return StoredFile(
+                storage_key="private/photos/first.png",
+                file_url="",
+                file_name=file_name,
+                file_size=len(data),
+                content_type=content_type,
+            )
+
+        def delete(self, storage_key: str) -> None:
+            self.deleted_keys.append(storage_key)
+
+    storage = FailingSecondSaveStorage()
+    monkeypatch.setattr(customer_orders, "get_storage_provider", lambda: storage)
+    admin_h = {"Authorization": f"Bearer {seed_admin_token}"}
+    status_res = client.patch(
+        f"/api/admin/orders/{DEV_ORDER_ID}",
+        json={"status": OrderStatus.CUSTOMER_DELIVERY_DONE.value},
+        headers=admin_h,
+    )
+    assert status_res.status_code == 200, status_res.text
+
+    png_bytes = b"\x89PNG\r\n\x1a\ncustomer-as"
+    with pytest.raises(OSError, match="forced storage failure"):
+        client.post(
+            f"/api/customer/orders/{DEV_CUSTOMER_TOKEN}/as-request",
+            data={
+                "phone_suffix": "5432",
+                "order_id": DEV_ORDER_ID,
+                "memo": "두 번째 파일 실패",
+            },
+            files=[
+                ("files", ("first.png", png_bytes, "image/png")),
+                ("files", ("second.png", png_bytes, "image/png")),
+            ],
+        )
+
+    assert storage.deleted_keys == ["private/photos/first.png"]
 
 
 def test_as_request_requires_memo(client, seed_admin_token):
@@ -175,327 +956,6 @@ def test_customer_dto_excludes_as_fields():
     fields = set(CustomerOrderLineRead.model_fields.keys())
     assert "as_memo" not in fields
     assert "as_requested" not in fields
-
-
-def test_customer_as_intake_waits_for_admin_acceptance(
-    client,
-    seed_admin_token,
-    seed_partner_token,
-):
-    admin_h = {"Authorization": f"Bearer {seed_admin_token}"}
-    status_response = client.patch(
-        f"/api/admin/orders/{DEV_ORDER_ID}",
-        json={"status": OrderStatus.CUSTOMER_DELIVERY_DONE.value},
-        headers=admin_h,
-    )
-    assert status_response.status_code == 200, status_response.text
-
-    intake = client.post(
-        "/api/customer/orders/as-requests",
-        headers=CUSTOMER_HEADERS,
-        json={
-            "phone_suffix": "5432",
-            "order_id": DEV_ORDER_ID,
-            "memo": "욕실 실리콘 마감 상태를 다시 확인해주세요.",
-        },
-    )
-    assert intake.status_code == 200, intake.text
-    customer_line = next(line for line in intake.json()["lines"] if line["id"] == DEV_ORDER_ID)
-    assert customer_line["aftercare_status"] == "pending"
-    assert "as_requested" not in customer_line
-    assert "as_memo" not in customer_line
-
-    admin_detail = client.get(f"/api/admin/orders/{DEV_ORDER_ID}", headers=admin_h).json()
-    assert admin_detail["status"] == OrderStatus.CUSTOMER_DELIVERY_DONE.value
-    assert admin_detail["as_requested"] is False
-    assert admin_detail["as_intake_pending"] is True
-    assert admin_detail["as_memo"] == "욕실 실리콘 마감 상태를 다시 확인해주세요."
-    assert all(
-        log["message_type"]
-        not in {MessageType.PARTNER_AS_REQUEST.value, MessageType.CUSTOMER_AS_NOTICE.value}
-        for log in admin_detail["message_logs"]
-    )
-    assert any(
-        event["event_type"] == TimelineEventType.AS_INTAKE_REQUESTED.value
-        for event in admin_detail["timeline"]
-    )
-
-    partner_h = {"Authorization": f"Bearer {seed_partner_token}"}
-    pending_partner_job = client.get(
-        f"/api/partner/jobs/{DEV_ORDER_ID}",
-        headers=partner_h,
-    )
-    assert pending_partner_job.status_code == 200
-    assert pending_partner_job.json()["as_requested"] is False
-    assert pending_partner_job.json()["as_memo"] is None
-    assert pending_partner_job.json()["as_requested_at"] is None
-    blocked_start = client.post(
-        f"/api/partner/jobs/{DEV_ORDER_ID}/start",
-        headers=partner_h,
-    )
-    blocked_upload = client.post(
-        f"/api/partner/jobs/{DEV_ORDER_ID}/photos",
-        headers=partner_h,
-        data={"photo_type": "before"},
-        files={"file": ("pending-as.png", PNG_BYTES, "image/png")},
-    )
-    assert blocked_start.status_code == 409
-    assert blocked_upload.status_code == 409
-
-    dashboard = client.get("/api/admin/dashboard/summary", headers=admin_h)
-    assert dashboard.status_code == 200
-    assert dashboard.json()["customer_check_needed"] >= 1
-    pending_page = client.get(
-        "/api/admin/orders/page",
-        params={"status": "customer_check", "visit_preset": "all"},
-        headers=admin_h,
-    )
-    assert pending_page.status_code == 200
-    assert any(item["id"] == DEV_ORDER_ID for item in pending_page.json()["items"])
-
-    accepted = client.post(
-        f"/api/admin/orders/{DEV_ORDER_ID}/as-request",
-        json={"memo": ""},
-        headers=admin_h,
-    )
-    assert accepted.status_code == 200, accepted.text
-    assert accepted.json()["as_requested"] is True
-    assert accepted.json()["as_intake_pending"] is False
-    assert accepted.json()["as_memo"] == "욕실 실리콘 마감 상태를 다시 확인해주세요."
-
-    paid_during_as = client.patch(
-        f"/api/admin/orders/{DEV_ORDER_ID}",
-        json={"payment_status": "paid"},
-        headers=admin_h,
-    )
-    assert paid_during_as.status_code == 200
-    assert paid_during_as.json()["status"] == OrderStatus.CUSTOMER_CHECK_NEEDED.value
-    assert paid_during_as.json()["as_requested"] is True
-
-    accepted_detail = client.get(f"/api/admin/orders/{DEV_ORDER_ID}", headers=admin_h).json()
-    as_message_types = [
-        log["message_type"]
-        for log in accepted_detail["message_logs"]
-        if log["message_type"]
-        in {MessageType.PARTNER_AS_REQUEST.value, MessageType.CUSTOMER_AS_NOTICE.value}
-    ]
-    assert sorted(as_message_types) == sorted(
-        [MessageType.PARTNER_AS_REQUEST, MessageType.CUSTOMER_AS_NOTICE]
-    )
-    verified = client.post(
-        "/api/customer/orders/verify",
-        headers=CUSTOMER_HEADERS,
-        json={"phone_suffix": "5432"},
-    )
-    customer_line = next(line for line in verified.json()["lines"] if line["id"] == DEV_ORDER_ID)
-    assert customer_line["aftercare_status"] == "in_progress"
-
-
-def test_customer_as_intake_is_authenticated_and_idempotent(
-    client,
-    seed_admin_token,
-):
-    admin_h = {"Authorization": f"Bearer {seed_admin_token}"}
-    client.patch(
-        f"/api/admin/orders/{DEV_ORDER_ID}",
-        json={"status": OrderStatus.CUSTOMER_DELIVERY_DONE.value},
-        headers=admin_h,
-    )
-    url = "/api/customer/orders/as-requests"
-    payload = {
-        "phone_suffix": "5432",
-        "order_id": DEV_ORDER_ID,
-        "memo": "현관 바닥 오염을 확인해주세요.",
-    }
-
-    wrong_suffix = client.post(
-        url,
-        json={**payload, "phone_suffix": "0000"},
-        headers=CUSTOMER_HEADERS,
-    )
-    assert wrong_suffix.status_code == 404
-    foreign_order = client.post(
-        url,
-        json={**payload, "order_id": "not-this-group"},
-        headers=CUSTOMER_HEADERS,
-    )
-    assert foreign_order.status_code == 404
-
-    first = client.post(url, json=payload, headers=CUSTOMER_HEADERS)
-    second = client.post(url, json=payload, headers=CUSTOMER_HEADERS)
-    conflicting = client.post(
-        url,
-        json={**payload, "memo": "다른 요청"},
-        headers=CUSTOMER_HEADERS,
-    )
-    assert first.status_code == 200
-    assert second.status_code == 200
-    assert conflicting.status_code == 409
-    detail = client.get(f"/api/admin/orders/{DEV_ORDER_ID}", headers=admin_h).json()
-    intake_events = [
-        event
-        for event in detail["timeline"]
-        if event["event_type"] == TimelineEventType.AS_INTAKE_REQUESTED.value
-    ]
-    assert len(intake_events) == 1
-
-
-def test_pending_as_reassignment_waits_for_admin_acceptance(
-    db_session,
-    seed_order,
-) -> None:
-    partner = Partner(
-        id="pending-as-partner",
-        name="Pending AS Partner",
-        phone="01044445555",
-        is_active=True,
-    )
-    db_session.add(partner)
-    seed_order.status = OrderStatus.CUSTOMER_DELIVERY_DONE
-    db_session.commit()
-    service = OrderService(db_session)
-    service.submit_customer_as_intake(
-        seed_order.id,
-        group_id=seed_order.group_id,
-        memo="Pending review",
-    )
-
-    service.update(seed_order.id, OrderUpdate(partner_id=partner.id))
-    pending_partner_messages = list(
-        db_session.scalars(
-            select(MessageLog).where(
-                MessageLog.order_id == seed_order.id,
-                MessageLog.recipient_partner_id == partner.id,
-            )
-        )
-    )
-    assert pending_partner_messages == []
-
-    service.request_as(seed_order.id, memo="", actor_user_id=None)
-    accepted_partner_types = list(
-        db_session.scalars(
-            select(MessageLog.message_type).where(
-                MessageLog.order_id == seed_order.id,
-                MessageLog.recipient_partner_id == partner.id,
-            )
-        )
-    )
-    assert accepted_partner_types == [MessageType.PARTNER_AS_REQUEST]
-
-
-def test_as_acceptance_rejects_inactive_partner(db_session, seed_order) -> None:
-    inactive_partner = Partner(
-        id="inactive-as-partner",
-        name="Inactive AS Partner",
-        phone="01055556666",
-        is_active=False,
-    )
-    db_session.add(inactive_partner)
-    seed_order.status = OrderStatus.CUSTOMER_DELIVERY_DONE
-    seed_order.partner_id = inactive_partner.id
-    db_session.commit()
-
-    with pytest.raises(ValueError, match="partner_not_found"):
-        OrderService(db_session).request_as(
-            seed_order.id,
-            memo="Do not disclose",
-            actor_user_id=None,
-        )
-
-    db_session.refresh(seed_order)
-    assert seed_order.as_requested is False
-
-
-def test_paid_active_as_stays_startable_until_partner_completion(
-    db_session,
-    seed_order,
-) -> None:
-    seed_order.status = OrderStatus.CUSTOMER_DELIVERY_DONE
-    seed_order.partner_id = DEV_PARTNER_ID
-    db_session.commit()
-    service = OrderService(db_session)
-    service.request_as(seed_order.id, memo="Paid rework", actor_user_id=None)
-
-    updated = service.update(
-        seed_order.id,
-        OrderUpdate(payment_status="paid"),
-    )
-
-    assert updated.status == OrderStatus.CUSTOMER_CHECK_NEEDED
-    assert updated.as_requested is True
-    PhotoService(db_session).upload_for_partner(
-        PhotoCreate(
-            order_id=seed_order.id,
-            photo_type=PhotoType.BEFORE,
-            file_url="/uploads/paid-active-as-before.png",
-            file_name="paid-active-as-before.png",
-        ),
-        user_id=DEV_PARTNER_USER_ID,
-        partner_id=DEV_PARTNER_ID,
-    )
-    started = service.start_partner_job(
-        seed_order.id,
-        actor_user_id=DEV_PARTNER_USER_ID,
-        partner_id=DEV_PARTNER_ID,
-    )
-    assert started.status == OrderStatus.IN_PROGRESS
-
-
-def test_legacy_completed_as_memo_is_not_treated_as_pending_intake(
-    db_session,
-    seed_order,
-) -> None:
-    seed_order.status = OrderStatus.COMPLETED
-    seed_order.as_requested = False
-    seed_order.as_intake_pending = False
-    seed_order.as_memo = "Completed legacy AS memo"
-    db_session.commit()
-
-    submitted = OrderService(db_session).submit_customer_as_intake(
-        seed_order.id,
-        group_id=seed_order.group_id,
-        memo="New AS request",
-    )
-
-    assert submitted.as_intake_pending is True
-    assert submitted.as_memo == "New AS request"
-
-
-def test_cancelling_pending_as_clears_customer_pending_state(
-    client,
-    seed_admin_token,
-) -> None:
-    admin_h = {"Authorization": f"Bearer {seed_admin_token}"}
-    client.patch(
-        f"/api/admin/orders/{DEV_ORDER_ID}",
-        json={"status": OrderStatus.CUSTOMER_DELIVERY_DONE.value},
-        headers=admin_h,
-    )
-    intake = client.post(
-        "/api/customer/orders/as-requests",
-        headers=CUSTOMER_HEADERS,
-        json={
-            "phone_suffix": "5432",
-            "order_id": DEV_ORDER_ID,
-            "memo": "Cancel pending intake",
-        },
-    )
-    assert intake.status_code == 200
-
-    cancelled = client.patch(
-        f"/api/admin/orders/{DEV_ORDER_ID}",
-        json={"status": OrderStatus.CANCELLED.value},
-        headers=admin_h,
-    )
-    assert cancelled.status_code == 200
-    assert cancelled.json()["as_intake_pending"] is False
-    verified = client.post(
-        "/api/customer/orders/verify",
-        headers=CUSTOMER_HEADERS,
-        json={"phone_suffix": "5432"},
-    )
-    line = next(item for item in verified.json()["lines"] if item["id"] == DEV_ORDER_ID)
-    assert line["aftercare_status"] is None
 
 
 def test_create_order_cannot_set_as_fields(client, seed_admin_token):

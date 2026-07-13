@@ -295,6 +295,7 @@ def test_partner_performance_pending_settlement_uses_backlog_policy(
     completed_order = seed_order_assigned_to_partner
     completed_order.status = OrderStatus.COMPLETED
     completed_order.scheduled_date = date(2031, 5, 15)
+    completed_order.total_amount = Decimal("120000")
     completed_order.partner_payment_status = PartnerPaymentStatus.UNPAID
     completed_order.partner_payment_amount = Decimal("120000")
 
@@ -302,8 +303,17 @@ def test_partner_performance_pending_settlement_uses_backlog_policy(
     not_completed_order.partner_id = completed_order.partner_id
     not_completed_order.status = OrderStatus.NEW
     not_completed_order.scheduled_date = date(2031, 5, 16)
+    not_completed_order.total_amount = Decimal("990000")
     not_completed_order.partner_payment_status = None
     not_completed_order.partner_payment_amount = Decimal("990000")
+
+    paid_order = make_extra_line(completed_order.group_id)
+    paid_order.partner_id = completed_order.partner_id
+    paid_order.status = OrderStatus.COMPLETED
+    paid_order.scheduled_date = date(2031, 5, 17)
+    paid_order.total_amount = Decimal("240000")
+    paid_order.partner_payment_status = PartnerPaymentStatus.PAID
+    paid_order.partner_payment_amount = Decimal("240000")
     db_session.flush()
 
     report = ReportService(db_session).partners(
@@ -311,7 +321,8 @@ def test_partner_performance_pending_settlement_uses_backlog_policy(
         end_date=date(2031, 12, 31),
     )
     row = next(item for item in report.rows if item.partner_id == completed_order.partner_id)
-    assert row.job_count == 2
+    assert row.job_count == 3
+    assert row.avg_unit_price == Decimal("180000")
     assert row.pending_settlement_count == 2
     assert row.expected_settlement_amount == Decimal("1110000")
 
@@ -369,7 +380,7 @@ def test_source_channels_counts_orders_and_revenue_by_group_source(
     assert report.total_orders == 2
     assert report.total_completed == 1
     assert report.total_revenue == Decimal("100000")
-    row = next(item for item in report.rows if item.source_channel == "네이버")
+    row = next(item for item in report.rows if item.source_channel == "네이버톡톡")
     assert row.order_count == 2
     assert row.completed_count == 1
     assert row.revenue == Decimal("100000")

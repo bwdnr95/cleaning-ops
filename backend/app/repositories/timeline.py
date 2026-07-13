@@ -4,6 +4,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.domain.constants import TimelineEventType
+from app.models.order import Order
 from app.models.timeline import OrderTimeline
 from app.repositories.base import Repository
 
@@ -53,3 +54,34 @@ class TimelineRepository(Repository[OrderTimeline]):
             .limit(1)
         )
         return self.db.scalar(stmt)
+
+    def latest_accepted_as_created_at(
+        self,
+        *,
+        order_id: str,
+        active_as_request_id: str | None,
+    ) -> datetime | None:
+        for event in reversed(self.list_for_order(order_id)):
+            metadata = event.event_metadata or {}
+            if event.event_type != TimelineEventType.AS_REQUESTED:
+                continue
+            if metadata.get("source") == "customer":
+                continue
+            if active_as_request_id and metadata.get("as_request_id") != active_as_request_id:
+                continue
+            return event.created_at
+        return None
+
+    def list_admin_notification_candidates(
+        self,
+        *,
+        limit: int,
+    ) -> list[tuple[OrderTimeline, Order]]:
+        stmt = (
+            select(OrderTimeline, Order)
+            .join(Order, Order.id == OrderTimeline.order_id)
+            .where(Order.deleted_at.is_(None))
+            .order_by(OrderTimeline.created_at.desc(), OrderTimeline.id.desc())
+            .limit(limit)
+        )
+        return list(self.db.execute(stmt).all())

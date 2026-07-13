@@ -3,6 +3,7 @@ from datetime import date
 import pytest
 from sqlalchemy import func, select
 
+from app.core.time import business_today
 from app.db.seed import DEV_PARTNER_ID
 from app.domain.constants import RecurrenceMode, RecurringContractStatus
 from app.models import OrderGroup
@@ -21,12 +22,17 @@ def _make_payload(**over):
     return RecurringContractCreate(**base)
 
 
-def test_create_contract_creates_empty_group(db_session):
+def test_create_contract_creates_group_and_current_month_order(db_session):
     svc = RecurringService(db_session)
     c = svc.create_contract(_make_payload(), actor_user_id=None)
+    today = business_today()
+
     assert c.status == RecurringContractStatus.ACTIVE
     assert c.order_group_id
-    assert OrderGroupRepository(db_session).list_lines(c.order_group_id) == []
+    lines = OrderGroupRepository(db_session).list_lines(c.order_group_id)
+    assert len(lines) == 1
+    assert lines[0].recurring_contract_id == c.id
+    assert lines[0].recurring_planned_date == date(today.year, today.month, 10)
 
 
 def test_update_contract_changes_future_template(db_session):

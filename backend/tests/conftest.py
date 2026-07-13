@@ -27,6 +27,10 @@ _TEST_ENV: dict[str, str] = {
     "STORAGE_PROVIDER": "local",
     "STORAGE_ROOT": "test_storage",
     "DATABASE_URL": "sqlite:///./test_cleaning_ops.db",
+    "AUTOMATION_SEND_PARTNER_ASSIGNMENT": "false",
+    "AUTOMATION_SEND_SCHEDULE_CONFIRMED": "false",
+    "AUTOMATION_DAY_BEFORE_NOTICE_SCHEDULER_ENABLED": "false",
+    "AUTOMATION_RECURRING_ORDER_SCHEDULER_ENABLED": "false",
     "SENTRY_DSN": "",
 }
 

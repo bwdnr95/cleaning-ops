@@ -27,7 +27,6 @@ def list_recurring_orders(
     db: Session = Depends(get_session),
     user: CurrentUser = Depends(require_admin),
 ):
-    # 2-3/2-4: 해당 월의 정기 주문을 (없으면) 생성한 뒤 목록으로 반환한다(월 트래커와 동일한 lazy 생성).
     return RecurringService(db).list_month_orders(month, actor_user_id=user.id)
 
 

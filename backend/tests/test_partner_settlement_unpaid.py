@@ -7,10 +7,11 @@ canSettle(>0)까지 일치시킨다. 도급가 미입력(NULL·0)은 정산할 �
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, timedelta
 
 from sqlalchemy.orm import Session
 
+from app.core.time import business_today
 from app.domain.constants import OrderStatus
 from app.models.order import Order
 from app.repositories.order_groups import OrderGroupRepository
@@ -107,23 +108,139 @@ def test_unpaid_includes_any_noncancelled_with_amount(db_session: Session) -> No
     assert completed_no_amount not in ids  # 도급가 없음 제외
 
 
-def test_unpaid_summary_amount_and_count(db_session: Session) -> None:
+def test_partner_admin_unpaid_summary_uses_work_progress_or_done_through_today(
+    db_session: Session,
+) -> None:
     pid = _make_partner(db_session)
-    _add_line(db_session, pid, status=OrderStatus.PARTNER_CONFIRMING, pps="unpaid", amount=100000)  # 포함(1-1)
-    _add_line(db_session, pid, status=OrderStatus.COMPLETED, pps=None, amount=200000)               # 포함
-    _add_line(db_session, pid, status=OrderStatus.COMPLETED, pps="paid", amount=300000)             # 지급완료 → 제외
+    today = business_today()
+    yesterday = today - timedelta(days=1)
+    tomorrow = today + timedelta(days=1)
 
-    detail = PartnerService(db_session).get_detail(pid)
-    assert detail.unpaid_partner_order_count == 2  # 도급가>0 + 미지급(완료 여부 무관)
-    assert detail.unpaid_partner_amount_total == 300000  # 100000 + 200000
+    consulting = _add_line(
+        db_session,
+        pid,
+        status=OrderStatus.CONSULTING,
+        pps="unpaid",
+        amount=100000,
+    )
+    confirming = _add_line(
+        db_session,
+        pid,
+        status=OrderStatus.PARTNER_CONFIRMING,
+        pps="unpaid",
+        amount=110000,
+    )
+    scheduled_today = _add_line(
+        db_session,
+        pid,
+        status=OrderStatus.SCHEDULED,
+        pps="unpaid",
+        amount=120000,
+    )
+    in_progress = _add_line(
+        db_session,
+        pid,
+        status=OrderStatus.IN_PROGRESS,
+        pps=None,
+        amount=130000,
+    )
+    photo_review = _add_line(
+        db_session,
+        pid,
+        status=OrderStatus.PHOTO_REVIEW_PENDING,
+        pps="unpaid",
+        amount=140000,
+    )
+    delivery_needed = _add_line(
+        db_session,
+        pid,
+        status=OrderStatus.CUSTOMER_DELIVERY_NEEDED,
+        pps="unpaid",
+        amount=150000,
+    )
+    delivery_done = _add_line(
+        db_session,
+        pid,
+        status=OrderStatus.CUSTOMER_DELIVERY_DONE,
+        pps=None,
+        amount=160000,
+    )
+    check_needed = _add_line(
+        db_session,
+        pid,
+        status=OrderStatus.CUSTOMER_CHECK_NEEDED,
+        pps="unpaid",
+        amount=170000,
+    )
+    completed = _add_line(
+        db_session,
+        pid,
+        status=OrderStatus.COMPLETED,
+        pps=None,
+        amount=180000,
+    )
+    future_completed = _add_line(
+        db_session,
+        pid,
+        status=OrderStatus.COMPLETED,
+        pps=None,
+        amount=190000,
+    )
+    paid_completed = _add_line(
+        db_session,
+        pid,
+        status=OrderStatus.COMPLETED,
+        pps="paid",
+        amount=200000,
+    )
+    no_amount_completed = _add_line(
+        db_session,
+        pid,
+        status=OrderStatus.COMPLETED,
+        pps=None,
+        amount=None,
+    )
+    undated_completed = _add_line(
+        db_session,
+        pid,
+        status=OrderStatus.COMPLETED,
+        pps=None,
+        amount=210000,
+    )
+
+    for order_id, scheduled_date in (
+        (consulting, yesterday),
+        (confirming, today),
+        (scheduled_today, today),
+        (in_progress, today),
+        (photo_review, yesterday),
+        (delivery_needed, yesterday),
+        (delivery_done, today),
+        (check_needed, today),
+        (completed, yesterday),
+        (future_completed, tomorrow),
+        (paid_completed, today),
+        (no_amount_completed, today),
+        (undated_completed, None),
+    ):
+        order = db_session.get(Order, order_id)
+        assert order is not None
+        order.scheduled_date = scheduled_date
+    db_session.flush()
+
+    service = PartnerService(db_session)
+    detail = service.get_detail(pid)
+    listed = next(
+        partner for partner in service.list_partners(include_inactive=True) if partner.id == pid
+    )
+
+    assert detail.unpaid_partner_order_count == 6
+    assert detail.unpaid_partner_amount_total == 930000
+    assert listed.unpaid_partner_order_count == detail.unpaid_partner_order_count
+    assert listed.unpaid_partner_amount_total == detail.unpaid_partner_amount_total
 
 
-def test_unpaid_list_with_date_range_keeps_undated(db_session: Session) -> None:
-    """A: 방문일 미정(scheduled_date NULL) 미정산 건은 날짜 범위 조회에서도 목록에 남아야 한다.
-
-    기존엔 `scheduled_date >= from AND <= to` 가 NULL 을 무조건 탈락시켜, 날짜와 무관한
-    미정산 합계/배지(전체)와 날짜로 거르는 목록이 어긋났다(전체 5건 vs 목록 4건).
-    """
+def test_unpaid_list_with_date_range_excludes_undated(db_session: Session) -> None:
     from app.models.order import Order as OrderModel
 
     pid = _make_partner(db_session)
@@ -142,11 +259,11 @@ def test_unpaid_list_with_date_range_keeps_undated(db_session: Session) -> None:
         to_date=date(2026, 6, 30),
     )
     ids = {item.order_id for item in result.items}
-    assert undated in ids       # A: 방문일 미정도 목록에 남는다
-    assert in_range in ids       # 범위 안은 포함
-    assert out_range not in ids  # 범위 밖(실제 날짜)은 여전히 제외
-    assert result.count == 2
-    assert result.total_partner_price == 430000  # 330000 + 100000
+    assert undated not in ids
+    assert in_range in ids
+    assert out_range not in ids
+    assert result.count == 1
+    assert result.total_partner_price == 100000
 
 
 def test_settle_allowed_before_completion(db_session: Session) -> None:

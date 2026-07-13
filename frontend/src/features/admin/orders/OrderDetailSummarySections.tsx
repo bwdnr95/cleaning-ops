@@ -4,6 +4,7 @@ import { formatQuantity } from '../../../domain/format';
 import { formatPhone } from '../../../domain/phone';
 import { partnerPaymentStatusLabel, paymentStatusLabel } from '../../../domain/paymentStatus';
 import { receiptBadge } from '../../../domain/receiptType';
+import { sourceChannelLabel } from '../../../domain/sourceChannel';
 import {
   formatDateTime,
   formatWon,
@@ -12,11 +13,10 @@ import {
   messageStatusLabel,
   messageStatusTone,
   messageTypeLabel,
-  photoTypeLabel,
   isMessageFailure,
-  isMessagePending,
 } from './OrderDetailFormat';
 import type { AdminOrderDetail, AdminPartnerOption, OrderDetailMessageLog, OrderDetailPhoto } from './OrderDetailModel';
+import { OrderDetailPhotoSection } from './OrderDetailPhotoSection';
 import { EmptyLine, KV, KVItem, Money, Section } from './OrderDetailPrimitives';
 
 interface OrderDetailSummarySectionsProps {
@@ -34,13 +34,18 @@ export function OrderDetailSummarySections({
   messageLogs,
   kakaoChannelUrl,
 }: OrderDetailSummarySectionsProps) {
+  const partnerMemos = (order.timeline || []).filter((event) => (
+    event.event_type === 'memo_added'
+    && event.event_metadata?.author_role === 'partner'
+  ));
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
       <Section title="고객 정보" icon="user">
         <KV col={2}>
           <KVItem label="고객명" value={order.customer_name}/>
           <KVItem label="연락처" value={formatPhone(order.customer_phone)} mono/>
-          <KVItem label="유입 경로" value={order.source_channel || '-'}/>
+          <KVItem label="유입 경로" value={sourceChannelLabel(order.source_channel)}/>
           <KVItem
             label="주소"
             value={[order.customer_address, order.customer_address_detail].filter(Boolean).join(' ')}
@@ -59,6 +64,45 @@ export function OrderDetailSummarySections({
             >
               카카오톡 상담
             </a>
+          </div>
+        )}
+        {order.as_memo && (
+          <div
+            data-testid="admin-order-as-memo"
+            style={{ marginTop: 12, padding: 12, borderRadius: 8, border: '1px solid var(--warn-border)', background: 'var(--warn-bg)' }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
+              <Badge tone={order.as_requested ? 'danger' : 'warn'}>
+                {order.as_requested ? 'AS 전달됨' : '고객 AS 접수'}
+              </Badge>
+              <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text)' }}>AS 요청 메모</span>
+            </div>
+            <div className="multiline-text" style={{ fontSize: 12.5, lineHeight: 1.5, color: 'var(--warn-fg)' }}>
+              {order.as_memo}
+            </div>
+          </div>
+        )}
+        {partnerMemos.length > 0 && (
+          <div
+            data-testid="admin-partner-memos"
+            style={{ marginTop: 12, padding: 12, borderRadius: 8, border: '1px solid var(--border)', background: 'var(--bg-subtle)' }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
+              <Badge tone="brand">협력사</Badge>
+              <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text)' }}>작업 메모</span>
+            </div>
+            <div style={{ display: 'grid', gap: 8 }}>
+              {partnerMemos.map((memo) => (
+                <div key={memo.id}>
+                  <div className="multiline-text" style={{ fontSize: 12.5, lineHeight: 1.5, color: 'var(--text)' }}>
+                    {memo.description || '-'}
+                  </div>
+                  <div style={{ marginTop: 3, fontSize: 10.5, color: 'var(--text-tertiary)' }}>
+                    {formatDateTime(memo.created_at)}
+                  </div>
+                </div>
+              ))}
+            </div>
           </div>
         )}
       </Section>
@@ -130,24 +174,7 @@ export function OrderDetailSummarySections({
         </KV>
       </Section>
 
-      <Section title="사진" icon="image" badge={<Badge tone="warn">{visiblePhotos.filter((photo) => !photo.is_customer_visible).length} 비공개</Badge>}>
-        {visiblePhotos.length === 0 ? (
-          <EmptyLine text="업로드된 사진이 없습니다." />
-        ) : (
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: 8 }}>
-            {visiblePhotos.map((photo) => (
-              <div key={photo.id} style={{ border: '1px solid var(--border)', borderRadius: 8, overflow: 'hidden', background: 'var(--surface)' }}>
-                <img src={photo.file_url} alt={photo.file_name || photo.photo_type}
-                  style={{ display: 'block', width: '100%', aspectRatio: '1', objectFit: 'cover', background: 'var(--bg-muted)' }} />
-                <div style={{ padding: 6, display: 'flex', alignItems: 'center', gap: 4 }}>
-                  <Badge tone={photo.is_customer_visible ? 'success' : 'warn'}>{photoTypeLabel(photo.photo_type)}</Badge>
-                  <span style={{ fontSize: 10.5, color: 'var(--text-tertiary)' }}>{photo.is_customer_visible ? '공개' : '비공개'}</span>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </Section>
+      <OrderDetailPhotoSection visiblePhotos={visiblePhotos} />
 
       <Section title="발송 이력" icon="send">
         {messageLogs.length === 0 ? (
@@ -162,8 +189,8 @@ export function OrderDetailSummarySections({
                 </span>
                 <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 3, minWidth: 0 }}>
                   <Badge tone={messageStatusTone(log.status)}>{messageStatusLabel(log.status)}</Badge>
-                  {(isMessageFailure(log.status) || isMessagePending(log.status)) && (
-                    <span title={log.error_message || log.provider_error_code || ''} style={{ maxWidth: '100%', color: isMessagePending(log.status) ? 'var(--warn-fg)' : 'var(--danger-fg)', fontSize: 10, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {isMessageFailure(log.status) && (
+                    <span title={log.error_message || log.provider_error_code || ''} style={{ maxWidth: '100%', color: 'var(--danger-fg)', fontSize: 10, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                       {messageProviderErrorText(log)}
                     </span>
                   )}

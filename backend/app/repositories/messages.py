@@ -301,3 +301,24 @@ class MessageRepository(Repository[MessageLog]):
             .order_by(MessageLog.created_at.desc(), MessageLog.id.desc())
         )
         return list(self.db.scalars(stmt))
+    def has_active_delivery_attempt(
+        self,
+        *,
+        order_id: str,
+        message_type: MessageType,
+        recipient_partner_id: str | None = None,
+    ) -> bool:
+        conditions = [
+            MessageLog.order_id == order_id,
+            MessageLog.message_type == message_type,
+            MessageLog.status.in_(
+                [MessageStatus.PENDING, MessageStatus.SENT, MessageStatus.DELIVERED]
+            ),
+        ]
+        if recipient_partner_id is not None:
+            conditions.append(MessageLog.recipient_partner_id == recipient_partner_id)
+        return self.db.execute(
+            select(MessageLog.id)
+            .where(*conditions)
+            .limit(1)
+        ).scalar_one_or_none() is not None

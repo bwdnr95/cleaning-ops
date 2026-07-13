@@ -7,13 +7,13 @@ from fastapi.staticfiles import StaticFiles
 
 from app.api.router import api_router
 from app.core.config import settings
-from app.core.middleware import SecurityHeadersMiddleware
+from app.core.middleware import CustomerAsRequestBodyLimitMiddleware, SecurityHeadersMiddleware
 from app.core.observability import (
     RequestIDMiddleware,
     configure_structlog,
     init_sentry,
 )
-from app.services.day_before_scheduler import day_before_notice_lifespan
+from app.services.lifespan import app_lifespan
 
 
 def create_app() -> FastAPI:
@@ -23,7 +23,7 @@ def create_app() -> FastAPI:
     app = FastAPI(
         title=settings.app_name,
         version=settings.app_version,
-        lifespan=day_before_notice_lifespan,
+        lifespan=app_lifespan,
     )
     if settings.storage_provider.strip().lower() == "local":
         app.mount(
@@ -34,6 +34,7 @@ def create_app() -> FastAPI:
 
     app.add_middleware(RequestIDMiddleware)
     app.add_middleware(SecurityHeadersMiddleware)
+    app.add_middleware(CustomerAsRequestBodyLimitMiddleware)
 
     app.add_middleware(
         CORSMiddleware,

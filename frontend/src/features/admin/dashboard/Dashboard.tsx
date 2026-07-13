@@ -2,6 +2,7 @@ import { Badge, Icon, Sparkline, StatusBadge } from '../../../components/common/
 import { getDashboardRecentActivity, getDashboardSummary, listAdminOrders, type DashboardSummary } from '../../../api/admin';
 import { toApiAssetUrl } from '../../../api/client';
 import { useApiResource } from '../../../api/useApiResource';
+import { ProtectedApiImage } from '../../../components/common/ProtectedApiImage';
 import { formatQuantity } from '../../../domain/format';
 import { formatPhone } from '../../../domain/phone';
 import { addDays, formatAppTime, getAppNowDate, getAppTodayDate, isSameDateValue } from '../../../domain/time';
@@ -125,7 +126,7 @@ export function Dashboard({ onOpenOrder, onNav, onCreateOrder, userName = undefi
                   border: '1px solid var(--border)',
                   background: 'var(--surface)',
                   display: 'flex', flexDirection: 'column', gap: 8,
-                  transition: 'border-color 100ms, box-shadow 100ms',
+                  transition: 'all 100ms',
                 }}
                 onMouseEnter={(e) => { e.currentTarget.style.borderColor = 'var(--brand)'; e.currentTarget.style.boxShadow = 'var(--shadow-sm)'; }}
                 onMouseLeave={(e) => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.boxShadow = 'none'; }}>
@@ -143,10 +144,10 @@ export function Dashboard({ onOpenOrder, onNav, onCreateOrder, userName = undefi
                   <div style={{ fontSize: 11.5, color: 'var(--text-tertiary)', fontWeight: 500 }}>{q.title}</div>
                   <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, marginTop: 2 }}>
                     <span style={{ fontSize: 22, fontWeight: 600, letterSpacing: '-0.03em' }}>{q.count}</span>
-                    <span style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>건</span>
+                    <span style={{ fontSize: 11, color: 'var(--text-quaternary)' }}>건</span>
                   </div>
                 </div>
-                <div style={{ fontSize: 10.5, color: 'var(--text-secondary)' }}>{q.desc}</div>
+                <div style={{ fontSize: 10.5, color: 'var(--text-quaternary)' }}>{q.desc}</div>
               </button>
             ))}
           </div>
@@ -207,7 +208,14 @@ export function Dashboard({ onOpenOrder, onNav, onCreateOrder, userName = undefi
                     cursor: 'pointer',
                   }}>
                     {p.fileUrl ? (
-                      <img data-testid={`dashboard-recent-photo-thumb-${p.photoId || i}`} src={p.fileUrl} alt={p.label} style={{ width: 36, height: 36, borderRadius: 6, objectFit: 'cover', flexShrink: 0, background: 'var(--bg-muted)' }} />
+                      <ProtectedApiImage
+                        testId={`dashboard-recent-photo-thumb-${p.photoId || i}`}
+                        src={p.fileUrl}
+                        alt={p.label}
+                        style={{ width: 36, height: 36, borderRadius: 6, objectFit: 'cover', flexShrink: 0, background: 'var(--bg-muted)' }}
+                        placeholderText="IMG"
+                        placeholderStyle={{ width: 36, height: 36, fontSize: 9, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: 6, background: 'var(--bg-muted)', color: 'var(--text-tertiary)', fontWeight: 700 }}
+                      />
                     ) : (
                       <div className="placeholder-img" style={{ width: 36, height: 36, fontSize: 9, flexShrink: 0 }}>IMG</div>
                     )}

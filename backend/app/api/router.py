@@ -7,6 +7,7 @@ from app.api.routes.admin import (
     calendar,
     dashboard,
     messages,
+    notifications,
     orders,
     partner_settlements,
     partners,
@@ -38,6 +39,7 @@ api_router.include_router(
     tags=["admin-partner-settlements"],
 )
 api_router.include_router(photos.router, prefix="/admin/photos", tags=["admin-photos"])
+api_router.include_router(notifications.router, prefix="/admin/notifications", tags=["admin-notifications"])
 api_router.include_router(messages.router, prefix="/admin/messages", tags=["admin-messages"])
 api_router.include_router(services.router, prefix="/admin/services", tags=["admin-services"])
 api_router.include_router(recurring.router, prefix="/admin/recurring", tags=["admin-recurring"])

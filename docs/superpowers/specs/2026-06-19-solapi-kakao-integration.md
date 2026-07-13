@@ -1,7 +1,7 @@
 # SOLAPI(문자) + 카카오 알림톡 연동 — 설정 런북
 
-- 작성일: 2026-06-19 / 최종 대조: 2026-07-11
-- 결론: **SOLAPI 발신프로필과 알림톡 9종 승인 상태를 실조회해 코드·운영 예시와 대조 완료.**
+- 작성일: 2026-06-19
+- 결론: **연동 코드는 이미 구현 완료.** 남은 일은 콘솔 설정 + `backend/.env` 주입 + 검증.
 - 순서: **Phase 1 = SMS/LMS 먼저 가동**, Phase 2 = 알림톡(템플릿 승인 후).
 - 관련 코드: `backend/app/services/messages.py`(`SolapiMessageProvider`, `build_solapi_auth_header`), `backend/app/domain/message_templates.py`(알림톡 템플릿 변수), `backend/app/api/routes/webhooks.py`(전송 리포트 웹훅), `backend/app/core/config.py`(설정 키).
 
@@ -9,10 +9,38 @@
 
 ## 현재 구현 상태 (확인 완료)
 - SMS 발송: `SolapiMessageProvider.send` — SOLAPI v4 send-many/detail 호출, 인증 서명(`HMAC-SHA256 apiKey/date/salt`) **규격 일치**.
-- 알림톡: `SolapiMessageProvider.send_with_context` — `kakaoOptions(pfId/templateId/variables)` + **실패 시 SMS 자동 폴백**.
-- 웹훅: `/api/webhooks/solapi` — `X-Solapi-Secret`의 `SHA1(SOLAPI_WEBHOOK_SECRET)`을 검증한 후 `message_logs` 전송상태 갱신.
+- 알림톡: `_send_kakao_alimtalk` — `kakaoOptions(pfId/templateId/variables)` + **실패 시 SMS 자동 폴백**.
+- 웹훅: `/api/webhooks/solapi` — 서명 검증 후 `message_logs` 전송상태 갱신.
 - 준비상태 점검: 관리자 "메시지 설정"에서 `can_send_alimtalk`, 누락 경고 표시.
-- 설정 키: `config.py`에 api key/secret/발신번호/pfId/템플릿 9종/웹훅시크릿/폴백을 정의한다. `.env`는 `backend/.env`.
+- 설정 키: `config.py`에 api key/secret/발신번호/pfId/템플릿/웹훅시크릿/폴백 모두 정의. `.env`는 `backend/.env`.
+
+---
+
+## 자동 발송 기준 (2026-07-11 확인)
+- 현재 운영 설정 기준 자동 ON: `partner_assignment`, `customer_schedule_confirmed`, `customer_day_before`, `customer_balance_due`.
+- 현재 운영 설정 기준 자동 OFF: 고객 사진확인 안내(수동 발송 유지).
+- `customer_balance_due`: 협력사가 작업 완료 처리했고 고객 미수금이 남아 있을 때 자동 발송.
+- `partner_assignment`: 자동 설정을 켠 경우, 주문 생성 시 협력사가 이미 배정되어 있거나 기존 주문의 `partner_id`가 변경될 때 발송.
+- `customer_schedule_confirmed`: 주문이 `일정확정`으로 생성/수정되거나 협력사가 작업확인을 눌러 `작업예정`으로 전환될 때 고객에게 자동 발송한다. 같은 주문의 pending/sent/delivered 시도는 중복하지 않는다.
+- `customer_day_before`: 매일 오전 10시(KST), 기준일 다음날 방문 예정인 일정확정/전날안내필요/작업예정 건에 발송. pending/sent/delivered 시도는 중복하지 않는다. 수동 실행 엔드포인트도 존재한다.
+- `customer_photo_ready`: 수동 발송 기준으로 구현되어 있으며, 자동 설정값은 존재하지만 현재 사진 업로드/작업완료에 연결된 자동 트리거는 없음.
+- `partner_as_request`, `customer_as_notice`: 고객 AS 접수 후 운영자가 AS 요청 처리를 실행할 때 협력사와 고객에게 각각 자동 발송한다.
+
+## SOLAPI 실계정 template_id 대조 (2026-07-11)
+
+`GET /kakao/v2/templates` 실조회 결과 아래 9개 모두 채널 `KA01PF260625095328232y4DcSniavuQ`에서 `APPROVED` 상태다.
+
+| 메시지 타입 | SOLAPI 템플릿명 | template_id |
+|---|---|---|
+| `customer_schedule_confirmed` | 일정 확정 안내 | `KA01TP260625095558697f6OQqqhxjqb` |
+| `customer_day_before` | 전날 안내 | `KA01TP260625095745441foLkYjPPfnS` |
+| `partner_assignment` | 협력사 배정 안내(사본) | `KA01TP260703114932918wBetIEHC8dg` |
+| `customer_photo_ready` | 사진 링크 발송 | `KA01TP260625095950577Dxz0dLAs9aH` |
+| `customer_balance_due` | 잔금 안내 | `KA01TP260625100057110pUAJaMeQ99G` |
+| `customer_quote` | 견적 안내 | `KA01TP260625100150149r4XMoHWve1R` |
+| `partner_customer_info` | 협력사 고객정보(미입금) | `KA01TP260625100259815c7MUvtoPo72` |
+| `partner_as_request` | AS 협력사용 | `KA01TP2607090709454037h9FwYAHMbW` |
+| `customer_as_notice` | AS 고객용 | `KA01TP260709071111937Ctnx5OzcNNq` |
 
 ---
 
@@ -46,7 +74,7 @@ SOLAPI_SENDER_NUMBER=<등록한 발신번호, 하이픈 없이>
 ### 4. 웹훅(전송 리포트) — 배포 환경에서만
 - 로컬(8002)은 공개 URL이 없어 웹훅 수신 불가 → Phase 1 검증은 발송 즉시 응답으로 충분.
 - 배포 도메인(`cleanjob.tono-operation.com`) 사용 시 SOLAPI 콘솔 웹훅 URL = `https://<도메인>/api/webhooks/solapi`.
-- SOLAPI 콘솔에는 `SOLAPI_WEBHOOK_SECRET` 원문을 등록한다. SOLAPI는 `SHA1(secret)`을 `X-Solapi-Secret` 헤더로 보내며 서버는 상수 시간 비교로 검증한다. 본문이나 secret 값은 로그에 남기지 않는다.
+- **확인 필요(미확정)**: 현재 코드는 웹훅 서명을 "우리 `SOLAPI_WEBHOOK_SECRET`으로 body HMAC-SHA256 → `X-Solapi-Signature`" 라고 가정한다. SOLAPI 실제 리포트 웹훅의 서명 방식이 이와 다르면 웹훅이 401로 전부 거부될 수 있음. 웹훅을 켜기 전, SOLAPI 콘솔의 웹훅 설정(서명/시크릿 지원 여부)과 대조해 코드의 `verify_solapi_webhook_signature`를 맞춰야 함. (공식 웹훅 레퍼런스 문서가 이전되어 온라인으로 즉시 확정 못 함.)
 
 ---
 
@@ -54,37 +82,33 @@ SOLAPI_SENDER_NUMBER=<등록한 발신번호, 하이픈 없이>
 
 ### 1. 카카오 채널 + 연동
 1. 카카오 비즈니스 채널 보유(로그인 완료).
-2. SOLAPI에 카카오 채널 연동 → **pfId(알림톡 발신프로필 ID)** 발급.
+2. SOLAPI에 카카오 채널 연동 → **pfId(카카오 알림톡 발신프로필 ID)** 발급.
 
 ### 2. 알림톡 템플릿 등록 + 검수 승인
-실조회한 승인 템플릿은 아래 9종이다. 치환문자 집합은
-`backend/tests/test_message_templates.py`가 승인본과 1:1로 잠근다.
-
-| 메시지 타입 | 승인 templateId |
-|---|---|
-| `customer_schedule_confirmed` | `KA01TP260625095558697f6OQqqhxjqb` |
-| `customer_day_before` | `KA01TP260625095745441foLkYjPPfnS` |
-| `partner_assignment` | `KA01TP260703114932918wBetIEHC8dg` |
-| `customer_photo_ready` | `KA01TP260625095950577Dxz0dLAs9aH` |
-| `customer_balance_due` | `KA01TP260625100057110pUAJaMeQ99G` |
-| `customer_quote` | `KA01TP260625100150149r4XMoHWve1R` |
-| `partner_customer_info` | `KA01TP260625100259815c7MUvtoPo72` |
-| `partner_as_request` | `KA01TP2607090709454037h9FwYAHMbW` |
-| `customer_as_notice` | `KA01TP260709071111937Ctnx5OzcNNq` |
+9종 메시지 타입을 등록하고, **변수명을 코드의 `#{...}` 형식과 정확히 일치**시킨다(`message_templates.py` 기준):
+- `customer_schedule_confirmed`: `#{고객명} #{방문일정} #{서비스명} #{평수} #{대수} #{주소} #{연락처} #{금액} #{계약금} #{잔금} #{총금액} #{고객링크}`
+- `customer_day_before`: `#{고객명} #{서비스명} #{방문일정} #{평수} #{대수} #{주소} #{연락처} #{고객링크}`
+- `partner_assignment`: `#{고객명} #{서비스명} #{협력사명} #{방문일정} #{평수} #{대수} #{주소} #{연락처} #{요청사항} #{협력사링크}`
+- `customer_photo_ready`: `#{고객명} #{서비스명} #{고객링크}`
+- `customer_balance_due`: `#{고객명} #{서비스명} #{잔금} #{고객링크}`
+- `customer_quote`: `#{고객명} #{서비스명} #{방문일정} #{평수} #{대수} #{주소} #{성함} #{금액} #{할인가} #{계약금} #{잔금} #{총금액}`
+- `partner_customer_info`: `#{담당자} #{고객명} #{연락처} #{주소} #{요청사항}`
+- `partner_as_request`: `#{협력사명} #{고객명} #{서비스명} #{협력사링크}`
+- `customer_as_notice`: `#{고객명} #{서비스명} #{고객링크}`
 
 ### 3. `.env` 채우기 + 테스트
 ```
-SOLAPI_KAKAO_PF_ID=KA01PF260625095328232y4DcSniavuQ
+SOLAPI_KAKAO_PF_ID=<pfId>
+# 기존 배포 호환용으로 SOLAPI_KAKAO_CHANNEL_ID도 읽지만, 신규 설정은 PF_ID를 사용한다.
+SOLAPI_KAKAO_CHANNEL_ID=
 SOLAPI_KAKAO_TEMPLATE_CUSTOMER_SCHEDULE_CONFIRMED=<템플릿ID>
-... (9종, `.env.production.example` 참조)
+... (9종)
 ```
 - 채널을 `ALIMTALK`로 발송 테스트 → 알림톡 수신 확인, 실패 시 SMS 폴백 동작 확인.
-- 운영 자격증명을 출력하지 않는 승인본 대조: `cd backend && python -m scripts.verify_solapi_alimtalk_templates`
-- 이 검증기는 `GET /kakao/v2/templates/sendable` 결과, 승인 상태, `pfId`, 변수 집합, 실행 환경의 9개 template ID를 함께 대조하며 인증 헤더를 다른 호스트로 전달할 수 있는 redirect는 거부한다.
 
 ---
 
-## 운영 확인 포인트
-1. 발신번호/수신번호 포맷 — 코드가 `normalize_phone`으로 숫자만 추출(하이픈 제거)하므로 국내번호 OK.
-2. 알림톡 템플릿 변수명 — 승인된 템플릿과 `message_templates.py`가 1:1로 맞아야 치환됨.
-3. AS 승인 템플릿에는 AS 메모와 고객 연락처 치환문자가 없다. 상세 내용은 인증된 협력사/고객 링크에서 확인한다. 애플리케이션의 명확한 초기 실패 후 직접 SMS 폴백에는 메모 요약이 포함되지만, SOLAPI 자체 비동기 폴백에서는 메모 포함을 보장하지 않는다.
+## 미해결/확인 포인트
+1. 웹훅 서명 방식(위 Phase 1-4) — 배포 시 SOLAPI 실제 스펙과 대조 후 확정.
+2. 발신번호/수신번호 포맷 — 코드가 `normalize_phone`으로 숫자만 추출(하이픈 제거)하므로 국내번호 OK.
+3. 알림톡 템플릿 변수명 — 승인된 템플릿과 `message_templates.py`가 1:1로 맞아야 치환됨.

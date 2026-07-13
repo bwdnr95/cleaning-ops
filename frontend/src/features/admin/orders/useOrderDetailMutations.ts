@@ -123,6 +123,10 @@ export function useOrderDetailMutations({
       setError('협력사 배정 후 AS 요청을 보낼 수 있습니다.');
       return;
     }
+    if (order.as_requested) {
+      setError('이미 협력사에 전달된 AS 요청입니다.');
+      return;
+    }
     if (hasUnsavedChanges) {
       setError('저장하지 않은 변경사항을 먼저 저장한 뒤 AS 요청을 보내세요.');
       return;
@@ -138,10 +142,15 @@ export function useOrderDetailMutations({
 
   const handleAsRequestSubmit = async (memo: string) => {
     if (!order) return;
+    if (order.as_requested) {
+      setError('이미 협력사에 전달된 AS 요청입니다.');
+      setIsAsRequestModalOpen(false);
+      return;
+    }
     await runAction(async () => {
       await sendOrderAsRequest(order.id, memo);
       setIsAsRequestModalOpen(false);
-      setNotice('AS 처리를 등록했고 협력사·고객 안내 발송을 시도했습니다. 최종 결과는 발송이력에서 확인해주세요.');
+      setNotice('AS 요청 상태로 전환하고 협력사/고객 안내를 발송했습니다.');
       reloadOrder();
     });
   };

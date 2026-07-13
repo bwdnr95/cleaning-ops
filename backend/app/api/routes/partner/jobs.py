@@ -1,8 +1,8 @@
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Response, UploadFile
 from sqlalchemy.orm import Session
 
-from app.api.deps import CurrentUser, ensure_partner_scope, get_session, require_partner
 from app.core.config import settings
+from app.api.deps import CurrentUser, ensure_partner_scope, get_session, require_partner
 from app.domain.constants import PhotoType, RecipientType, TimelineEventType
 from app.repositories.messages import MessageRepository
 from app.repositories.order_groups import OrderGroupRepository
@@ -12,16 +12,18 @@ from app.repositories.timeline import TimelineRepository
 from app.schemas.message import PartnerMessageRead
 from app.schemas.order import PartnerJobCompleteRequest, PartnerJobRead, PartnerMemoCreate
 from app.schemas.photo import PartnerPhotoRead
+from app.models.order import Order
+from app.models.order_group import OrderGroup
+from app.models.photo import OrderPhoto
+from app.models.timeline import OrderTimeline
 from app.services.orders import (
     OrderService,
-    is_partner_confirmation_required,
-    is_partner_photo_uploadable,
+    active_customer_as_photo_ids,
     partner_memo_events,
     to_partner_job_dto,
 )
 from app.services.photos import PhotoService, normalize_uploaded_photo_content_type
 from app.services.storage import get_storage_provider
-from app.services.timeline import TimelineService
 
 router = APIRouter()
 
@@ -36,24 +38,11 @@ def list_my_jobs(
     group_repo = OrderGroupRepository(db)
     timeline_repo = TimelineRepository(db)
     return [
-        to_partner_job_dto(
+        _to_partner_job_read(
             order,
+            timeline_repo=timeline_repo,
             group=group_repo.get(order.group_id),
             photos=photo_repo.list_for_order(order.id),
-            as_requested_at=timeline_repo.latest_created_at(
-                order_id=order.id,
-                event_type=TimelineEventType.AS_REQUESTED,
-            ),
-            evidence_required_after=TimelineService(db).latest_partner_work_epoch(
-                order_id=order.id,
-                partner_id=order.partner_id,
-                work_completed_at=order.work_completed_at,
-                work_is_active=is_partner_photo_uploadable(order),
-            ),
-            partner_confirmation_required=is_partner_confirmation_required(
-                order,
-                TimelineService(db),
-            ),
         )
         for order in OrderRepository(db).list_for_partner(partner_id)
     ]
@@ -73,26 +62,15 @@ def get_my_job(
     photos = PhotoRepository(db).list_for_order(order.id)
     group = OrderGroupRepository(db).get(order.group_id)
     timeline_repo = TimelineRepository(db)
-    memos = partner_memo_events(timeline_repo.list_for_order(order.id), partner_id)
-    return to_partner_job_dto(
+    events = timeline_repo.list_for_order(order.id)
+    memos = partner_memo_events(events, partner_id)
+    return _to_partner_job_read(
         order,
+        timeline_repo=timeline_repo,
         group=group,
         photos=photos,
         memos=memos,
-        as_requested_at=timeline_repo.latest_created_at(
-            order_id=order.id,
-            event_type=TimelineEventType.AS_REQUESTED,
-        ),
-        evidence_required_after=TimelineService(db).latest_partner_work_epoch(
-            order_id=order.id,
-            partner_id=order.partner_id,
-            work_completed_at=order.work_completed_at,
-            work_is_active=is_partner_photo_uploadable(order),
-        ),
-        partner_confirmation_required=is_partner_confirmation_required(
-            order,
-            TimelineService(db),
-        ),
+        timeline_events=events,
     )
 
 
@@ -110,35 +88,18 @@ def start_my_job(
             partner_id=partner_id,
         )
     except ValueError as exc:
-        if str(exc) == "as_intake_approval_required":
-            raise HTTPException(status_code=409, detail="as_intake_approval_required") from exc
         if str(exc) == "invalid_status_transition":
             raise HTTPException(status_code=409, detail="invalid_status_transition") from exc
-        if str(exc) == "partner_confirmation_required":
-            raise HTTPException(status_code=409, detail="partner_confirmation_required") from exc
         if str(exc) == "before_photo_required_for_start":
             raise HTTPException(status_code=422, detail="before_photo_required_for_start") from exc
         raise HTTPException(status_code=404, detail="order_not_found") from exc
     photos = PhotoRepository(db).list_for_order(order.id)
     group = OrderGroupRepository(db).get(order.group_id)
-    return to_partner_job_dto(
+    return _to_partner_job_read(
         order,
+        timeline_repo=TimelineRepository(db),
         group=group,
         photos=photos,
-        as_requested_at=TimelineRepository(db).latest_created_at(
-            order_id=order.id,
-            event_type=TimelineEventType.AS_REQUESTED,
-        ),
-        evidence_required_after=TimelineService(db).latest_partner_work_epoch(
-            order_id=order.id,
-            partner_id=order.partner_id,
-            work_completed_at=order.work_completed_at,
-            work_is_active=is_partner_photo_uploadable(order),
-        ),
-        partner_confirmation_required=is_partner_confirmation_required(
-            order,
-            TimelineService(db),
-        ),
     )
 
 
@@ -156,36 +117,16 @@ def confirm_my_job(
             partner_id=partner_id,
         )
     except ValueError as exc:
-        if str(exc) == "as_intake_approval_required":
-            raise HTTPException(status_code=409, detail="as_intake_approval_required") from exc
         if str(exc) == "invalid_status_transition":
             raise HTTPException(status_code=409, detail="invalid_status_transition") from exc
-        if str(exc) == "schedule_required_for_confirmation":
-            raise HTTPException(
-                status_code=422,
-                detail="schedule_required_for_confirmation",
-            ) from exc
         raise HTTPException(status_code=404, detail="order_not_found") from exc
     photos = PhotoRepository(db).list_for_order(order.id)
     group = OrderGroupRepository(db).get(order.group_id)
-    return to_partner_job_dto(
+    return _to_partner_job_read(
         order,
+        timeline_repo=TimelineRepository(db),
         group=group,
         photos=photos,
-        as_requested_at=TimelineRepository(db).latest_created_at(
-            order_id=order.id,
-            event_type=TimelineEventType.AS_REQUESTED,
-        ),
-        evidence_required_after=TimelineService(db).latest_partner_work_epoch(
-            order_id=order.id,
-            partner_id=order.partner_id,
-            work_completed_at=order.work_completed_at,
-            work_is_active=is_partner_photo_uploadable(order),
-        ),
-        partner_confirmation_required=is_partner_confirmation_required(
-            order,
-            TimelineService(db),
-        ),
     )
 
 
@@ -205,8 +146,6 @@ def complete_my_job(
             customer_signature_data_url=payload.customer_signature_data_url if payload else "",
         )
     except ValueError as exc:
-        if str(exc) == "as_intake_approval_required":
-            raise HTTPException(status_code=409, detail="as_intake_approval_required") from exc
         if str(exc) == "invalid_status_transition":
             raise HTTPException(status_code=409, detail="invalid_status_transition") from exc
         if str(exc) == "completion_evidence_required":
@@ -214,24 +153,11 @@ def complete_my_job(
         raise HTTPException(status_code=404, detail="order_not_found") from exc
     photos = PhotoRepository(db).list_for_order(order.id)
     group = OrderGroupRepository(db).get(order.group_id)
-    return to_partner_job_dto(
+    return _to_partner_job_read(
         order,
+        timeline_repo=TimelineRepository(db),
         group=group,
         photos=photos,
-        as_requested_at=TimelineRepository(db).latest_created_at(
-            order_id=order.id,
-            event_type=TimelineEventType.AS_REQUESTED,
-        ),
-        evidence_required_after=TimelineService(db).latest_partner_work_epoch(
-            order_id=order.id,
-            partner_id=order.partner_id,
-            work_completed_at=order.work_completed_at,
-            work_is_active=is_partner_photo_uploadable(order),
-        ),
-        partner_confirmation_required=is_partner_confirmation_required(
-            order,
-            TimelineService(db),
-        ),
     )
 
 
@@ -285,6 +211,69 @@ async def upload_photo(
         raise
 
 
+@router.get("/{order_id}/photos/{photo_id}/file")
+def get_partner_job_photo_file(
+    order_id: str,
+    photo_id: str,
+    db: Session = Depends(get_session),
+    user: CurrentUser = Depends(require_partner),
+) -> Response:
+    partner_id = ensure_partner_scope(user)
+    order = OrderRepository(db).get(order_id)
+    if order is None or order.partner_id != partner_id:
+        raise HTTPException(status_code=404, detail="order_not_found")
+    photo = PhotoRepository(db).get(photo_id)
+    if photo is None or photo.order_id != order.id or not photo.storage_key:
+        raise HTTPException(status_code=404, detail="photo_not_found")
+    if (
+        photo.uploaded_by_user_id is None
+        and photo.id
+        not in active_customer_as_photo_ids(
+            order,
+            TimelineRepository(db).list_for_order(order.id),
+        )
+    ):
+        raise HTTPException(status_code=404, detail="photo_not_found")
+    try:
+        data = get_storage_provider().read(photo.storage_key)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="photo_file_not_found") from exc
+    return Response(
+        content=data,
+        media_type=photo.content_type or "application/octet-stream",
+        headers={"cache-control": "private, max-age=60"},
+    )
+
+
+@router.delete("/{order_id}/photos/{photo_id}", status_code=204)
+def delete_partner_job_photo(
+    order_id: str,
+    photo_id: str,
+    db: Session = Depends(get_session),
+    user: CurrentUser = Depends(require_partner),
+) -> Response:
+    partner_id = ensure_partner_scope(user)
+    try:
+        PhotoService(db).delete_for_partner(
+            order_id=order_id,
+            photo_id=photo_id,
+            user_id=user.id,
+            partner_id=partner_id,
+        )
+    except ValueError as exc:
+        detail = str(exc)
+        if detail == "order_not_found":
+            raise HTTPException(status_code=404, detail="order_not_found") from exc
+        if detail == "photo_not_found":
+            raise HTTPException(status_code=404, detail="photo_not_found") from exc
+        if detail == "photo_delete_not_allowed":
+            raise HTTPException(status_code=403, detail="photo_delete_not_allowed") from exc
+        if detail == "invalid_status_for_delete":
+            raise HTTPException(status_code=409, detail="invalid_status_for_delete") from exc
+        raise HTTPException(status_code=422, detail=detail) from exc
+    return Response(status_code=204)
+
+
 @router.post("/{order_id}/memo", response_model=PartnerJobRead)
 def add_job_memo(
     order_id: str,
@@ -304,26 +293,16 @@ def add_job_memo(
         raise HTTPException(status_code=404, detail="order_not_found") from exc
     photos = PhotoRepository(db).list_for_order(order.id)
     group = OrderGroupRepository(db).get(order.group_id)
-    memos = partner_memo_events(TimelineRepository(db).list_for_order(order.id), partner_id)
-    return to_partner_job_dto(
+    timeline_repo = TimelineRepository(db)
+    events = timeline_repo.list_for_order(order.id)
+    memos = partner_memo_events(events, partner_id)
+    return _to_partner_job_read(
         order,
+        timeline_repo=timeline_repo,
         group=group,
         photos=photos,
         memos=memos,
-        as_requested_at=TimelineRepository(db).latest_created_at(
-            order_id=order.id,
-            event_type=TimelineEventType.AS_REQUESTED,
-        ),
-        evidence_required_after=TimelineService(db).latest_partner_work_epoch(
-            order_id=order.id,
-            partner_id=order.partner_id,
-            work_completed_at=order.work_completed_at,
-            work_is_active=is_partner_photo_uploadable(order),
-        ),
-        partner_confirmation_required=is_partner_confirmation_required(
-            order,
-            TimelineService(db),
-        ),
+        timeline_events=events,
     )
 
 
@@ -354,5 +333,33 @@ def list_job_messages(
             created_at=log.created_at,
         )
         for log in logs
-        if log.recipient_type == RecipientType.PARTNER and log.recipient_partner_id == partner_id
+        if log.recipient_type == RecipientType.PARTNER
+        and log.recipient_partner_id == partner_id
     ]
+
+
+def _to_partner_job_read(
+    order: Order,
+    *,
+    timeline_repo: TimelineRepository,
+    group: OrderGroup | None = None,
+    photos: list[OrderPhoto] | None = None,
+    memos: list[OrderTimeline] | None = None,
+    timeline_events: list[OrderTimeline] | None = None,
+) -> PartnerJobRead:
+    events = timeline_events if timeline_events is not None else timeline_repo.list_for_order(order.id)
+    return to_partner_job_dto(
+        order,
+        group=group,
+        photos=photos,
+        memos=memos,
+        as_requested_at=_latest_as_requested_at(events),
+        visible_customer_as_photo_ids=active_customer_as_photo_ids(order, events),
+    )
+
+
+def _latest_as_requested_at(events: list[OrderTimeline]):
+    for event in reversed(events):
+        if event.event_type == TimelineEventType.AS_REQUESTED:
+            return event.created_at
+    return None

@@ -20,23 +20,27 @@ SOLAPI_WEBHOOK_MAX_BYTES = 1_000_000
 async def receive_solapi_webhook(
     request: Request,
     x_solapi_secret: str | None = Header(default=None, alias="X-Solapi-Secret"),
+    x_solapi_signature: str | None = Header(default=None, alias="X-Solapi-Signature"),
     db: Session = Depends(get_session),
 ) -> dict[str, int]:
+    body = await read_limited_body(request, max_bytes=SOLAPI_WEBHOOK_MAX_BYTES)
     try:
-        verify_solapi_webhook_secret(x_solapi_secret)
+        verify_solapi_webhook_auth(
+            body=body,
+            received_secret=x_solapi_secret,
+            received_signature=x_solapi_signature,
+        )
     except HTTPException as exc:
         logger.warning(
             "SOLAPI webhook rejected (%s): header_keys=%s body_len=%d "
             "x_solapi_secret_present=%s secret_configured=%s",
             exc.detail,
             sorted(request.headers.keys()),
-            0,
+            len(body),
             x_solapi_secret is not None,
             bool(settings.solapi_webhook_secret),
         )
         raise
-
-    body = await read_limited_body(request, max_bytes=SOLAPI_WEBHOOK_MAX_BYTES)
 
     try:
         payload = json.loads(body)
@@ -71,6 +75,33 @@ def verify_solapi_webhook_secret(received_secret: str | None) -> None:
     if not normalized_secret or not hmac.compare_digest(
         normalized_secret,
         expected_secret,
+    ):
+        raise HTTPException(status_code=401, detail="invalid_solapi_webhook_secret")
+
+
+def verify_solapi_webhook_auth(
+    *,
+    body: bytes,
+    received_secret: str | None,
+    received_signature: str | None,
+) -> None:
+    if not settings.solapi_webhook_secret:
+        raise HTTPException(status_code=401, detail="solapi_webhook_secret_required")
+
+    if received_secret:
+        verify_solapi_webhook_secret(received_secret)
+        return
+
+    normalized_signature = (received_signature or "").strip().lower()
+    if normalized_signature.startswith("sha256="):
+        normalized_signature = normalized_signature.removeprefix("sha256=")
+    expected_signature = hmac.new(
+        settings.solapi_webhook_secret.encode("utf-8"),
+        body,
+        hashlib.sha256,
+    ).hexdigest()
+    if not normalized_signature or not hmac.compare_digest(
+        normalized_signature, expected_signature
     ):
         raise HTTPException(status_code=401, detail="invalid_solapi_webhook_secret")
 

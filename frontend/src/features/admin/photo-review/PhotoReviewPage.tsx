@@ -2,9 +2,10 @@ import React from 'react';
 
 import { sendCustomerPhotoReady } from '../../../api/messages';
 import { listPhotoReviewQueue, revokePhoto } from '../../../api/photos';
-import { toApiAssetUrl } from '../../../api/client';
 import { useApiResource } from '../../../api/useApiResource';
 import { PaginationBar, paginateItems } from '../../../components/common/Pagination';
+import { PhotoLightbox } from '../../../components/common/PhotoLightbox';
+import { ProtectedApiImage } from '../../../components/common/ProtectedApiImage';
 import { Badge, Icon } from '../../../components/common/ui';
 import { formatQuantity } from '../../../domain/format';
 
@@ -20,8 +21,9 @@ export function PhotoReviewPage({ onOpenOrder, onNav }) {
   const [page, setPage] = React.useState(1);
   const [pageSize, setPageSize] = React.useState(10);
   const [selectedIdx, setSelectedIdx] = React.useState(0);
-  const [selectedOrderId, setSelectedOrderId] = React.useState(null);
-  const [activePhotoId, setActivePhotoId] = React.useState(null);
+  const [selectedOrderId, setSelectedOrderId] = React.useState<string | null>(null);
+  const [activePhotoId, setActivePhotoId] = React.useState<string | null>(null);
+  const [lightboxPhotoId, setLightboxPhotoId] = React.useState<string | null>(null);
   const [isApproving, setIsApproving] = React.useState(false);
   const [isSending, setIsSending] = React.useState(false);
   const [sentMessage, setSentMessage] = React.useState(null);
@@ -35,10 +37,20 @@ export function PhotoReviewPage({ onOpenOrder, onNav }) {
   );
   const selectedById = selectedOrderId ? items.find((item) => item.order_id === selectedOrderId) : null;
   const selected = selectedById || pagedItems[selectedIdx] || pagedItems[0] || filteredItems[0] || null;
-  const photos = selected?.photos || [];
+  const photos = React.useMemo(() => selected?.photos ?? [], [selected?.photos]);
   const pendingPhotos = photos.filter((photo) => !photo.is_customer_visible);
   const approvedPhotos = photos.filter((photo) => photo.is_customer_visible);
   const activePhoto = photos.find((photo) => photo.id === activePhotoId) || photos[0] || null;
+  const lightboxPhotos = React.useMemo(
+    () => photos.map((photo) => ({
+      id: photo.id,
+      src: photo.file_url,
+      alt: photo.file_name || photoTypeLabel(photo.photo_type),
+      caption: `${photoTypeLabel(photo.photo_type)} · ${photo.is_customer_visible ? '공개' : '비공개'}`,
+      isProtected: true,
+    })),
+    [photos],
+  );
   const counts = {
     all: items.length,
     pending_link: items.filter((item) => reviewStage(item).key === 'pending_link').length,
@@ -52,11 +64,13 @@ export function PhotoReviewPage({ onOpenOrder, onNav }) {
     setSelectedIdx(0);
     setSelectedOrderId(null);
     setActivePhotoId(null);
+    setLightboxPhotoId(null);
   }, [filter]);
 
   React.useEffect(() => {
     setSelectedIdx(0);
     setActivePhotoId(null);
+    setLightboxPhotoId(null);
   }, [queue.data]);
 
   const handleRevoke = async (photoId) => {
@@ -84,8 +98,6 @@ export function PhotoReviewPage({ onOpenOrder, onNav }) {
       const log = await sendCustomerPhotoReady(selected.order_id);
       if (log.status === 'sent') {
         setSentMessage('고객 링크를 발송했습니다.');
-      } else if (log.status === 'pending') {
-        setError('SOL API 수락 여부를 확인 중입니다. SOLAPI 콘솔 확인 전에는 다시 발송하지 마세요.');
       } else {
         setError(`고객 링크 발송 실패 기록이 남았습니다. ${providerErrorText(log)}`);
       }
@@ -160,7 +172,7 @@ export function PhotoReviewPage({ onOpenOrder, onNav }) {
               <button
                 key={item.order_id}
                 data-testid={`photo-review-item-${item.order_id}`}
-                onClick={() => { setSelectedIdx(index); setSelectedOrderId(item.order_id); setActivePhotoId(null); setSentMessage(null); setError(null); }}
+                onClick={() => { setSelectedIdx(index); setSelectedOrderId(item.order_id); setActivePhotoId(null); setLightboxPhotoId(null); setSentMessage(null); setError(null); }}
                 style={{
                   display: 'block',
                   width: '100%',
@@ -196,6 +208,7 @@ export function PhotoReviewPage({ onOpenOrder, onNav }) {
               setSelectedIdx(0);
               setSelectedOrderId(null);
               setActivePhotoId(null);
+              setLightboxPhotoId(null);
             }}
             onPageSizeChange={setPageSize}
             itemLabel="건"
@@ -228,11 +241,20 @@ export function PhotoReviewPage({ onOpenOrder, onNav }) {
             justifyContent: 'center',
           }}>
             {activePhoto ? (
-              <img
-                src={toApiAssetUrl(activePhoto.file_url)}
-                alt={activePhoto.file_name || '작업 사진'}
-                style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain', display: 'block' }}
-              />
+              <button
+                type="button"
+                aria-label="선택 사진 크게 보기"
+                onClick={() => setLightboxPhotoId(activePhoto.id)}
+                style={{ width: '100%', height: '100%', padding: 0, border: 'none', background: 'transparent', cursor: 'zoom-in', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+              >
+                <ProtectedApiImage
+                  src={activePhoto.file_url}
+                  alt={activePhoto.file_name || '작업 사진'}
+                  loading="eager"
+                  style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain', display: 'block' }}
+                  placeholderStyle={{ color: 'var(--text-tertiary)', fontSize: 12, fontWeight: 700 }}
+                />
+              </button>
             ) : (
               <div style={{ textAlign: 'center', color: 'var(--text-tertiary)', fontSize: 13, lineHeight: 1.6 }}>
                 <Icon name="image" size={22}/>
@@ -258,10 +280,17 @@ export function PhotoReviewPage({ onOpenOrder, onNav }) {
                     background: 'transparent',
                     cursor: 'pointer',
                     overflow: 'hidden',
+                    contentVisibility: 'auto',
+                    containIntrinsicSize: '96px 96px',
                   }}
                 >
-                  <img src={toApiAssetUrl(photo.file_url)} alt={photo.file_name || photo.photo_type}
-                    style={{ width: '100%', aspectRatio: '1', objectFit: 'cover', display: 'block', background: 'var(--bg-muted)' }} />
+                  <ProtectedApiImage
+                    src={photo.file_url}
+                    alt={photo.file_name || photo.photo_type}
+                    style={{ width: '100%', aspectRatio: '1', objectFit: 'cover', display: 'block', background: 'var(--bg-muted)' }}
+                    placeholderText="IMG"
+                    placeholderStyle={{ width: '100%', aspectRatio: '1', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--bg-muted)', color: 'var(--text-tertiary)', fontSize: 10, fontWeight: 700 }}
+                  />
                   <span style={{
                     position: 'absolute',
                     left: 4,
@@ -359,6 +388,12 @@ export function PhotoReviewPage({ onOpenOrder, onNav }) {
           </div>
         </div>
       </aside>
+      <PhotoLightbox
+        photos={lightboxPhotos}
+        openPhotoId={lightboxPhotoId}
+        onOpenPhoto={setLightboxPhotoId}
+        onClose={() => setLightboxPhotoId(null)}
+      />
     </div>
   );
 }
@@ -575,13 +610,12 @@ function providerErrorText(message) {
     missing_recipient: '수신번호 없음',
     solapi_missing_credentials: 'SOL API 인증 설정 누락',
     solapi_missing_sender_number: 'SOL API 발신번호 누락',
-    solapi_missing_kakao_channel_id: 'SOL API 카카오 채널 ID 누락',
-    solapi_missing_kakao_pf_id: 'SOL API 카카오 발신 프로필 ID 누락',
+    solapi_missing_kakao_channel_id: 'SOL API 카카오 발신프로필 ID 누락',
+    solapi_missing_kakao_pf_id: 'SOL API 카카오 발신프로필 ID 누락',
     solapi_missing_kakao_template_id: '알림톡 승인 템플릿 ID 누락',
     solapi_http_error: 'SOL API HTTP 오류',
     solapi_request_failed: 'SOL API 요청 실패',
     solapi_invalid_response: 'SOL API 응답 오류',
-    solapi_outcome_unknown: 'SOL API 수락 여부 확인 필요',
     solapi_provider_failed: 'SOL API 발송 실패',
     unsupported_message_provider: 'Provider 설정 오류',
   };

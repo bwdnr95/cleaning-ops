@@ -268,7 +268,25 @@ function toApiUrl(path) {
     return path;
   }
 
-  return `${API_BASE_URL}${path.startsWith('/') ? path : `/${path}`}`;
+  const normalizedPath = normalizeApiPath(path);
+  return `${API_BASE_URL}${normalizedPath.startsWith('/') ? normalizedPath : `/${normalizedPath}`}`;
+}
+
+function normalizeApiPath(path) {
+  if (!path.startsWith('/api/')) {
+    return path;
+  }
+  try {
+    const base = new URL(API_BASE_URL, window.location.origin);
+    if (base.pathname.replace(/\/$/, '') === '/api') {
+      return path.slice('/api'.length);
+    }
+  } catch {
+    if (API_BASE_URL === '/api') {
+      return path.slice('/api'.length);
+    }
+  }
+  return path;
 }
 
 function createRequestId() {

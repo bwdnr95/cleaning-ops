@@ -38,12 +38,10 @@ class Order(TimestampMixin, Base):
     special_request: Mapped[str | None] = mapped_column(Text)
     # AS(사후관리) 요청: 컴플레인/AS 건에 체크 + 메모. 협력사링크로 전송된다.
     as_requested: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
-    as_intake_pending: Mapped[bool] = mapped_column(
-        Boolean,
-        default=False,
-        server_default="false",
-    )
     as_memo: Mapped[str | None] = mapped_column(Text)
+    as_intake_pending: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false"
+    )
     active_as_request_id: Mapped[str | None] = mapped_column(String(36), index=True)
     work_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     work_completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

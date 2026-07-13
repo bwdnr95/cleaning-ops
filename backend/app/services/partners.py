@@ -7,10 +7,14 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.core.security import hash_password
+from app.core.time import business_today
 from app.domain.constants import AuditEventType, AuditSeverity, OrderStatus, UserRole
-from app.domain.order_metrics import ACTIVE_JOB_STATUSES, COMPLETED_JOB_STATUSES
+from app.domain.order_metrics import (
+    ACTIVE_JOB_STATUSES,
+    COMPLETED_JOB_STATUSES,
+    PARTNER_ADMIN_UNPAID_STATUSES,
+)
 from app.domain.order_pricing import order_consumer_total
-from app.services.partner_settlements import unpaid_partner_condition
 from app.domain.phone import normalize_phone
 from app.models.order import Order
 from app.models.partner import Partner, PartnerCategory
@@ -29,6 +33,7 @@ from app.schemas.partner import (
     PartnerUpdate,
 )
 from app.services.audit import AuditService
+from app.services.partner_settlements import unpaid_partner_condition
 
 
 @dataclass(frozen=True)
@@ -375,6 +380,7 @@ class PartnerService:
             partner_id: empty_settlement_summary()
             for partner_id in partner_ids
         }
+        today = business_today()
         settlement_stmt = (
             select(
                 Order.partner_id,
@@ -385,6 +391,8 @@ class PartnerService:
                 Order.deleted_at.is_(None),
                 Order.partner_id.in_(partner_ids),
                 unpaid_partner_condition(),
+                Order.status.in_(PARTNER_ADMIN_UNPAID_STATUSES),
+                Order.scheduled_date <= today,
             )
             .group_by(Order.partner_id)
         )
@@ -486,6 +494,7 @@ class PartnerService:
         return list(self.db.scalars(stmt))
 
     def _unpaid_settlement_summary(self, partner_id: str) -> dict[str, float | int]:
+        today = business_today()
         stmt = select(
             func.count(Order.id),
             func.coalesce(func.sum(Order.partner_payment_amount), 0),
@@ -493,6 +502,8 @@ class PartnerService:
             Order.partner_id == partner_id,
             Order.deleted_at.is_(None),
             unpaid_partner_condition(),
+            Order.status.in_(PARTNER_ADMIN_UNPAID_STATUSES),
+            Order.scheduled_date <= today,
         )
         count, amount = self.db.execute(stmt).one()
         return {

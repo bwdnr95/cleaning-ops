@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from datetime import date
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 
 from sqlalchemy.orm import Session
@@ -31,6 +31,8 @@ DEV_PARTNER_USER_ID = "seed-partner-user"
 DEV_ORDER_GROUP_ID = "seed-order-group-2450"
 DEV_ORDER_ID = "seed-order-2450"
 DEV_ORDER_TIMELINE_ID = "seed-order-2450-created"
+DEV_ORDER_ASSIGNED_TIMELINE_ID = "seed-order-2450-assigned"
+DEV_ORDER_CONFIRMED_TIMELINE_ID = "seed-order-2450-confirmed"
 DEV_CUSTOMER_TOKEN = "ct2_seed-customer-token-2450"
 DEV_SERVICE_CATEGORY_ID = "seed-service-category-cleaning"
 DEV_SERVICE_ITEM_ID = "seed-service-item-move-in"
@@ -56,6 +58,7 @@ def seed_dev_data(db: Session) -> SeedSummary:
     ensure_service_catalog(db)
     ensure_sample_order(db)
     ensure_order_created_timeline(db)
+    ensure_order_partner_timeline(db)
     db.commit()
 
     return SeedSummary(
@@ -254,3 +257,32 @@ def ensure_order_created_timeline(db: Session) -> OrderTimeline:
     )
     db.add(event)
     return event
+
+
+def ensure_order_partner_timeline(db: Session) -> None:
+    assigned_at = datetime(2026, 5, 2, 0, 0, tzinfo=UTC)
+    if db.get(OrderTimeline, DEV_ORDER_ASSIGNED_TIMELINE_ID) is None:
+        db.add(
+            OrderTimeline(
+                id=DEV_ORDER_ASSIGNED_TIMELINE_ID,
+                order_id=DEV_ORDER_ID,
+                actor_user_id=DEV_ADMIN_ID,
+                event_type=TimelineEventType.PARTNER_ASSIGNED,
+                title="개발 샘플 협력사 배정",
+                event_metadata={"seed": True, "partner_id": DEV_PARTNER_ID},
+                created_at=assigned_at,
+            )
+        )
+        db.flush()
+    if db.get(OrderTimeline, DEV_ORDER_CONFIRMED_TIMELINE_ID) is None:
+        db.add(
+            OrderTimeline(
+                id=DEV_ORDER_CONFIRMED_TIMELINE_ID,
+                order_id=DEV_ORDER_ID,
+                actor_user_id=DEV_PARTNER_USER_ID,
+                event_type=TimelineEventType.PARTNER_CONFIRMED,
+                title="개발 샘플 협력사 확인",
+                event_metadata={"seed": True, "partner_id": DEV_PARTNER_ID},
+                created_at=assigned_at + timedelta(microseconds=1),
+            )
+        )

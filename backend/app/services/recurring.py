@@ -2,19 +2,16 @@ from __future__ import annotations
 
 from calendar import monthrange
 from datetime import date, timedelta
-from decimal import Decimal
 from uuid import uuid4
 
 from sqlalchemy import select
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.core.time import business_today, utc_now
 from app.domain.constants import (
-    OrderStatus,
     RecurrenceMode,
-    RecurringBillingMode,
     RecurringContractStatus,
-    VatType,
 )
 from app.domain.phone import normalize_phone
 from app.domain.recurrence import (
@@ -38,6 +35,11 @@ from app.schemas.recurring import (
     RecurringContractUpdate,
 )
 from app.services.orders import OrderService, to_admin_order_dto
+from app.services.recurring_generation import (
+    RecurringOrderGenerationService,
+    recurring_schedule_spec,
+)
+from app.services.recurring_validation import validate_recurring_service_catalog
 
 
 def _month_bounds(month: str) -> tuple[date, date]:
@@ -57,6 +59,7 @@ class RecurringService:
         self.contracts = RecurringContractRepository(db)
         self.groups = OrderGroupRepository(db)
         self.orders = OrderService(db)
+        self.order_generation = RecurringOrderGenerationService(db)
 
     # --- 계약 CRUD ---
     def create_contract(self, payload: RecurringContractCreate, *, actor_user_id: str | None) -> RecurringContract:
@@ -65,6 +68,7 @@ class RecurringService:
         if payload.default_partner_id is not None:
             if PartnerRepository(self.db).get(payload.default_partner_id) is None:
                 raise ValueError("partner_not_found")
+        self._validate_service_catalog(payload)
         group = self.orders.create_empty_group(
             OrderGroupCreate(
                 customer_name=payload.customer_name,
@@ -94,7 +98,20 @@ class RecurringService:
         self.db.add(contract)
         self.db.commit()
         self.db.refresh(contract)
+        try:
+            self.order_generation.generate_current_month_for_contract(contract, actor_user_id=actor_user_id)
+        except (SQLAlchemyError, ValueError):
+            self.order_generation.discard_failed_contract_setup(contract.id, group.id)
+            raise
+        self.db.refresh(contract)
         return contract
+
+    def _validate_service_catalog(self, payload: RecurringContractCreate) -> None:
+        validate_recurring_service_catalog(
+            self.db,
+            service_item_id=payload.service_item_id,
+            service_category_id=payload.service_category_id,
+        )
 
     def get_contract(self, contract_id: str) -> RecurringContract | None:
         return self.contracts.get(contract_id)
@@ -118,6 +135,13 @@ class RecurringService:
             and self._has_partner_billing_history(contract.id)
         ):
             raise ValueError("recurring_partner_billing_mode_locked")
+        service_item_id = changes.get("service_item_id")
+        service_category_id = changes.get("service_category_id")
+        validate_recurring_service_catalog(
+            self.db,
+            service_item_id=service_item_id if isinstance(service_item_id, str) else None,
+            service_category_id=service_category_id if isinstance(service_category_id, str) else None,
+        )
 
         group = self.groups.get(contract.order_group_id)
         for field in list(changes.keys()):
@@ -176,16 +200,7 @@ class RecurringService:
 
     # --- 스케줄 헬퍼 ---
     def _spec(self, contract: RecurringContract) -> ScheduleSpec:
-        return ScheduleSpec(
-            mode=contract.recurrence_mode,
-            start_date=contract.start_date,
-            day_of_month=contract.day_of_month,
-            interval_weeks=contract.interval_weeks,
-            weekday=contract.weekday,
-            weekdays=parse_weekdays_csv(contract.weekdays) or None,
-            end_date=contract.end_date,
-            max_occurrences=contract.max_occurrences,
-        )
+        return recurring_schedule_spec(contract)
 
     # --- DTO 매핑 (라우트용) ---
     def _next_due(self, contract: RecurringContract) -> date | None:
@@ -242,18 +257,15 @@ class RecurringService:
 
     # --- 정기 주문 자동생성 + 월별 조회 (2-3 / 2-4 / 2-5) ---
     def list_month_orders(self, month: str, *, actor_user_id: str | None) -> list[AdminOrderRead]:
-        """해당 월의 정기 주문을 (없으면) 멱등 생성한 뒤 목록으로 반환한다.
-
-        스케줄러가 없으므로 월 트래커(list_month)와 동일하게 '조회 시 생성' 방식을 쓴다.
-        생성된 주문은 recurring_contract_id로 스탬프되어 일반 주문 파이프라인을 그대로
-        타므로 협력사링크에도 다른 주문과 동일하게 노출된다(2-5).
-        """
         first, last = _month_bounds(month)
         today = business_today()
-        # '매월 1일 생성' 스펙: 생성은 현재 달을 조회할 때만 수행한다. 과거/미래 달은 읽기 전용이라
-        # 임의의 달을 넘겨봐도 운영 큐(주문목록/캘린더/대시보드/협력사링크)가 미리 오염되지 않는다.
         if (today.year, today.month) == (first.year, first.month):
-            self._generate_month(first, last, actor_user_id=actor_user_id)
+            self.order_generation.generate_month(
+                first,
+                last,
+                actor_user_id=actor_user_id,
+                raise_on_error=False,
+            )
         orders = list(
             self.db.scalars(
                 select(Order)
@@ -269,91 +281,5 @@ class RecurringService:
         groups = self.groups.list_by_ids(order.group_id for order in orders)
         return [to_admin_order_dto(order, group=groups.get(order.group_id)) for order in orders]
 
-    def _generate_month(self, first: date, last: date, *, actor_user_id: str | None) -> None:
-        """활성 계약의 해당 월 예정일마다 주문을 멱등 생성한다.
-
-        (recurring_contract_id, scheduled_date)가 이미 있으면 건너뛴다. 월/주간 다중요일
-        모두 iter_due_dates가 처리하므로 매주 특정 요일(2-3)도 그대로 생성된다.
-        """
-        created = False
-        for contract in self.contracts.list_active():
-            if contract.start_date > last:
-                continue
-            if contract.end_date is not None and contract.end_date < first:
-                continue
-            group = self.groups.get(contract.order_group_id)
-            if group is None:
-                continue
-            # 멱등 키 = '생성 당시 예정일'(recurring_planned_date, 불변)이며 soft-delete분까지
-            # 포함해 조회한다 → 방문일을 옮기거나 회차를 삭제해도 그 슬롯을 재생성하지 않는다.
-            existing = set(
-                self.db.scalars(
-                    select(Order.recurring_planned_date).where(
-                        Order.recurring_contract_id == contract.id,
-                        Order.recurring_planned_date >= first,
-                        Order.recurring_planned_date <= last,
-                    )
-                )
-            )
-            try:
-                # 계약 단위 savepoint: 한 계약의 설정 오류(비활성 서비스 항목 등)나 동시 생성
-                # 충돌(유니크 위반)이 그 달 전체 조회를 막지 않도록 격리한다(이 계약만 건너뜀).
-                with self.db.begin_nested():
-                    for _seq, due in iter_due_dates(self._spec(contract), until=last):
-                        if due < first or due > last or due in existing:
-                            continue
-                        order = self.orders.add_recurring_line(
-                            group,
-                            self._contract_line_payload(contract, due),
-                            recurring_contract_id=contract.id,
-                            actor_user_id=actor_user_id,
-                        )
-                        order.recurring_planned_date = due
-                        existing.add(due)
-                        created = True
-            except Exception:
-                continue
-        if created:
-            self.db.commit()
-
-    def _contract_line_payload(self, contract: RecurringContract, due: date) -> OrderLineCreate:
-        # 계약 템플릿 → 주문 라인. 방문일이 계약 예정일이므로 '일정확정'으로 생성해
-        # 배정 협력사의 링크/일정에 바로 노출한다(협력사 미지정이면 미배정 상태로 확정).
-        def _f(value: Decimal | None) -> float | None:
-            return float(value) if value is not None else None
-        is_partner_per_visit = (
-            contract.partner_billing_mode or RecurringBillingMode.PER_VISIT
-        ) == RecurringBillingMode.PER_VISIT
-
-        return OrderLineCreate(
-            status=OrderStatus.SCHEDULE_CONFIRMED,
-            received_date=business_today(),
-            scheduled_date=due,
-            requested_time=contract.requested_time,
-            partner_id=contract.default_partner_id,
-            team_name=contract.team_name,
-            service_category_id=contract.service_category_id,
-            service_item_id=contract.service_item_id,
-            service_name=contract.service_name,
-            size_or_quantity=contract.size_or_quantity,
-            service_detail=contract.service_detail,
-            special_request=contract.special_request,
-            # 회당(per_visit): 각 회차 = 회당 금액 → 회차 주문이 정상적으로 매출 집계(월합 = 회당×방문수)에 반영된다.
-            # 월 고정(monthly): 회차별 금액 없음(None). 월 고정 청구는 회차 수와 무관하므로 회차마다 금액을
-            # 실으면 N배 과대계상된다. 그래서 회차에는 금액을 두지 않고, 월 고정 청구/매출은 '월 트래커'
-            # (RecurringMonthlyStatus, 세금계산서/잔금)에서 계약×월 단위로 관리한다. 결과적으로 월 고정 정기분은
-            # 주문 단위 매출 대시보드(dashboard.monthly_revenue)에는 잡히지 않는다 — 의도된 경계(과대계상 방지).
-            # 월 고정 정기 매출을 대시보드로 롤업하려면 월 트래커를 매출 소스로 합류시키는 별도 작업이 필요하다.
-            total_amount=(
-                None
-                if contract.billing_mode == RecurringBillingMode.MONTHLY
-                else _f(contract.total_amount)
-            ),
-            discount_amount=_f(contract.discount_amount) or 0,
-            deposit_amount=_f(contract.deposit_amount),
-            balance_amount=_f(contract.balance_amount),
-            vat_type=contract.vat_type or VatType.INCLUDED,
-            partner_payment_amount=(
-                _f(contract.partner_payment_amount) if is_partner_per_visit else None
-            ),
-        )
+    def generate_current_month_orders(self, *, actor_user_id: str | None) -> int:
+        return self.order_generation.generate_current_month(actor_user_id=actor_user_id)

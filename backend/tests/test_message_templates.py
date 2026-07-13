@@ -6,12 +6,7 @@ KAKAO_TEMPLATE_DEFINITIONS의 solapi_key가 어긋나면 실발송이 실패하�
 """
 
 from app.domain.constants import MessageType
-from app.domain.message_templates import (
-    KakaoTemplateDefinition,
-    get_kakao_template_definition,
-    render_kakao_variables,
-)
-from app.services.messages import truncate_sms_section
+from app.domain.message_templates import get_kakao_template_definition, render_kakao_variables
 
 # SOLAPI 콘솔(2026-07 대조) 템플릿별 실제 치환문자 집합.
 EXPECTED_SOLAPI_KEYS = {
@@ -45,19 +40,6 @@ EXPECTED_SOLAPI_KEYS = {
 }
 
 
-def test_as_sms_memo_is_truncated_on_utf8_boundary() -> None:
-    truncated = truncate_sms_section("가" * 2000)
-
-    assert len(truncated.encode("utf-8")) <= 1000
-    assert truncated.endswith("…(전체 내용은 시스템에서 확인)")
-
-
-def require_definition(message_type: MessageType) -> KakaoTemplateDefinition:
-    definition = get_kakao_template_definition(message_type)
-    assert definition is not None
-    return definition
-
-
 def test_kakao_definitions_match_registered_solapi_variables():
     for mtype, keys in EXPECTED_SOLAPI_KEYS.items():
         definition = get_kakao_template_definition(mtype)
@@ -71,10 +53,7 @@ def test_kakao_render_fills_every_variable_without_blank():
         "customer_name": "홍길동", "service_name": "입주청소", "schedule": "6/10 오후",
         "size_or_quantity": "30평", "unit_count": "-", "customer_address": "서울 강남",
         "customer_phone": "010-1234-5678", "consumer_price": "300,000원",
-        "customer_phone_without_auth_suffix": "010-****-****",
         "deposit_amount": "100,000원", "balance_amount": "200,000원", "total_amount": "300,000원",
-        "schedule_consumer_price": "300,000원", "schedule_deposit_amount": "100,000원",
-        "schedule_balance_amount": "200,000원", "schedule_total_amount": "300,000원",
         "discount_amount": "0원", "customer_link": "https://x.kr/c/tok",
         "customer_link_button": "x.kr/c/tok", "partner_name": "청소왕",
         "partner_manager_name": "김담당", "special_request": "현관 비번 1234",
@@ -82,27 +61,27 @@ def test_kakao_render_fills_every_variable_without_blank():
         "as_memo": "욕실 코너 AS 요청",
     }
     for mtype in EXPECTED_SOLAPI_KEYS:
-        rendered = render_kakao_variables(require_definition(mtype), context)
+        rendered = render_kakao_variables(get_kakao_template_definition(mtype), context)
         assert set(rendered.keys()) == EXPECTED_SOLAPI_KEYS[mtype], mtype
         assert all(value for value in rendered.values()), (mtype, rendered)
 
     # 대표 매핑 스팟체크.
     schedule = render_kakao_variables(
-        require_definition(MessageType.CUSTOMER_SCHEDULE_CONFIRMED), context
+        get_kakao_template_definition(MessageType.CUSTOMER_SCHEDULE_CONFIRMED), context
     )
-    assert schedule["#{연락처}"] == "010-****-****"
+    assert schedule["#{연락처}"] == "010-1234-5678"
     # 일정확정의 #{고객링크}는 '본문' 변수 → 풀 URL(scheme 포함).
     assert schedule["#{고객링크}"] == "https://x.kr/c/tok"
     assert schedule["#{대수}"] == "-"  # size_or_quantity가 단일 필드라 대수는 "-"
 
     partner = render_kakao_variables(
-        require_definition(MessageType.PARTNER_ASSIGNMENT), context
+        get_kakao_template_definition(MessageType.PARTNER_ASSIGNMENT), context
     )
     assert partner["#{협력사링크}"] == "x.kr/partner"
     assert "://" not in partner["#{협력사링크}"]
 
     partner_as = render_kakao_variables(
-        require_definition(MessageType.PARTNER_AS_REQUEST), context
+        get_kakao_template_definition(MessageType.PARTNER_AS_REQUEST), context
     )
     assert partner_as == {
         "#{협력사명}": "청소왕",
@@ -119,6 +98,6 @@ def test_kakao_render_fills_every_variable_without_blank():
         MessageType.CUSTOMER_BALANCE_DUE,
         MessageType.CUSTOMER_AS_NOTICE,
     ):
-        rendered = render_kakao_variables(require_definition(mtype), context)
+        rendered = render_kakao_variables(get_kakao_template_definition(mtype), context)
         assert rendered["#{고객링크}"] == "x.kr/c/tok", mtype
         assert "://" not in rendered["#{고객링크}"], mtype

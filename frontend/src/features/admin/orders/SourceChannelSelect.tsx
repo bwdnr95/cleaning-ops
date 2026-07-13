@@ -1,4 +1,4 @@
-import { SOURCE_CHANNEL_OPTIONS } from '../../../domain/sourceChannel';
+import { SOURCE_CHANNEL_OPTIONS, sourceChannelLabel } from '../../../domain/sourceChannel';
 
 interface Props {
   value: string;
@@ -18,7 +18,7 @@ export function SourceChannelSelect({ value, onChange }: Props) {
       onChange={(event) => onChange(event.target.value)}
     >
       <option value="">미선택</option>
-      {hasLegacyValue && <option value={value}>{value}</option>}
+      {hasLegacyValue && <option value={value}>{sourceChannelLabel(value)}</option>}
       {SOURCE_CHANNEL_OPTIONS.map((option) => (
         <option key={option.value} value={option.value}>
           {option.label}

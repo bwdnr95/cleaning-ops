@@ -80,7 +80,7 @@ export function MessagePreviewModal({
         <div className="scroll" style={{ padding: 16, overflow: 'auto', display: 'flex', flexDirection: 'column', gap: 14 }}>
           <div>
             <div style={{ fontSize: 11, color: 'var(--text-tertiary)', fontWeight: 600, marginBottom: 8 }}>발송 채널</div>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 6 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
               <button
                 data-testid="message-preview-channel-sms"
                 className={`btn ${channel === 'sms' ? 'btn--primary' : 'btn--secondary'}`}
@@ -89,15 +89,6 @@ export function MessagePreviewModal({
                 onClick={() => onChannelChange('sms')}
               >
                 SMS
-              </button>
-              <button
-                data-testid="message-preview-channel-lms"
-                className={`btn ${channel === 'lms' ? 'btn--primary' : 'btn--secondary'}`}
-                disabled={isLoading || isSaving}
-                aria-pressed={channel === 'lms'}
-                onClick={() => onChannelChange('lms')}
-              >
-                LMS
               </button>
               <button
                 data-testid="message-preview-channel-alimtalk"
@@ -195,7 +186,7 @@ function AlimtalkPreviewMeta({
     <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
       <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
         <Badge tone={preview.kakao_channel_id_configured ? 'success' : 'warn'}>
-          Channel ID {preview.kakao_channel_id_configured ? '설정됨' : '미설정'}
+          PF ID {preview.kakao_channel_id_configured ? '설정됨' : '미설정'}
         </Badge>
         <Badge tone={preview.kakao_template_configured ? 'success' : 'warn'}>
           템플릿 {preview.kakao_template_configured ? '설정됨' : '미설정'}

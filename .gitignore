@@ -9,9 +9,10 @@ venv/
 # Backend local data
 backend/cleaning_ops.db
 backend/cleaning_ops.sqlite.backup.db
-backend/e2e_cleaning_ops*.db
-backend/e2e_storage*/
+backend/e2e_cleaning_ops.db
+backend/e2e_storage/
 backend/local_storage/
+backend/local_private_storage/
 *.sqlite3
 
 # Postgres backups / logs (R10 선반영)
@@ -62,6 +63,8 @@ exports/
 !.env.production.example
 
 # Operator workspace (not for repo)
+.omo/
+backend/.omo/
 .claude/
 .codex/
 .playwright-mcp/

@@ -50,12 +50,12 @@ export function App() {
   const adminSession = auth.getSession('admin');
   const partnerSession = auth.getSession('partner');
   const adminSummaryLoader = React.useCallback(() => {
-    if (mode !== 'admin' || adminSession.user?.role !== 'admin') {
+    if (isStandaloneCustomerLink || mode !== 'admin' || adminSession.user?.role !== 'admin') {
       return Promise.resolve(null);
     }
     return getDashboardSummary();
-  }, [adminSession.user?.role, mode]);
-  const adminSummary = useApiResource(adminSummaryLoader, `${mode}:${adminSession.accessToken || 'guest'}`);
+  }, [adminSession.user?.role, isStandaloneCustomerLink, mode]);
+  const adminSummary = useApiResource(adminSummaryLoader, `${mode}:${isStandaloneCustomerLink ? 'customer' : adminSession.accessToken || 'guest'}`);
   const navBadges = toAdminNavBadges(adminSummary.data);
   const isSwitchingRole = auth.activeRole !== mode;
 
@@ -106,7 +106,7 @@ export function App() {
   }
 
   return (
-    <div style={{ height: '100dvh', width: '100vw', overflow: 'hidden', background: 'var(--bg)' }}>
+    <main style={{ height: '100dvh', width: '100vw', overflow: 'hidden', background: 'var(--bg)' }}>
       <React.Suspense fallback={<RouteState text="화면을 불러오는 중입니다." />}>
         {mode === 'admin' && (
           <>
@@ -246,6 +246,6 @@ export function App() {
           <>{isSwitchingRole ? <RouteState text="화면을 전환하는 중입니다." /> : partnerSession.user?.role === 'partner' ? <PartnerApp /> : <PartnerLoginPage />}</>
         )}
       </React.Suspense>
-    </div>
+    </main>
   );
 }
