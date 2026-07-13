@@ -38,6 +38,7 @@ from app.repositories.timeline import TimelineRepository
 from app.schemas.message import MessageSendRequest
 from app.services.dashboard import DashboardService
 from app.services.messages import MessageSendResult, MessageService
+from app.services.timeline import TimelineService
 
 PNG_BYTES = b"\x89PNG\r\n\x1a\ncleanops-test-image"
 SIGNATURE_DATA_URL = (
@@ -72,6 +73,25 @@ def make_test_client(seed_callback=None) -> TestClient:
 
     app.dependency_overrides[get_session] = override_get_session
     return TestClient(app)
+
+
+def seed_current_partner_confirmation(db: Session) -> None:
+    order = db.get(Order, "seed-order-2450")
+    assert order is not None and order.partner_id is not None
+    timeline = TimelineService(db)
+    timeline.record(
+        order_id=order.id,
+        event_type=TimelineEventType.PARTNER_ASSIGNED,
+        title="테스트 협력사 배정",
+        metadata={"partner_id": order.partner_id},
+    )
+    timeline.record(
+        order_id=order.id,
+        event_type=TimelineEventType.PARTNER_CONFIRMED,
+        title="테스트 협력사 확인",
+        metadata={"partner_id": order.partner_id},
+    )
+    db.flush()
 
 
 def login(client: TestClient, path: str, identifier: str, password: str) -> dict:
@@ -443,7 +463,7 @@ def test_admin_order_detail_reflects_status_and_partner_timeline_updates() -> No
     assert body["team_name"] == "상세 테스트팀"
     event_types = [event["event_type"] for event in body["timeline"]]
     assert "status_changed" in event_types
-    assert "partner_assigned" in event_types
+    assert "partner_assigned" not in event_types
 
 
 def test_admin_payment_and_settlement_update_records_timeline_and_queue() -> None:
@@ -1934,6 +1954,7 @@ def test_failed_customer_message_is_logged_without_status_or_link_side_effects()
 
     with TestingSessionLocal() as db:
         seed_dev_data(db)
+        seed_current_partner_confirmation(db)
         order = db.get(Order, "seed-order-2450")
         original_status = order.status
         log = MessageService(db, provider=FailingProvider()).send(
@@ -1967,6 +1988,7 @@ def test_message_send_persists_pending_log_before_provider_call_and_records_exce
 
     with TestingSessionLocal() as db:
         seed_dev_data(db)
+        seed_current_partner_confirmation(db)
         order = db.get(Order, "seed-order-2450")
         original_status = order.status
 
@@ -2021,7 +2043,7 @@ def test_admin_message_send_route_returns_failed_log_when_provider_fails(monkeyp
             )
 
     monkeypatch.setattr("app.services.messages.build_message_provider", lambda: FailingProvider())
-    client = make_test_client()
+    client = make_test_client(seed_current_partner_confirmation)
     admin_session = login(client, "/api/auth/admin/login", DEV_ADMIN_EMAIL, DEV_ADMIN_PASSWORD)
     headers = {"Authorization": f"Bearer {admin_session['access_token']}"}
 
@@ -2255,7 +2277,7 @@ def test_admin_can_send_customer_photo_ready_message() -> None:
 
 def test_admin_can_send_day_before_notice_and_update_timeline(monkeypatch) -> None:
     monkeypatch.setattr("app.services.messages.business_today", lambda: date(2026, 5, 3))
-    client = make_test_client()
+    client = make_test_client(seed_current_partner_confirmation)
     admin_session = login(client, "/api/auth/admin/login", DEV_ADMIN_EMAIL, DEV_ADMIN_PASSWORD)
     headers = {"Authorization": f"Bearer {admin_session['access_token']}"}
 
@@ -2463,7 +2485,7 @@ def test_admin_can_preview_alimtalk_template_variables(monkeypatch) -> None:
     monkeypatch.setattr(settings, "solapi_kakao_channel_id", "")
     monkeypatch.setattr(settings, "solapi_kakao_pf_id", "")
     monkeypatch.setattr(settings, "solapi_kakao_template_customer_day_before", "KA_DAY_BEFORE")
-    client = make_test_client()
+    client = make_test_client(seed_current_partner_confirmation)
     admin_session = login(client, "/api/auth/admin/login", DEV_ADMIN_EMAIL, DEV_ADMIN_PASSWORD)
     headers = {"Authorization": f"Bearer {admin_session['access_token']}"}
 
@@ -2497,7 +2519,7 @@ def test_admin_alimtalk_preview_blocks_when_template_missing_without_fallback(mo
     monkeypatch.setattr(settings, "solapi_kakao_channel_id", "channel-id")
     monkeypatch.setattr(settings, "solapi_kakao_template_customer_day_before", "")
     monkeypatch.setattr(settings, "solapi_alimtalk_fallback_sms", False)
-    client = make_test_client()
+    client = make_test_client(seed_current_partner_confirmation)
     admin_session = login(client, "/api/auth/admin/login", DEV_ADMIN_EMAIL, DEV_ADMIN_PASSWORD)
     headers = {"Authorization": f"Bearer {admin_session['access_token']}"}
 

@@ -8,12 +8,14 @@ from zoneinfo import ZoneInfo
 from fastapi import FastAPI
 
 from app.core.config import settings
+from app.db.seed import DEV_PARTNER_ID
 from app.domain.constants import (
     MessageChannel,
     MessageStatus,
     MessageType,
     OrderStatus,
     RecipientType,
+    TimelineEventType,
 )
 from app.models.message import MessageLog
 from app.schemas.message import DayBeforeNoticeRunRead
@@ -23,6 +25,17 @@ from app.services.day_before_scheduler import (
     next_daily_run_at,
 )
 from app.services.messages import MessageService
+from app.services.timeline import TimelineService
+
+
+def _confirm_order(db_session, order) -> None:
+    order.partner_id = DEV_PARTNER_ID
+    TimelineService(db_session).record(
+        order_id=order.id,
+        event_type=TimelineEventType.PARTNER_CONFIRMED,
+        title="테스트 협력사 확인",
+        metadata={"partner_id": DEV_PARTNER_ID},
+    )
 
 
 def test_next_daily_run_at_uses_today_when_before_schedule() -> None:
@@ -121,6 +134,7 @@ def test_day_before_notice_does_not_regress_scheduled_order(db_session, seed_ord
     target_date = date(2030, 1, 2)
     seed_order.status = OrderStatus.SCHEDULED
     seed_order.scheduled_date = target_date
+    _confirm_order(db_session, seed_order)
     db_session.commit()
 
     result = MessageService(db_session).send_day_before_notices(target_date=target_date)
@@ -134,6 +148,7 @@ def test_day_before_notice_skips_pending_delivery_attempt(db_session, seed_order
     target_date = date(2030, 1, 2)
     seed_order.status = OrderStatus.SCHEDULED
     seed_order.scheduled_date = target_date
+    _confirm_order(db_session, seed_order)
     db_session.add(
         MessageLog(
             id=str(uuid4()),
@@ -148,6 +163,7 @@ def test_day_before_notice_skips_pending_delivery_attempt(db_session, seed_order
             status=MessageStatus.PENDING,
             error_message=None,
             provider="solapi",
+            requested_at=datetime.now(ZoneInfo("UTC")),
         )
     )
     db_session.commit()

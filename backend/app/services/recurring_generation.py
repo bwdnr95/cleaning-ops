@@ -194,7 +194,11 @@ class RecurringOrderGenerationService:
         ) == RecurringBillingMode.PER_VISIT
 
         return OrderLineCreate(
-            status=OrderStatus.SCHEDULE_CONFIRMED,
+            status=(
+                OrderStatus.PARTNER_CONFIRMING
+                if contract.default_partner_id
+                else OrderStatus.SCHEDULE_CONFIRMED
+            ),
             received_date=business_today(),
             scheduled_date=due,
             requested_time=contract.requested_time,

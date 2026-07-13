@@ -19,7 +19,7 @@ export function PartnerApp() {
   const title = company || manager;
 
   return (
-    <main style={{ height: '100%', display: 'flex', flexDirection: 'column', background: 'var(--bg-subtle)', overflow: 'hidden' }}>
+    <main style={{ height: '100%', width: '100%', maxWidth: 768, margin: '0 auto', display: 'flex', flexDirection: 'column', background: 'var(--bg-subtle)', overflow: 'hidden' }}>
       {showShell && (
         <PartnerTopBar
           title={title}

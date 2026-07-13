@@ -62,7 +62,7 @@ export function Dashboard({ onOpenOrder, onNav, onCreateOrder, userName = undefi
         )}
 
         {/* KPI grid — 8장. 넓은 화면에선 한 줄, 좁아지면 칸을 줄여 자동 줄바꿈(글자 세로 쪼개짐 방지) */}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 10, marginBottom: 16 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: 10, marginBottom: 16 }}>
           {kpis.map((k, i) => (
             <button
               key={k.key || i}

@@ -96,6 +96,7 @@ def test_s3_storage_provider_saves_private_file_without_public_url_and_reads_by_
 def test_s3_storage_provider_translates_missing_object_to_file_not_found() -> None:
     provider = S3StorageProvider(
         bucket="cleanops-photos",
+        private_bucket="cleanops-private-photos",
         region="ap-northeast-2",
         access_key_id="access",
         secret_access_key="secret",

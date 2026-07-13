@@ -16,7 +16,7 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.db.seed import DEV_PARTNER_USER_ID
+from app.db.seed import DEV_PARTNER_ID, DEV_PARTNER_USER_ID
 from app.core.config import settings
 from app.core.time import business_today
 from app.domain.constants import (
@@ -44,6 +44,20 @@ from app.services.orders import OrderService
 from app.services.partner_settlements import PartnerSettlementService
 from app.services.partners import PartnerService
 from app.services.photos import PhotoService
+from app.services.timeline import TimelineService
+
+
+def _confirm_order(db: Session, order_id: str) -> None:
+    order = db.get(Order, order_id)
+    assert order is not None
+    order.partner_id = DEV_PARTNER_ID
+    TimelineService(db).record(
+        order_id=order.id,
+        event_type=TimelineEventType.PARTNER_CONFIRMED,
+        title="테스트 협력사 확인",
+        metadata={"partner_id": DEV_PARTNER_ID},
+    )
+    db.flush()
 
 
 def _clean_universe(db: Session) -> None:
@@ -403,6 +417,7 @@ def test_schedule_confirmed_auto_message_runs_when_enabled(
 
     monkeypatch.setattr(settings, "automation_send_schedule_confirmed", True)
     oid = _add(db_session, status=OrderStatus.CONSULTING, scheduled_date=None)
+    _confirm_order(db_session, oid)
     db_session.flush()
 
     OrderService(db_session).update(oid, OrderUpdate(scheduled_date=date(2026, 7, 1)))
@@ -438,9 +453,7 @@ def test_schedule_confirmed_auto_message_runs_on_create_when_enabled(
 
     order = db_session.scalars(select(Order).where(Order.group_id == group.id)).one()
     logs = db_session.scalars(select(MessageLog).where(MessageLog.order_id == order.id)).all()
-    assert len(logs) == 1
-    assert logs[0].message_type == MessageType.CUSTOMER_SCHEDULE_CONFIRMED
-    assert logs[0].recipient_type == RecipientType.CUSTOMER
+    assert logs == []
 
 
 def test_schedule_confirmed_auto_message_respects_disabled_setting(
@@ -538,6 +551,7 @@ def test_schedule_confirmed_auto_message_runs_on_explicit_status_update_when_ena
 
     monkeypatch.setattr(settings, "automation_send_schedule_confirmed", True)
     oid = _add(db_session, status=OrderStatus.CONSULTING, scheduled_date=None)
+    _confirm_order(db_session, oid)
     db_session.flush()
 
     OrderService(db_session).update(
@@ -622,6 +636,7 @@ def test_schedule_confirmed_auto_message_does_not_send_twice(
 
     monkeypatch.setattr(settings, "automation_send_schedule_confirmed", True)
     oid = _add(db_session, status=OrderStatus.CONSULTING, scheduled_date=None)
+    _confirm_order(db_session, oid)
     db_session.flush()
 
     service = OrderService(db_session)
@@ -646,11 +661,13 @@ def test_day_before_notice_batch_sends_once_for_default_target(db_session: Sessi
         status=OrderStatus.SCHEDULE_CONFIRMED,
         scheduled_date=tomorrow,
     )
+    _confirm_order(db_session, target_id)
     already_sent_id = _add(
         db_session,
         status=OrderStatus.DAY_BEFORE_NOTICE_NEEDED,
         scheduled_date=tomorrow,
     )
+    _confirm_order(db_session, already_sent_id)
     _add(
         db_session,
         status=OrderStatus.DAY_BEFORE_NOTICE_DONE,
@@ -866,6 +883,10 @@ def test_customer_balance_due_manual_preview_uses_total_minus_deposit(db_session
         deposit_amount=30000,
         balance_amount=None,
     )
+    order = db_session.get(Order, oid)
+    assert order is not None
+    order.work_completed_at = datetime.now(UTC)
+    db_session.flush()
 
     preview = MessageService(db_session).preview(
         MessageSendRequest(
@@ -893,6 +914,7 @@ def test_customer_balance_due_preview_does_not_duplicate_honorific(
     )
     order = db_session.get(Order, oid)
     assert order is not None
+    order.work_completed_at = datetime.now(UTC)
     order.customer_name = "우리인테리어 현순철 대표님"
     db_session.flush()
 

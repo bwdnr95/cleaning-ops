@@ -2,7 +2,7 @@ from collections import OrderedDict
 from datetime import timedelta
 from typing import Final
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, Request, UploadFile, status
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
@@ -23,6 +23,29 @@ router = APIRouter()
 _customer_verify_attempts: OrderedDict[str, dict] = OrderedDict()
 _CUSTOMER_VERIFY_CACHE_MAX_ENTRIES: Final = 10_000
 _CUSTOMER_AS_UPLOAD_CHUNK_BYTES: Final = 1024 * 1024
+
+
+@router.post("/verify", response_model=CustomerOrderGroupRead)
+def verify_customer_order_legacy(
+    payload: CustomerVerifyRequest,
+    request: Request,
+    customer_token: str = Header(..., alias="X-Customer-Token"),
+    db: Session = Depends(get_session),
+) -> CustomerOrderGroupRead:
+    """기존 고객 링크 클라이언트가 새 경로로 전환되는 동안 인증 계약을 유지한다."""
+    group_repo = OrderGroupRepository(db)
+    group = _verify_customer_group(
+        customer_token=customer_token,
+        phone_suffix=payload.phone_suffix,
+        request=request,
+        group_repo=group_repo,
+    )
+    photo_repo = PhotoRepository(db)
+    lines_with_photos = [
+        (line, photo_repo.list_for_order(line.id, customer_visible_only=True))
+        for line in group_repo.list_lines(group.id)
+    ]
+    return to_customer_group_dto(group, lines_with_photos=lines_with_photos)
 
 
 @router.post("/{customer_token}/verify", response_model=CustomerOrderGroupRead)
@@ -231,7 +254,23 @@ def _record_customer_verify_failure(rate_limit_key: str) -> None:
     )
     _customer_verify_attempts.move_to_end(rate_limit_key)
     while len(_customer_verify_attempts) > _CUSTOMER_VERIFY_CACHE_MAX_ENTRIES:
-        _customer_verify_attempts.popitem(last=False)
+        now = utc_now()
+        evictable_key = next(
+            (
+                key
+                for key, value in _customer_verify_attempts.items()
+                if key != rate_limit_key
+                and (
+                    value.get("locked_until") is None
+                    or value["locked_until"] <= now
+                )
+            ),
+            None,
+        )
+        if evictable_key is None:
+            _customer_verify_attempts.pop(rate_limit_key, None)
+            return
+        _customer_verify_attempts.pop(evictable_key, None)
     attempt["count"] += 1
     if attempt["count"] >= settings.customer_verify_max_attempts:
         attempt["locked_until"] = utc_now() + timedelta(

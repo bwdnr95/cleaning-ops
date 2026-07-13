@@ -3,12 +3,12 @@ import binascii
 from contextlib import suppress
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from secrets import token_urlsafe
 from uuid import uuid4
 
 from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session
 
+from app.core.time import to_utc
 from app.core.config import settings
 from app.domain.constants import (
     MessageType,
@@ -19,6 +19,7 @@ from app.domain.constants import (
     RecipientType,
     TimelineEventType,
 )
+from app.domain.customer_token import generate_customer_token
 from app.domain.order_pricing import order_consumer_total
 from app.domain.payment_status import PAYMENT_TRACKED_FIELDS, PaymentStatus
 from app.domain.phone import normalize_phone
@@ -204,7 +205,7 @@ class OrderService:
             raise ValueError("at_least_one_line_required")
         group = OrderGroup(
             id=str(uuid4()),
-            customer_token=token_urlsafe(24),
+            customer_token=generate_customer_token(),
             customer_name=payload.customer_name,
             customer_phone=normalize_phone(payload.customer_phone),
             customer_address=payload.customer_address,
@@ -253,7 +254,7 @@ class OrderService:
         """라인 0개 그룹 생성(정기계약 전용). payload.lines는 무시한다."""
         group = OrderGroup(
             id=str(uuid4()),
-            customer_token=token_urlsafe(24),
+            customer_token=generate_customer_token(),
             customer_name=payload.customer_name,
             customer_phone=normalize_phone(payload.customer_phone),
             customer_address=payload.customer_address,
@@ -363,6 +364,8 @@ class OrderService:
         if (
             changes.get("payment_status") == PaymentStatus.PAID
             and "status" not in changes
+            and not order.as_intake_pending
+            and not order.as_requested
             and order.status not in (OrderStatus.CANCELLED, OrderStatus.COMPLETED)
         ):
             from_status = order.status
@@ -406,7 +409,8 @@ class OrderService:
                 metadata={"from": old_status, "to": changes["status"]},
             )
 
-        if "partner_id" in changes:
+        partner_changed = "partner_id" in changes and order.partner_id != old_partner_id
+        if partner_changed:
             self.timeline.record(
                 order_id=order.id,
                 actor_user_id=actor_user_id,
@@ -437,13 +441,19 @@ class OrderService:
 
         self.db.commit()
         self.db.refresh(order)
-        if (
-            settings.automation_send_partner_assignment
-            and "partner_id" in changes
-            and order.partner_id
-            and order.partner_id != old_partner_id
-        ):
-            self._send_partner_assignment_if_needed(order, actor_user_id=actor_user_id)
+        if partner_changed and order.partner_id:
+            if order.as_requested:
+                self._send_automation_message(
+                    order,
+                    MessageSendRequest(
+                        order_id=order.id,
+                        message_type=MessageType.PARTNER_AS_REQUEST,
+                        recipient_type=RecipientType.PARTNER,
+                    ),
+                    actor_user_id=actor_user_id,
+                )
+            elif settings.automation_send_partner_assignment:
+                self._send_partner_assignment_if_needed(order, actor_user_id=actor_user_id)
         if should_send_schedule_confirmed or "status" in changes or "scheduled_date" in changes:
             self._send_schedule_confirmed_if_needed(order, actor_user_id=actor_user_id)
         self.db.refresh(order)
@@ -546,7 +556,28 @@ class OrderService:
     ) -> Order:
         order = self.get_for_partner(order_id, partner_id=partner_id)
         if order.status not in PARTNER_JOB_CONFIRMABLE_STATUSES:
-            raise ValueError("invalid_status_transition")
+            if order.status not in {
+                OrderStatus.SCHEDULE_CONFIRMED.value,
+                OrderStatus.SCHEDULED.value,
+            }:
+                raise ValueError("invalid_status_transition")
+            if self.timeline.latest_current_partner_confirmation(
+                order_id=order.id,
+                partner_id=partner_id,
+            ) is None:
+                self.timeline.record(
+                    order_id=order.id,
+                    actor_user_id=actor_user_id,
+                    event_type=TimelineEventType.PARTNER_CONFIRMED,
+                    title="협력사 작업 확인",
+                    description="협력사가 기존 확정 일정과 배정 내용을 확인했습니다.",
+                    metadata={"partner_id": partner_id},
+                )
+                self.db.commit()
+                self.db.refresh(order)
+                self._send_schedule_confirmed_once(order, actor_user_id=actor_user_id)
+                self.db.refresh(order)
+            return order
 
         self._change_status(
             order,
@@ -1143,6 +1174,7 @@ def to_admin_order_dto(
         service_detail=order.service_detail,
         special_request=order.special_request,
         as_requested=bool(order.as_requested),
+        as_intake_pending=bool(order.as_intake_pending),
         as_memo=order.as_memo,
         work_started_at=order.work_started_at,
         work_completed_at=order.work_completed_at,
@@ -1355,7 +1387,7 @@ def to_partner_photo_dto(
         file_size=photo.file_size,
         content_type=photo.content_type,
         is_customer_visible=photo.is_customer_visible,
-        created_at=photo.created_at,
+        created_at=to_utc(photo.created_at),
     )
 
 

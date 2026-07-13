@@ -1,6 +1,9 @@
+from urllib.parse import urlparse
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+from app.domain.message_templates import KAKAO_TEMPLATE_DEFINITIONS, SOLAPI_KAKAO_PROFILE_ID
 
 
 class Settings(BaseSettings):
@@ -79,9 +82,24 @@ class Settings(BaseSettings):
 
     def model_post_init(self, __context: object) -> None:
         provider = self.message_provider.strip().lower()
+        self.message_provider = provider
+        self.environment = self.environment.strip().lower()
+        self.storage_provider = self.storage_provider.strip().lower()
+        solapi_string_settings = {
+            "solapi_api_key",
+            "solapi_api_secret",
+            "solapi_sender_number",
+            "solapi_send_url",
+            "solapi_webhook_secret",
+            "solapi_kakao_channel_id",
+            "solapi_kakao_pf_id",
+            *(definition.template_id_setting for definition in KAKAO_TEMPLATE_DEFINITIONS.values()),
+        }
+        for setting_name in solapi_string_settings:
+            setattr(self, setting_name, getattr(self, setting_name).strip())
         if provider not in {"", "mock", "solapi"}:
             raise ValueError(f"unsupported message_provider: {self.message_provider}")
-        storage_provider = self.storage_provider.strip().lower()
+        storage_provider = self.storage_provider
         if storage_provider not in {"local", "s3"}:
             raise ValueError(f"unsupported storage_provider: {self.storage_provider}")
         try:
@@ -136,6 +154,10 @@ class Settings(BaseSettings):
             if provider != "solapi":
                 raise ValueError("production requires message_provider=solapi")
             if provider == "solapi":
+                template_settings = {
+                    definition.template_id_setting: getattr(self, definition.template_id_setting)
+                    for definition in KAKAO_TEMPLATE_DEFINITIONS.values()
+                }
                 missing = [
                     name
                     for name, value in {
@@ -146,13 +168,53 @@ class Settings(BaseSettings):
                     }.items()
                     if not value
                 ]
+                if not (self.solapi_kakao_pf_id or self.solapi_kakao_channel_id):
+                    missing.append("solapi_kakao_pf_id")
+                missing.extend(name for name, value in template_settings.items() if not value)
                 if missing:
                     raise ValueError(
                         "production solapi message provider missing settings: "
                         + ", ".join(missing)
                     )
-                if not self.solapi_send_url.startswith("https://api.solapi.com/"):
-                    raise ValueError("production requires the official HTTPS SOLAPI endpoint")
+                if self.solapi_api_key in {
+                    "replace-with-solapi-api-key",
+                    "replace-with-solapi-api-secret",
+                } or self.solapi_api_secret in {
+                    "replace-with-solapi-api-key",
+                    "replace-with-solapi-api-secret",
+                }:
+                    raise ValueError("production solapi credentials must not use placeholders")
+                configured_profile_id = self.solapi_kakao_pf_id or self.solapi_kakao_channel_id
+                if configured_profile_id != SOLAPI_KAKAO_PROFILE_ID:
+                    raise ValueError(
+                        "production solapi_kakao_pf_id does not match the approved profile"
+                    )
+                mismatched_templates = [
+                    definition.template_id_setting
+                    for definition in KAKAO_TEMPLATE_DEFINITIONS.values()
+                    if template_settings[definition.template_id_setting]
+                    != definition.expected_template_id
+                ]
+                if mismatched_templates:
+                    raise ValueError(
+                        "production solapi template IDs do not match approved templates: "
+                        + ", ".join(mismatched_templates)
+                    )
+                if len(self.solapi_webhook_secret) < 32 or (
+                    self.solapi_webhook_secret
+                    == "replace-with-random-webhook-secret-32chars"
+                ):
+                    raise ValueError(
+                        "production solapi_webhook_secret must be a random value "
+                        "of at least 32 characters"
+                    )
+                send_url = urlparse(self.solapi_send_url)
+                if (
+                    send_url.scheme != "https"
+                    or send_url.hostname != "api.solapi.com"
+                    or send_url.port not in {None, 443}
+                ):
+                    raise ValueError("production solapi_send_url must use https://api.solapi.com")
             if not self.sentry_dsn:
                 raise ValueError("production requires sentry_dsn for error tracking")
             if not 0.0 <= self.sentry_traces_sample_rate <= 1.0:

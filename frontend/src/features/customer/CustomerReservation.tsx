@@ -463,7 +463,11 @@ function CustomerAsRequestForm({ line, customerToken, phoneSuffix, onOrderUpdate
         인테리어 추가 시공 및 입주 이후 사항은 AS 대상에 해당되지 않습니다.
       </div>
       <form onSubmit={handleSubmit} style={{ display: 'grid', gap: 8 }}>
+        <label htmlFor={`customer-as-memo-${line.id}`} style={asFieldLabelStyle}>
+          AS 요청 내용
+        </label>
         <textarea
+          id={`customer-as-memo-${line.id}`}
           data-testid={`customer-as-memo-${line.id}`}
           value={memo}
           maxLength={1000}
@@ -521,8 +525,8 @@ function CustomerAsRequestForm({ line, customerToken, phoneSuffix, onOrderUpdate
             onRemove={handleFileRemove}
           />
         )}
-        {error && <div data-testid={`customer-as-error-${line.id}`} style={errorStyle}>{error}</div>}
-        {notice && <div data-testid={`customer-as-notice-${line.id}`} style={asSuccessStyle}>{notice}</div>}
+        {error && <div role="alert" data-testid={`customer-as-error-${line.id}`} style={errorStyle}>{error}</div>}
+        {notice && <div aria-live="polite" data-testid={`customer-as-notice-${line.id}`} style={asSuccessStyle}>{notice}</div>}
         <button
           type="submit"
           data-testid={`customer-as-submit-${line.id}`}
@@ -818,6 +822,9 @@ function css(style) {
 const pageStyle = css({
   minHeight: '100%',
   height: '100%',
+  width: '100%',
+  maxWidth: 768,
+  margin: '0 auto',
   display: 'flex',
   flexDirection: 'column',
   background: '#f7f6f3',
@@ -1099,6 +1106,12 @@ const asTextareaStyle = css({
   resize: 'vertical',
   color: 'var(--text)',
   background: 'var(--surface)',
+});
+
+const asFieldLabelStyle = css({
+  color: 'var(--text-secondary)',
+  fontSize: 12,
+  fontWeight: 800,
 });
 
 const asFileActionsStyle = css({

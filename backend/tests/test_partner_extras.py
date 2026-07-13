@@ -418,6 +418,16 @@ def test_partner_messages_exclude_previous_partner_after_reassignment() -> None:
         json={"partner_id": _PARTNER_B_ID},
     )
     assert reassign.status_code == 200, reassign.text
+    assert client.post(
+        "/api/admin/messages/send",
+        headers=admin_headers,
+        json={
+            "order_id": "seed-order-2450",
+            "message_type": "partner_assignment",
+            "recipient_type": "partner",
+            "channel": "sms",
+        },
+    ).status_code == 200
 
     b_headers = _partner_b_headers()
     before = client.get("/api/partner/jobs/seed-order-2450/messages", headers=b_headers)
@@ -548,6 +558,16 @@ def test_partner_messages_isolated_when_partners_share_phone() -> None:
         ).status_code
         == 200
     )
+    assert client.post(
+        "/api/admin/messages/send",
+        headers=admin_headers,
+        json={
+            "order_id": "seed-order-2450",
+            "message_type": "partner_assignment",
+            "recipient_type": "partner",
+            "channel": "sms",
+        },
+    ).status_code == 200
 
     b_token = create_access_token(
         user_id="shared-user-b",

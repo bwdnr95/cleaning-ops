@@ -2427,7 +2427,7 @@ class MessageService:
         )
         schedule_total = format_money(order.total_amount) if order.customer_visible_payment else "-"
         return {
-            "customer_name": order.customer_name,
+            "customer_name": customer_name_without_honorific(order.customer_name),
             "service_name": format_service_name(order),
             "size_or_quantity": order.size_or_quantity or "-",
             "schedule": format_schedule(order),
@@ -2522,20 +2522,21 @@ class MessageService:
         customer_link: str,
     ) -> str:
         schedule = format_schedule(order)
+        customer_name = customer_name_without_honorific(order.customer_name)
         if payload.message_type == MessageType.CUSTOMER_PHOTO_READY:
             return (
-                f"[클린잡] {order.customer_name}님, {order.service_name} 작업 사진 "
+                f"[클린잡] {customer_name}님, {order.service_name} 작업 사진 "
                 "확인이 준비되었습니다.\n"
                 f"아래 링크에서 연락처 뒷자리 인증 후 확인해주세요.\n{customer_link}"
             )
         if payload.message_type == MessageType.CUSTOMER_ACCESS_LINK:
             return (
-                f"[클린잡] {order.customer_name}님, 예약·작업 내역 확인 링크입니다.\n"
+                f"[클린잡] {customer_name}님, 예약·작업 내역 확인 링크입니다.\n"
                 f"연락처 뒷자리 인증 후 확인해주세요.\n{customer_link}"
             )
         if payload.message_type == MessageType.CUSTOMER_BALANCE_DUE:
             return (
-                f"[클린잡] {order.customer_name}님, {format_service_name(order)} "
+                f"[클린잡] {customer_name}님, {format_service_name(order)} "
                 "작업이 완료되었습니다.\n"
                 f"잔금: {format_money(customer_balance_due_amount(order))}\n"
                 f"결제 및 작업 내역 확인: {customer_link}"
@@ -2543,7 +2544,7 @@ class MessageService:
         if payload.message_type == MessageType.CUSTOMER_AS_NOTICE:
             as_memo = truncate_sms_section(order.as_memo or payload.memo or "")
             return (
-                f"[클린잡] {order.customer_name}님, AS 요청이 접수되었습니다.\n"
+                f"[클린잡] {customer_name}님, AS 요청이 접수되었습니다.\n"
                 f"서비스: {format_service_name(order)}\n"
                 f"방문: {schedule}\n"
                 f"AS 내용: {as_memo or '-'}\n"
@@ -2551,7 +2552,7 @@ class MessageService:
             )
         if payload.message_type == MessageType.CUSTOMER_SCHEDULE_CONFIRMED:
             return (
-                f"[클린잡] {order.customer_name}님, 예약 일정이 확정되었습니다.\n"
+                f"[클린잡] {customer_name}님, 예약 일정이 확정되었습니다.\n"
                 f"서비스: {format_service_name(order)}\n"
                 f"방문: {schedule}\n"
                 f"주소: {order.customer_address}\n"
@@ -2577,7 +2578,7 @@ class MessageService:
             )
         if payload.message_type == MessageType.CUSTOMER_QUOTE:
             return (
-                f"[클린잡] {order.customer_name}님 견적 안내드립니다.\n"
+                f"[클린잡] {customer_name}님 견적 안내드립니다.\n"
                 f"서비스: {format_service_name(order)}\n"
                 f"소비자가(VAT {format_vat_label(order.vat_type)}): "
                 f"{format_money(order_consumer_total(order))}\n"
@@ -2672,6 +2673,11 @@ def format_service_name(order: Order) -> str:
     if order.size_or_quantity:
         return f"{order.service_name} ({order.size_or_quantity})"
     return order.service_name
+
+
+def customer_name_without_honorific(value: str | None) -> str:
+    name = (value or "").strip()
+    return name[:-1].rstrip() if name.endswith("님") else name
 
 
 def get_solapi_kakao_sender_profile_id() -> str:

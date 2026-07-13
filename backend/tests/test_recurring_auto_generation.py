@@ -50,7 +50,7 @@ def test_create_contract_auto_generates_current_month_orders(client, seed_admin_
         if date(today.year, today.month, day).weekday() == today.weekday()
     ]
     assert len(mine) == len(expected_dates)
-    assert all(order["status"] == "일정확정" for order in mine)
+    assert all(order["status"] == "협력사확인중" for order in mine)
 
 
 def test_create_contract_rejects_invalid_service_item_before_auto_generation(

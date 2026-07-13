@@ -6,6 +6,7 @@ import { Badge, Icon } from '../../../components/common/ui';
 
 export function AdminNotificationsBell() {
   const [isOpen, setIsOpen] = React.useState(false);
+  const containerRef = React.useRef<HTMLDivElement>(null);
   const notifications = useApiResource(listAdminNotifications);
   const reloadRef = React.useRef(notifications.reload);
   const items = notifications.data || [];
@@ -16,8 +17,31 @@ export function AdminNotificationsBell() {
     return () => window.clearInterval(timer);
   }, []);
 
+  React.useEffect(() => {
+    if (!isOpen) {
+      return undefined;
+    }
+
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setIsOpen(false);
+      }
+    };
+    const closeOnOutsideClick = (event: MouseEvent) => {
+      if (!containerRef.current?.contains(event.target as Node)) {
+        setIsOpen(false);
+      }
+    };
+    document.addEventListener('keydown', closeOnEscape);
+    document.addEventListener('mousedown', closeOnOutsideClick);
+    return () => {
+      document.removeEventListener('keydown', closeOnEscape);
+      document.removeEventListener('mousedown', closeOnOutsideClick);
+    };
+  }, [isOpen]);
+
   return (
-    <div style={{ position: 'relative' }}>
+    <div ref={containerRef} style={{ position: 'relative' }}>
       <button
         type="button"
         data-testid="admin-notifications-button"
@@ -33,10 +57,10 @@ export function AdminNotificationsBell() {
         )}
       </button>
       {isOpen && (
-        <div data-testid="admin-notifications-panel" style={panelStyle}>
+        <div data-testid="admin-notifications-panel" role="region" aria-label="운영 알림 목록" style={panelStyle}>
           <div style={panelHeaderStyle}>
             <span>운영 알림</span>
-            <button type="button" className="btn btn--ghost btn--sm" onClick={() => notifications.reload()} style={{ padding: '0 6px' }}>
+            <button type="button" aria-label="알림 새로고침" className="btn btn--ghost btn--sm" onClick={() => notifications.reload()} style={{ padding: '0 6px' }}>
               <Icon name="refresh" size={12} />
             </button>
           </div>

@@ -117,7 +117,7 @@ class S3StorageProvider(StorageProvider):
         self.private_bucket = (
             private_bucket
             if private_bucket is not None
-            else (settings.s3_private_bucket or self.bucket)
+            else settings.s3_private_bucket
         )
         self.region = region if region is not None else settings.s3_region
         self.endpoint_url = endpoint_url if endpoint_url is not None else settings.s3_endpoint_url
