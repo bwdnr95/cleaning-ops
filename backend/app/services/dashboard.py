@@ -1,6 +1,6 @@
 from datetime import date, timedelta
 
-from sqlalchemy import case, extract, func, select
+from sqlalchemy import case, extract, func, or_, select
 from sqlalchemy.orm import Session
 
 from app.core.time import business_today
@@ -29,7 +29,6 @@ class DashboardService:
     def summary(self, *, today: date | None = None) -> DashboardSummary:
         current = today or business_today()
         tomorrow = current + timedelta(days=1)
-        pending_as_intakes = self._count(Order.as_intake_pending.is_(True))
         month_filter = (
             extract("year", Order.scheduled_date) == current.year,
             extract("month", Order.scheduled_date) == current.month,
@@ -63,9 +62,11 @@ class DashboardService:
                 Order.status.in_(WORK_DONE_STATUSES),
                 Order.payment_status.in_(PAYMENT_CHECK_STATUSES),
             ),
-            customer_check_needed=(
-                self._count(Order.status == OrderStatus.CUSTOMER_CHECK_NEEDED)
-                + pending_as_intakes
+            customer_check_needed=self._count(
+                or_(
+                    Order.status == OrderStatus.CUSTOMER_CHECK_NEEDED,
+                    Order.as_intake_pending.is_(True),
+                )
             ),
             # 이번 달 완료 = 당월 방문 + 작업완료 상태.
             monthly_completed=self._count(Order.status.in_(WORK_DONE_STATUSES), *month_filter),

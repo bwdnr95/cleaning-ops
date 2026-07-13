@@ -373,7 +373,8 @@ def test_customer_dto_exposes_only_approved_photos(tmp_path, monkeypatch) -> Non
     client = make_test_client(tmp_path, monkeypatch, seed)
 
     response = client.post(
-        "/api/customer/orders/ct2_seed-customer-token-2450/verify",
+        "/api/customer/orders/verify",
+        headers={"X-Customer-Token": "ct2_seed-customer-token-2450"},
         json={"phone_suffix": "5432"},
     )
 

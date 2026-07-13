@@ -81,7 +81,8 @@ def test_customer_as_request_waits_for_admin_acceptance_before_partner_notice(
 
     png_bytes = b"\x89PNG\r\n\x1a\ncustomer-as"
     res = client.post(
-        f"/api/customer/orders/{DEV_CUSTOMER_TOKEN}/as-request",
+        "/api/customer/orders/as-request",
+        headers={"X-Customer-Token": DEV_CUSTOMER_TOKEN},
         data={
             "phone_suffix": "5432",
             "order_id": DEV_ORDER_ID,
@@ -189,7 +190,8 @@ def test_customer_as_request_waits_for_admin_acceptance_before_partner_notice(
     assert wrong_partner_file_res.json()["detail"] == "order_not_found"
 
     repeated = client.post(
-        f"/api/customer/orders/{DEV_CUSTOMER_TOKEN}/as-request",
+        "/api/customer/orders/as-request",
+        headers={"X-Customer-Token": DEV_CUSTOMER_TOKEN},
         data={
             "phone_suffix": "5432",
             "order_id": DEV_ORDER_ID,
@@ -237,7 +239,8 @@ def test_customer_as_request_rejects_repeat_before_admin_acceptance_and_deletes_
     assert status_res.status_code == 200, status_res.text
 
     first_res = client.post(
-        f"/api/customer/orders/{DEV_CUSTOMER_TOKEN}/as-request",
+        "/api/customer/orders/as-request",
+        headers={"X-Customer-Token": DEV_CUSTOMER_TOKEN},
         data={
             "phone_suffix": "5432",
             "order_id": DEV_ORDER_ID,
@@ -248,7 +251,8 @@ def test_customer_as_request_rejects_repeat_before_admin_acceptance_and_deletes_
     assert first_res.status_code == 200, first_res.text
 
     repeat_res = client.post(
-        f"/api/customer/orders/{DEV_CUSTOMER_TOKEN}/as-request",
+        "/api/customer/orders/as-request",
+        headers={"X-Customer-Token": DEV_CUSTOMER_TOKEN},
         data={
             "phone_suffix": "5432",
             "order_id": DEV_ORDER_ID,
@@ -300,7 +304,8 @@ def test_customer_as_request_rejects_too_many_files_before_storage(
 
     png_bytes = b"\x89PNG\r\n\x1a\nas"
     res = client.post(
-        f"/api/customer/orders/{DEV_CUSTOMER_TOKEN}/as-request",
+        "/api/customer/orders/as-request",
+        headers={"X-Customer-Token": DEV_CUSTOMER_TOKEN},
         data={
             "phone_suffix": "5432",
             "order_id": DEV_ORDER_ID,
@@ -347,7 +352,8 @@ def test_customer_as_request_rejects_total_file_size_before_storage(
     assert status_res.status_code == 200, status_res.text
 
     res = client.post(
-        f"/api/customer/orders/{DEV_CUSTOMER_TOKEN}/as-request",
+        "/api/customer/orders/as-request",
+        headers={"X-Customer-Token": DEV_CUSTOMER_TOKEN},
         data={
             "phone_suffix": "5432",
             "order_id": DEV_ORDER_ID,
@@ -428,9 +434,12 @@ def test_customer_as_request_rejects_large_body_before_multipart_parse(client, m
     monkeypatch.setattr(customer_orders.settings, "customer_as_request_body_overhead_bytes", 0)
 
     res = client.post(
-        f"/api/customer/orders/{DEV_CUSTOMER_TOKEN}/as-request",
+        "/api/customer/orders/as-request",
         content=b"x" * 13,
-        headers={"content-type": "multipart/form-data; boundary=too-large"},
+        headers={
+            "content-type": "multipart/form-data; boundary=too-large",
+            "X-Customer-Token": DEV_CUSTOMER_TOKEN,
+        },
     )
 
     assert res.status_code == 413
@@ -844,7 +853,8 @@ def test_customer_as_request_deletes_uploaded_files_when_db_write_fails(client, 
 
     png_bytes = b"\x89PNG\r\n\x1a\ncustomer-as"
     res = client.post(
-        f"/api/customer/orders/{DEV_CUSTOMER_TOKEN}/as-request",
+        "/api/customer/orders/as-request",
+        headers={"X-Customer-Token": DEV_CUSTOMER_TOKEN},
         data={
             "phone_suffix": "5432",
             "order_id": DEV_ORDER_ID,
@@ -896,7 +906,8 @@ def test_customer_as_request_deletes_partial_uploads_when_second_file_store_fail
     png_bytes = b"\x89PNG\r\n\x1a\ncustomer-as"
     with pytest.raises(OSError, match="forced storage failure"):
         client.post(
-            f"/api/customer/orders/{DEV_CUSTOMER_TOKEN}/as-request",
+            "/api/customer/orders/as-request",
+            headers={"X-Customer-Token": DEV_CUSTOMER_TOKEN},
             data={
                 "phone_suffix": "5432",
                 "order_id": DEV_ORDER_ID,

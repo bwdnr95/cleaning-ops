@@ -63,6 +63,16 @@ def test_customer_verify_returns_group_with_lines(client: TestClient) -> None:
     assert body["lines"][0]["id"] == "seed-order-2450"
 
 
+def test_current_customer_token_is_rejected_from_legacy_url_route(client: TestClient) -> None:
+    response = client.post(
+        "/api/customer/orders/ct2_seed-customer-token-2450/verify",
+        json={"phone_suffix": "5432"},
+    )
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "order_not_found"
+
+
 def test_partner_only_sees_own_line_in_group(
     client: TestClient,
     seed_admin_token: str,

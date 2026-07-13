@@ -1320,6 +1320,34 @@ def test_dashboard_new_cards_260702() -> None:
     assert summary.outstanding_receivable == 530000
 
 
+def test_dashboard_customer_as_intake_is_counted_once() -> None:
+    engine = create_engine(
+        "sqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    TestingSessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+    Base.metadata.create_all(bind=engine)
+
+    with TestingSessionLocal() as db:
+        db.add(
+            Order(
+                id="pending-customer-as",
+                group_id="pending-customer-as-group",
+                status=OrderStatus.CUSTOMER_CHECK_NEEDED,
+                as_intake_pending=True,
+                received_date=date(2026, 5, 1),
+                service_name="청소",
+                customer_visible_payment=False,
+            )
+        )
+        db.commit()
+
+        summary = DashboardService(db).summary(today=date(2026, 5, 4))
+
+    assert summary.customer_check_needed == 1
+
+
 def test_admin_dashboard_recent_activity_returns_photos_and_messages() -> None:
     def seed_recent_activity(db: Session) -> None:
         order = db.get(Order, "seed-order-2450")
@@ -1386,7 +1414,8 @@ def test_customer_link_verify_returns_customer_dto_only() -> None:
     client = make_test_client()
 
     response = client.post(
-        "/api/customer/orders/ct2_seed-customer-token-2450/verify",
+        "/api/customer/orders/verify",
+        headers={"X-Customer-Token": "ct2_seed-customer-token-2450"},
         json={"phone_suffix": "5432"},
     )
 
@@ -1408,7 +1437,8 @@ def test_customer_link_verify_rejects_wrong_phone_suffix() -> None:
     client = make_test_client()
 
     response = client.post(
-        "/api/customer/orders/ct2_seed-customer-token-2450/verify",
+        "/api/customer/orders/verify",
+        headers={"X-Customer-Token": "ct2_seed-customer-token-2450"},
         json={"phone_suffix": "0000"},
     )
 
@@ -1464,7 +1494,8 @@ def test_customer_link_verify_rejects_malformed_phone_suffix() -> None:
     client = make_test_client()
 
     response = client.post(
-        "/api/customer/orders/ct2_seed-customer-token-2450/verify",
+        "/api/customer/orders/verify",
+        headers={"X-Customer-Token": "ct2_seed-customer-token-2450"},
         json={"phone_suffix": "12ab"},
     )
 
@@ -1501,7 +1532,8 @@ def test_customer_link_verify_returns_only_customer_visible_photos() -> None:
     client = make_test_client(seed_photos)
 
     response = client.post(
-        "/api/customer/orders/ct2_seed-customer-token-2450/verify",
+        "/api/customer/orders/verify",
+        headers={"X-Customer-Token": "ct2_seed-customer-token-2450"},
         json={"phone_suffix": "5432"},
     )
 
@@ -1543,7 +1575,8 @@ def test_partner_upload_auto_visible_customer_delivery_flow(tmp_path, monkeypatc
     assert "uploaded_by_user_id" not in uploaded
 
     auto_visible = client.post(
-        "/api/customer/orders/ct2_seed-customer-token-2450/verify",
+        "/api/customer/orders/verify",
+        headers={"X-Customer-Token": "ct2_seed-customer-token-2450"},
         json={"phone_suffix": "5432"},
     )
     assert auto_visible.status_code == 200
@@ -1771,7 +1804,8 @@ def test_admin_e2e_order_to_customer_delivery_flow(tmp_path, monkeypatch) -> Non
     assert uploaded["is_customer_visible"] is True
 
     auto_visible = client.post(
-        f"/api/customer/orders/{order['customer_token']}/verify",
+        "/api/customer/orders/verify",
+        headers={"X-Customer-Token": order["customer_token"]},
         json={"phone_suffix": "2222"},
     )
     assert auto_visible.status_code == 200
@@ -1815,7 +1849,8 @@ def test_admin_e2e_order_to_customer_delivery_flow(tmp_path, monkeypatch) -> Non
     assert send_photo_response.status_code == 200
 
     customer_response = client.post(
-        f"/api/customer/orders/{order['customer_token']}/verify",
+        "/api/customer/orders/verify",
+        headers={"X-Customer-Token": order["customer_token"]},
         json={"phone_suffix": "2222"},
     )
     assert customer_response.status_code == 200

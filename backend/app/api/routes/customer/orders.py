@@ -55,6 +55,7 @@ def verify_customer_order(
     request: Request,
     db: Session = Depends(get_session),
 ) -> CustomerOrderGroupRead:
+    _ensure_legacy_customer_token(customer_token)
     group_repo = OrderGroupRepository(db)
     group = _verify_customer_group(
         customer_token=customer_token,
@@ -101,6 +102,7 @@ async def submit_customer_as_request_legacy(
     files: list[UploadFile] | None = File(default=None),
     db: Session = Depends(get_session),
 ) -> CustomerOrderGroupRead:
+    _ensure_legacy_customer_token(customer_token)
     return await _submit_customer_as_request(
         customer_token=customer_token,
         request=request,
@@ -185,6 +187,11 @@ def _verify_customer_group(
 def _ensure_phone_suffix(phone_suffix: str) -> None:
     if len(phone_suffix) != 4 or not phone_suffix.isdigit():
         raise HTTPException(status_code=422, detail="invalid_phone_suffix")
+
+
+def _ensure_legacy_customer_token(customer_token: str) -> None:
+    if customer_token.startswith("ct2_"):
+        raise HTTPException(status_code=404, detail="order_not_found")
 
 
 async def _store_customer_as_files(

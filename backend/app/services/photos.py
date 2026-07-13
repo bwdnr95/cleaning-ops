@@ -1,9 +1,11 @@
 from uuid import uuid4
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.time import utc_now
 from app.domain.constants import OrderStatus, TimelineEventType
+from app.models.order import Order
 from app.models.photo import OrderPhoto
 from app.models.user import User
 from app.repositories.orders import OrderRepository
@@ -102,7 +104,15 @@ class PhotoService:
         user_id: str,
         partner_id: str,
     ) -> None:
-        order = self.orders.get(order_id)
+        order = self.db.execute(
+            select(Order)
+            .where(
+                Order.id == order_id,
+                Order.partner_id == partner_id,
+                Order.deleted_at.is_(None),
+            )
+            .with_for_update()
+        ).scalar_one_or_none()
         if order is None or order.deleted_at is not None or order.partner_id != partner_id:
             raise ValueError("order_not_found")
 

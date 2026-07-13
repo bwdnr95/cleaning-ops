@@ -34,7 +34,9 @@
 ### 2.1 코드 롤백 (코드 결함)
 
 **Railway (백엔드)**
-- Railway 대시보드 → 프로젝트 → Deployments → 직전 정상 deploy 의 `Redeploy` 버튼
+- DB revision이 이전 이미지의 migration head보다 앞서 있으면 이전 이미지는 기동할 수 없다. 현재 이미지에서 먼저 `alembic current`를 확인한다.
+- 이번 `0029_orders_as_intake_pending` 롤백은 현재 이미지로 `alembic downgrade 0028_orders_active_as_request_id`를 실행하고 DB 백업·revision을 확인한 뒤에만 직전 정상 deploy를 `Redeploy`한다.
+- 스키마 downgrade 없이 이전 backend 이미지를 바로 재배포하지 않는다.
 
 **Vercel (프론트)**
 - Vercel 대시보드 → Project → Deployments → 직전 정상 deploy 의 `Promote to Production`
@@ -162,21 +164,19 @@ railway variables --service api
 
 운영 Docker 이미지는 고객 인증 토큰이 URL access log에 남지 않도록 uvicorn access log를 비활성화한다. 애플리케이션 오류 로그와 Sentry에도 고객 URL·토큰을 별도 필드로 기록하지 않는다.
 
-`0029_orders_as_intake_pending`는 운영 PostgreSQL의 `0028_orders_active_as_request_id` 다음에서 구형 path/query 링크에 사용된 기존 고객 토큰을 전부 회전한다. 이 배포는 일반 rolling deploy로 실행하지 않는다. 기존 앱 인스턴스를 모두 내려 주문 쓰기를 중단하고, PostgreSQL에 온라인 마이그레이션을 적용한 뒤 새 버전만 기동한다. 마이그레이션은 `order_groups`와 `orders`를 잠그고 토큰을 함께 교체하며, `ct2_` 형식 제약으로 구 버전 인스턴스의 재유입을 차단한다.
+`0029_orders_as_intake_pending`의 현재 정의는 AS 접수 대기 컬럼만 추가하며 기존 고객 토큰을 변경하지 않는다. 과거 0029 초판을 이미 실행한 DB에는 `0030_drop_legacy_customer_token_constraints`가 남아 있는 토큰 형식 제약을 제거한다. 두 migration 모두 추가 토큰 회전을 하지 않는다. 신규 링크는 애플리케이션에서 `ct2_` 토큰을 생성하고 fragment로 전달하며 API에는 `X-Customer-Token` 헤더만 사용한다. 구형 path API는 기존 비-`ct2_` 토큰 호환에만 남기고 신규 `ct2_` 토큰은 거부한다.
 
 현재 고객사 운영 DB가 로컬 SQLite이면 운영 파일을 테스트 명령의 `DATABASE_URL`로 사용하지 않는다. 앱을 완전히 중지하고 별도 백업을 만든 뒤, 백업 복제본에서 현재 버전부터 `head`까지 먼저 검증한다. 현재 확인된 운영 스키마 `0009_address_detail_and_soft_delete`부터의 경로는 데이터 없는 동일 스키마로 검증했고, 신규 SQLite 전체 경로는 CI에서도 매번 검증한다. 실제 운영 파일 마이그레이션과 고객 링크 재발송은 별도 점검 시간에만 실행한다.
 
 기존 `작업예정` 계열 주문에 현재 협력사의 `partner_confirmed` 이벤트가 없으면 새 버전은 전날안내와 작업시작을 차단한다. 상태를 일괄 변경하거나 확인 이벤트를 위조하지 않고, 협력사 화면에 **작업 일정 확인**을 다시 노출한다. 협력사가 직접 확인한 뒤에만 이후 안내와 작업이 진행된다.
 
-기동 전 아래 검증 결과가 모두 `0`인지 확인한다.
+기동 전 주문 line의 토큰이 그룹 토큰과 다른 데이터가 없는지 확인한다.
 
 ```sql
-SELECT count(*) FROM order_groups WHERE substr(customer_token, 1, 4) <> 'ct2_';
 SELECT count(*)
 FROM orders o
 LEFT JOIN order_groups g ON g.id = o.group_id
 WHERE o.customer_token IS NULL
-   OR substr(o.customer_token, 1, 4) <> 'ct2_'
    OR o.customer_token IS DISTINCT FROM g.customer_token;
 ```
 
