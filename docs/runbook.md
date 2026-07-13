@@ -164,7 +164,7 @@ railway variables --service api
 
 운영 Docker 이미지는 고객 인증 토큰이 URL access log에 남지 않도록 uvicorn access log를 비활성화한다. 애플리케이션 오류 로그와 Sentry에도 고객 URL·토큰을 별도 필드로 기록하지 않는다.
 
-`0029_orders_as_intake_pending`의 현재 정의는 AS 접수 대기 컬럼만 추가하며 기존 고객 토큰을 변경하지 않는다. 과거 0029 초판을 이미 실행한 DB에는 `0030_drop_legacy_customer_token_constraints`가 남아 있는 토큰 형식 제약을 제거한다. 두 migration 모두 추가 토큰 회전을 하지 않는다. 신규 링크는 애플리케이션에서 `ct2_` 토큰을 생성하고 fragment로 전달하며 API에는 `X-Customer-Token` 헤더만 사용한다. 구형 path API는 기존 비-`ct2_` 토큰 호환에만 남기고 신규 `ct2_` 토큰은 거부한다.
+`0029_orders_as_intake_pending`의 현재 정의는 AS 접수 대기 컬럼만 추가하며 기존 고객 토큰을 변경하지 않는다. 과거 0029 초판을 이미 실행한 DB에는 `0030_drop_token_constraints`가 남아 있는 토큰 형식 제약을 제거한다. 두 migration 모두 추가 토큰 회전을 하지 않는다. 신규 링크는 애플리케이션에서 `ct2_` 토큰을 생성하고 fragment로 전달하며 API에는 `X-Customer-Token` 헤더만 사용한다. 구형 path API는 기존 비-`ct2_` 토큰 호환에만 남기고 신규 `ct2_` 토큰은 거부한다.
 
 현재 고객사 운영 DB가 로컬 SQLite이면 운영 파일을 테스트 명령의 `DATABASE_URL`로 사용하지 않는다. 앱을 완전히 중지하고 별도 백업을 만든 뒤, 백업 복제본에서 현재 버전부터 `head`까지 먼저 검증한다. 현재 확인된 운영 스키마 `0009_address_detail_and_soft_delete`부터의 경로는 데이터 없는 동일 스키마로 검증했고, 신규 SQLite 전체 경로는 CI에서도 매번 검증한다. 실제 운영 파일 마이그레이션과 고객 링크 재발송은 별도 점검 시간에만 실행한다.
 

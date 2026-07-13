@@ -3,7 +3,7 @@
 Existing customer links are preserved. New tokens are generated with the ct2_ prefix
 by application code, while rollback-compatible legacy rows remain valid.
 
-Revision ID: 0030_drop_legacy_customer_token_constraints
+Revision ID: 0030_drop_token_constraints
 Revises: 0029_orders_as_intake_pending
 """
 
@@ -11,7 +11,7 @@ import sqlalchemy as sa
 
 from alembic import op
 
-revision = "0030_drop_legacy_customer_token_constraints"
+revision = "0030_drop_token_constraints"
 down_revision = "0029_orders_as_intake_pending"
 branch_labels = None
 depends_on = None
