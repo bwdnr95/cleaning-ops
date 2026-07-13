@@ -191,4 +191,5 @@ def test_partner_photo_upload_locks_order_before_status_validation() -> None:
         )
 
     assert session.statements[0]._for_update_arg is not None
+    assert session.statements[0].get_execution_options()["populate_existing"] is True
     assert session.is_committed is False

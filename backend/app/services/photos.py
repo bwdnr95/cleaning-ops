@@ -37,6 +37,7 @@ class PhotoService:
                 Order.partner_id == partner_id,
                 Order.deleted_at.is_(None),
             )
+            .execution_options(populate_existing=True)
             .with_for_update()
         ).scalar_one_or_none()
         if order is None:
