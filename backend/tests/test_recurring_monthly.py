@@ -142,6 +142,26 @@ def test_month_amount_uses_generated_slots_without_new_weekday_projection(db_ses
     assert row.partner_amount == 30000
 
 
+def test_legacy_cancelled_generated_visit_does_not_reappear_as_projection(db_session):
+    c = _weekly_contract(db_session, billing_mode="per_visit", amount=50000)
+    c.partner_payment_amount = 30000
+    c.partner_billing_mode = "per_visit"
+    db_session.add(Order(
+        id=str(uuid4()), group_id=c.order_group_id, status=OrderStatus.CANCELLED,
+        received_date=date(2026, 6, 1), scheduled_date=date(2026, 6, 1),
+        service_name="청소", recurring_contract_id=c.id, recurring_planned_date=None,
+    ))
+    db_session.commit()
+
+    row = next(
+        item
+        for item in RecurringMonthlyService(db_session).list_month("2026-06")
+        if item.contract_id == c.id
+    )
+    assert row.amount == 0
+    assert row.partner_amount == 0
+
+
 def test_month_amount_per_visit_future_projects_own_slots_without_moved_planned_month(db_session):
     # 월 1회(day10) per_visit 계약에서 과거 예정 회차를 미래 방문일로 옮겨도,
     # 자동 생성 회차는 원래 예정 월에 귀속해 미래 달과 중복 청구하지 않는다.

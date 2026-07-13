@@ -76,12 +76,14 @@ class TimelineRepository(Repository[OrderTimeline]):
         self,
         *,
         limit: int,
+        offset: int = 0,
     ) -> list[tuple[OrderTimeline, Order]]:
         stmt = (
             select(OrderTimeline, Order)
             .join(Order, Order.id == OrderTimeline.order_id)
             .where(Order.deleted_at.is_(None))
             .order_by(OrderTimeline.created_at.desc(), OrderTimeline.id.desc())
+            .offset(offset)
             .limit(limit)
         )
         return list(self.db.execute(stmt).all())

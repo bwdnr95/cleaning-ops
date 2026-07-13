@@ -550,6 +550,43 @@ def test_pending_customer_as_request_does_not_reset_customer_photo_evidence_cuto
     assert sent.message_type == MessageType.CUSTOMER_PHOTO_READY
 
 
+def test_customer_as_intake_blocks_paid_auto_completion_until_admin_accepts(db_session):
+    from app.domain.payment_status import PaymentStatus
+    from app.models.order import Order
+    from app.schemas.order import OrderUpdate
+    from app.services.orders import OrderService
+
+    service = OrderService(db_session)
+    order = db_session.get(Order, DEV_ORDER_ID)
+    assert order is not None
+    order.status = OrderStatus.CUSTOMER_DELIVERY_DONE
+    db_session.commit()
+
+    submitted = service.submit_customer_as_request(
+        DEV_ORDER_ID,
+        memo="운영 승인 대기 AS",
+        stored_files=[],
+    )
+    assert submitted.as_intake_pending is True
+    request_id = submitted.active_as_request_id
+
+    paid = service.update(
+        DEV_ORDER_ID,
+        OrderUpdate(payment_status=PaymentStatus.PAID),
+        actor_user_id="seed-admin-user",
+    )
+    assert paid.status == OrderStatus.CUSTOMER_CHECK_NEEDED
+    assert paid.active_as_request_id == request_id
+
+    accepted = service.request_as(
+        DEV_ORDER_ID,
+        memo="운영 승인 대기 AS",
+        actor_user_id="seed-admin-user",
+    )
+    assert accepted.as_intake_pending is False
+    assert accepted.active_as_request_id == request_id
+
+
 def test_partner_dto_scopes_customer_as_photos_to_active_request(db_session):
     from app.models.order import Order
     from app.repositories.photos import PhotoRepository

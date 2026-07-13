@@ -1,10 +1,13 @@
 import { apiRequest } from './client';
 
 export function verifyCustomerOrder(customerToken, phoneSuffix) {
-  return apiRequest(`/customer/orders/${encodeURIComponent(customerToken)}/verify`, {
+  return apiRequest('/customer/orders/verify', {
     method: 'POST',
     skipAuth: true,
     retryOnUnauthorized: false,
+    headers: {
+      'X-Customer-Token': customerToken,
+    },
     body: {
       phone_suffix: phoneSuffix,
     },
@@ -20,10 +23,13 @@ export function submitCustomerAsRequest(customerToken, { orderId, phoneSuffix, m
     formData.append('files', file);
   }
 
-  return apiRequest(`/customer/orders/${encodeURIComponent(customerToken)}/as-request`, {
+  return apiRequest('/customer/orders/as-request', {
     method: 'POST',
     skipAuth: true,
     retryOnUnauthorized: false,
+    headers: {
+      'X-Customer-Token': customerToken,
+    },
     body: formData,
   });
 }

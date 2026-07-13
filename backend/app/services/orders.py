@@ -857,6 +857,7 @@ class OrderService:
         was_customer_as_pending = pending_customer_as_request_id is not None
         active_as_request_id = pending_customer_as_request_id or str(uuid4())
         order.as_requested = True
+        order.as_intake_pending = False
         order.active_as_request_id = active_as_request_id
         order.as_memo = memo
         self._change_status(
@@ -948,6 +949,7 @@ class OrderService:
             .values(
                 status=OrderStatus.CUSTOMER_CHECK_NEEDED.value,
                 as_memo=memo,
+                as_intake_pending=True,
                 active_as_request_id=as_request_id,
             )
             .execution_options(synchronize_session=False)

@@ -9,6 +9,7 @@ import { paymentStatusLabel } from '../../domain/paymentStatus';
 import { formatQuantity } from '../../domain/format';
 import { formatPhone } from '../../domain/phone';
 import { parseDateValue } from '../../domain/time';
+import { readCapturedCustomerToken } from '../../domain/customerTokenPrivacy';
 
 const CUSTOMER_TOKEN_STORAGE_KEY = 'cleaning_ops_customer_token';
 
@@ -662,15 +663,16 @@ function TrustFooter() {
 }
 
 function readInitialCustomerLink() {
+  const capturedToken = readCapturedCustomerToken();
   const pathToken = readTokenFromPath(window.location.pathname);
   const params = new URLSearchParams(window.location.search);
   const queryToken = params.get('t') || params.get('token') || params.get('customer_token');
   const storedToken = sessionStorage.getItem(CUSTOMER_TOKEN_STORAGE_KEY);
-  const token = pathToken || queryToken || storedToken || '';
+  const token = capturedToken || pathToken || queryToken || storedToken || '';
 
   return {
     token,
-    isFromUrl: Boolean(pathToken || queryToken),
+    isFromUrl: Boolean(capturedToken || pathToken || queryToken),
   };
 }
 

@@ -20,12 +20,23 @@ def list_admin_notifications(
     _: CurrentUser = Depends(require_admin),
 ) -> list[AdminNotificationRead]:
     rows: list[AdminNotificationRead] = []
-    for event, order in TimelineRepository(db).list_admin_notification_candidates(limit=limit * 5):
-        if not _is_admin_notification(event):
-            continue
-        rows.append(_to_notification(event, order))
-        if len(rows) >= limit:
+    repository = TimelineRepository(db)
+    batch_size = max(limit * 5, 100)
+    offset = 0
+    while len(rows) < limit:
+        candidates = repository.list_admin_notification_candidates(
+            limit=batch_size,
+            offset=offset,
+        )
+        if not candidates:
             break
+        offset += len(candidates)
+        for event, order in candidates:
+            if not _is_admin_notification(event):
+                continue
+            rows.append(_to_notification(event, order))
+            if len(rows) >= limit:
+                break
     return rows
 
 

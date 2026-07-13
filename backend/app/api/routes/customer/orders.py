@@ -70,8 +70,29 @@ def verify_customer_order(
     return to_customer_group_dto(group, lines_with_photos=lines_with_photos)
 
 
-@router.post("/{customer_token}/as-request", response_model=CustomerOrderGroupRead)
+@router.post("/as-request", response_model=CustomerOrderGroupRead)
 async def submit_customer_as_request(
+    request: Request,
+    customer_token: str = Header(..., alias="X-Customer-Token"),
+    phone_suffix: str = Form(...),
+    order_id: str = Form(...),
+    memo: str = Form(...),
+    files: list[UploadFile] | None = File(default=None),
+    db: Session = Depends(get_session),
+) -> CustomerOrderGroupRead:
+    return await _submit_customer_as_request(
+        customer_token=customer_token,
+        request=request,
+        phone_suffix=phone_suffix,
+        order_id=order_id,
+        memo=memo,
+        files=files,
+        db=db,
+    )
+
+
+@router.post("/{customer_token}/as-request", response_model=CustomerOrderGroupRead)
+async def submit_customer_as_request_legacy(
     customer_token: str,
     request: Request,
     phone_suffix: str = Form(...),
@@ -79,6 +100,27 @@ async def submit_customer_as_request(
     memo: str = Form(...),
     files: list[UploadFile] | None = File(default=None),
     db: Session = Depends(get_session),
+) -> CustomerOrderGroupRead:
+    return await _submit_customer_as_request(
+        customer_token=customer_token,
+        request=request,
+        phone_suffix=phone_suffix,
+        order_id=order_id,
+        memo=memo,
+        files=files,
+        db=db,
+    )
+
+
+async def _submit_customer_as_request(
+    *,
+    customer_token: str,
+    request: Request,
+    phone_suffix: str,
+    order_id: str,
+    memo: str,
+    files: list[UploadFile] | None,
+    db: Session,
 ) -> CustomerOrderGroupRead:
     _ensure_phone_suffix(phone_suffix)
     group_repo = OrderGroupRepository(db)

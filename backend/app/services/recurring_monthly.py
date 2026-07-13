@@ -162,8 +162,17 @@ class RecurringMonthlyService:
         return self.db.scalar(
             select(func.count(Order.id)).where(
                 Order.recurring_contract_id == contract.id,
-                Order.recurring_planned_date >= first,
-                Order.recurring_planned_date <= last,
+                or_(
+                    (
+                        (Order.recurring_planned_date >= first)
+                        & (Order.recurring_planned_date <= last)
+                    ),
+                    (
+                        Order.recurring_planned_date.is_(None)
+                        & (Order.scheduled_date >= first)
+                        & (Order.scheduled_date <= last)
+                    ),
+                ),
             )
         ) or 0
 
