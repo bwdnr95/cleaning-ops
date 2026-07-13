@@ -211,7 +211,15 @@ class RecurringMonthlyService:
         contract = self.contracts.get(contract_id)
         if contract is None:
             raise ValueError("recurring_contract_not_found")
-        status, _ = self._get_or_create_status(contract_id, month)
+        status = self.statuses.get_by_contract_and_month(contract_id, month)
+        if status is None:
+            first, last = _month_bounds(month)
+            if (
+                contract.status != RecurringContractStatus.ACTIVE
+                or not self._active_in_month(contract, first, last)
+            ):
+                raise ValueError("recurring_month_not_editable")
+            status, _ = self._get_or_create_status(contract_id, month)
         if tax_invoice_issued is not None:
             status.tax_invoice_issued = tax_invoice_issued
         if balance_paid is not None:

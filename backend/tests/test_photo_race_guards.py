@@ -168,3 +168,27 @@ def test_partner_photo_delete_locks_order_before_status_validation(
 
     assert session.statements[0]._for_update_arg is not None
     assert session.is_committed is False
+
+
+def test_partner_photo_upload_locks_order_before_status_validation() -> None:
+    order = Order(
+        id="order-1",
+        group_id="group-1",
+        status=OrderStatus.CUSTOMER_DELIVERY_NEEDED.value,
+        received_date="2026-05-18",
+        partner_id="partner-1",
+        service_name="Service",
+        customer_visible_payment=False,
+    )
+    session = _FakeSession(order)
+    service = PhotoService(cast(Session, cast(object, session)))
+
+    with pytest.raises(ValueError, match="invalid_status_for_upload"):
+        service.upload_for_partner(
+            payload=cast(Any, type("Payload", (), {"order_id": "order-1"})()),
+            user_id="partner-user-1",
+            partner_id="partner-1",
+        )
+
+    assert session.statements[0]._for_update_arg is not None
+    assert session.is_committed is False

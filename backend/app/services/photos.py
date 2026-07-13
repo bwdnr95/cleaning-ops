@@ -30,8 +30,16 @@ class PhotoService:
         self.timeline = TimelineService(db)
 
     def upload_for_partner(self, payload: PhotoCreate, *, user_id: str, partner_id: str) -> OrderPhoto:
-        order = self.orders.get(payload.order_id)
-        if order is None or order.partner_id != partner_id:
+        order = self.db.execute(
+            select(Order)
+            .where(
+                Order.id == payload.order_id,
+                Order.partner_id == partner_id,
+                Order.deleted_at.is_(None),
+            )
+            .with_for_update()
+        ).scalar_one_or_none()
+        if order is None:
             raise ValueError("order_not_found")
 
         # 활성 작업 구간(작업예정~작업진행)에서만 업로드 허용.

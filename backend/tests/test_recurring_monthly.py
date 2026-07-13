@@ -1,6 +1,8 @@
 from datetime import date
 from uuid import uuid4
 
+import pytest
+
 from app.domain.constants import OrderStatus, RecurrenceMode, RecurringContractStatus
 from app.models.order import Order
 from app.models.order_group import OrderGroup
@@ -78,6 +80,13 @@ def test_list_month_does_not_create_future_rows_for_paused_contract(db_session):
         c.id,
         "2026-07",
     ) is None
+
+    with pytest.raises(ValueError, match="recurring_month_not_editable"):
+        RecurringMonthlyService(db_session).set_status(
+            c.id,
+            "2026-07",
+            partner_payment_paid=True,
+        )
 
 
 def test_list_month_keeps_existing_unpaid_row_after_contract_has_ended(db_session):

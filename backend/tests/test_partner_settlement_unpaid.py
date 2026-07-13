@@ -108,7 +108,7 @@ def test_unpaid_includes_any_noncancelled_with_amount(db_session: Session) -> No
     assert completed_no_amount not in ids  # 도급가 없음 제외
 
 
-def test_partner_admin_unpaid_summary_uses_work_progress_or_done_through_today(
+def test_partner_admin_unpaid_summary_uses_canonical_unpaid_condition(
     db_session: Session,
 ) -> None:
     pid = _make_partner(db_session)
@@ -234,8 +234,8 @@ def test_partner_admin_unpaid_summary_uses_work_progress_or_done_through_today(
         partner for partner in service.list_partners(include_inactive=True) if partner.id == pid
     )
 
-    assert detail.unpaid_partner_order_count == 6
-    assert detail.unpaid_partner_amount_total == 930000
+    assert detail.unpaid_partner_order_count == 11
+    assert detail.unpaid_partner_amount_total == 1660000
     assert listed.unpaid_partner_order_count == detail.unpaid_partner_order_count
     assert listed.unpaid_partner_amount_total == detail.unpaid_partner_amount_total
 

@@ -91,8 +91,17 @@ test('customer token stays out of browser and API request URLs', async ({ page }
   expect(observedRequest?.url).not.toContain(secret);
 });
 
-test('legacy path and query tokens are discarded instead of authenticated', async ({ page }) => {
+test('legacy path and query tokens are captured before URL redaction', async ({ page }) => {
   const legacySecret = 'legacy-customer-token';
+  const observedHeaders: string[] = [];
+  await page.route('**/api/customer/orders/verify', async (route) => {
+    observedHeaders.push(route.request().headers()['x-customer-token'] || '');
+    await route.fulfill({
+      status: 404,
+      contentType: 'application/json',
+      body: JSON.stringify({ detail: 'order_not_found' }),
+    });
+  });
 
   for (const legacyUrl of [
     `/c/${legacySecret}`,
@@ -100,8 +109,11 @@ test('legacy path and query tokens are discarded instead of authenticated', asyn
   ]) {
     await page.goto(legacyUrl);
     await expect(page).toHaveURL(/\/c$/);
-    await expect(page.getByTestId('customer-token-input')).toBeVisible();
-    await expect(page.getByTestId('customer-token-input')).toHaveValue('');
+    await page.getByTestId('customer-phone-suffix').fill('5432');
+    await page.getByTestId('customer-verify-submit').click();
+    await expect(page.getByTestId('customer-verify-error')).toBeVisible();
     expect(page.url()).not.toContain(legacySecret);
   }
+
+  expect(observedHeaders).toEqual([legacySecret, legacySecret]);
 });

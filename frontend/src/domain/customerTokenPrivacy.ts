@@ -29,7 +29,14 @@ export function captureAndRedactCustomerToken(): void {
     fragmentParams.get('token') ||
     fragmentParams.get('customer_token');
   const hasLegacyToken = Boolean(pathMatch || queryToken);
-  const token = fragmentToken && fragmentToken !== '[redacted]' ? fragmentToken : '';
+  const pathToken = pathMatch ? safelyDecodeToken(pathMatch[1]) : '';
+  const legacyToken = queryToken || pathToken;
+  const token =
+    fragmentToken && fragmentToken !== '[redacted]'
+      ? fragmentToken
+      : legacyToken && legacyToken !== '[redacted]' && !legacyToken.startsWith('ct2_')
+        ? legacyToken
+        : '';
   if (!token && !hasLegacyToken) {
     return;
   }
@@ -99,4 +106,12 @@ function scrubTelemetryValue(value: unknown): unknown {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function safelyDecodeToken(value: string): string {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return '';
+  }
 }
