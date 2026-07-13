@@ -1,4 +1,5 @@
 from concurrent.futures import ThreadPoolExecutor
+from threading import Lock
 from typing import cast
 
 import pytest
@@ -42,6 +43,8 @@ class FakeRefreshTokenRepository:
         self.added = []
         self.by_hash = {}
         self.revoked_user_ids = []
+        self.consume_lock = Lock()
+        self.consume_calls = 0
 
     def add(self, token):
         self.added.append(token)
@@ -50,6 +53,15 @@ class FakeRefreshTokenRepository:
 
     def get_by_hash(self, token_hash: str):
         return self.by_hash.get(token_hash)
+
+    def consume_active(self, token_hash: str, revoked_at) -> bool:
+        with self.consume_lock:
+            self.consume_calls += 1
+            token = self.by_hash.get(token_hash)
+            if token is None or token.revoked_at is not None:
+                return False
+            token.revoked_at = revoked_at
+            return True
 
     def revoke_active_for_user(self, user_id: str) -> None:
         self.revoked_user_ids.append(user_id)
@@ -256,6 +268,40 @@ def test_refresh_rejects_reused_refresh_token() -> None:
         assert str(exc) == "refresh_token_reused"
     else:
         raise AssertionError("expected AuthError")
+
+
+def test_parallel_refresh_consumes_token_only_once() -> None:
+    user = make_user(role=UserRole.ADMIN)
+    first = make_service(user)
+    second = make_service(user)
+    shared_tokens = cast(FakeRefreshTokenRepository, cast(object, first.refresh_tokens))
+    second.refresh_tokens = cast(RefreshTokenRepository, cast(object, shared_tokens))
+    old_token, old_jti, old_expires_at = create_refresh_token(
+        user_id=user.id,
+        role=UserRole.ADMIN,
+    )
+    shared_tokens.add(
+        RefreshToken(
+            id="refresh-parallel",
+            user_id=user.id,
+            token_hash=hash_token_jti(old_jti),
+            expires_at=old_expires_at,
+            revoked_at=None,
+        )
+    )
+
+    def refresh(service: AuthService) -> str:
+        try:
+            service.refresh(old_token)
+        except AuthError as exc:
+            return str(exc)
+        return "rotated"
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        results = list(executor.map(refresh, (first, second)))
+
+    assert sorted(results) == ["refresh_token_reused", "rotated"]
+    assert shared_tokens.consume_calls == 1
 
 
 def test_change_password_revokes_existing_sessions() -> None:

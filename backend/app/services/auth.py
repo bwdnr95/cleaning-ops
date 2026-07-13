@@ -128,7 +128,8 @@ class AuthService:
         if self._role(user) == UserRole.PARTNER and not self._partner_is_active(user.partner_id):
             raise AuthError("invalid_refresh_token")
 
-        token_record.revoked_at = utc_now()
+        if not self.refresh_tokens.consume_active(token_hash, utc_now()):
+            raise AuthError("refresh_token_reused")
         response = self._issue_token_pair(user)
         self.audit.record(
             event_type=AuditEventType.TOKEN_REFRESH,

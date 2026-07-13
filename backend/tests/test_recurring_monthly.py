@@ -49,6 +49,63 @@ def test_list_month_excludes_before_start(db_session):
     assert all(r.contract_id != c.id for r in rows)  # 시작 전 달 제외
 
 
+def test_list_month_keeps_existing_unpaid_row_after_contract_is_paused(db_session):
+    c = _contract(db_session)
+    c.partner_payment_amount = 90000
+    c.partner_billing_mode = "monthly"
+    db_session.commit()
+    service = RecurringMonthlyService(db_session)
+    initial = next(row for row in service.list_month("2026-06") if row.contract_id == c.id)
+    assert initial.partner_payment_paid is False
+
+    c.status = RecurringContractStatus.PAUSED
+    db_session.commit()
+
+    paused = next(row for row in service.list_month("2026-06") if row.contract_id == c.id)
+    assert paused.partner_amount == 90000
+    assert paused.partner_payment_paid is False
+
+
+def test_list_month_does_not_create_future_rows_for_paused_contract(db_session):
+    c = _contract(db_session)
+    c.status = RecurringContractStatus.PAUSED
+    db_session.commit()
+
+    rows = RecurringMonthlyService(db_session).list_month("2026-07")
+
+    assert all(row.contract_id != c.id for row in rows)
+    assert RecurringMonthlyStatusRepository(db_session).get_by_contract_and_month(
+        c.id,
+        "2026-07",
+    ) is None
+
+
+def test_list_month_keeps_existing_unpaid_row_after_contract_has_ended(db_session):
+    c = _contract(db_session)
+    c.partner_payment_amount = 90000
+    c.partner_billing_mode = "monthly"
+    c.status = RecurringContractStatus.ENDED
+    c.end_date = date(2026, 5, 31)
+    db_session.add(
+        RecurringMonthlyStatus(
+            id=str(uuid4()),
+            contract_id=c.id,
+            billing_month="2026-06",
+            partner_payment_paid=False,
+        )
+    )
+    db_session.commit()
+
+    row = next(
+        item
+        for item in RecurringMonthlyService(db_session).list_month("2026-06")
+        if item.contract_id == c.id
+    )
+
+    assert row.partner_amount == 90000
+    assert row.partner_payment_paid is False
+
+
 def test_set_status_toggles(db_session):
     c = _contract(db_session)
     db_session.commit()

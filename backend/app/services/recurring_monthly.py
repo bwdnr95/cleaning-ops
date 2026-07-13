@@ -8,7 +8,7 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.domain.constants import OrderStatus, RecurringBillingMode
+from app.domain.constants import OrderStatus, RecurringBillingMode, RecurringContractStatus
 from app.domain.recurrence import iter_due_dates
 from app.models.order import Order
 from app.models.recurring_contract import RecurringContract
@@ -180,8 +180,19 @@ class RecurringMonthlyService:
         first, last = _month_bounds(month)
         created = False
         rows: list[RecurringMonthlyRowRead] = []
-        for contract in self.contracts.list_active():
-            if not self._active_in_month(contract, first, last):
+        statuses = {
+            status.contract_id: status
+            for status in self.statuses.list_by_month(month)
+        }
+        for contract in self.contracts.list_all():
+            status = statuses.get(contract.id)
+            if status is not None:
+                rows.append(self._to_row(contract, month, status))
+                continue
+            if (
+                contract.status != RecurringContractStatus.ACTIVE
+                or not self._active_in_month(contract, first, last)
+            ):
                 continue
             status, was_created = self._get_or_create_status(contract.id, month)
             created = created or was_created
