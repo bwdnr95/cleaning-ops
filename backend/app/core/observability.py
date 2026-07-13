@@ -8,16 +8,40 @@ production 환경에서 Sentry 가 의무이고, 모든 요청은 X-Request-ID �
 from __future__ import annotations
 
 import logging
+import re
 import sys
 import uuid
 from contextvars import ContextVar
-from typing import Any
+from typing import Any, cast
 
 import structlog
+from sentry_sdk.types import Event, Hint
 
 from app.core.config import Settings
 
 _request_id_ctx: ContextVar[str | None] = ContextVar("request_id", default=None)
+_CUSTOMER_API_TOKEN_PATH = re.compile(r"(/api/customer/orders/)[^/?#\s]+")
+_CUSTOMER_PAGE_TOKEN_PATH = re.compile(
+    r"(^|\s|https?://[^/?#\s]+)(/(?:c|customer)/)[^/?#\s]+"
+)
+_CUSTOMER_TOKEN_QUERY = re.compile(
+    r"(^|[?&])((?:t|token|customer_token)=)[^&#\s]+"
+)
+_CUSTOMER_TOKEN_FRAGMENT = re.compile(
+    r"(^|#|&)((?:t|token|customer_token)=)[^&#\s]+"
+)
+_SENSITIVE_TELEMETRY_KEYS = frozenset(
+    {
+        "--cleaning-ops-customer-token",
+        "authorization",
+        "cookie",
+        "customer-token",
+        "t",
+        "token",
+        "x-customer-token",
+        "x-solapi-secret",
+    }
+)
 
 
 def get_request_id() -> str | None:
@@ -38,11 +62,46 @@ def init_sentry(settings: Settings) -> None:
         release=settings.sentry_release or settings.app_version,
         traces_sample_rate=settings.sentry_traces_sample_rate,
         send_default_pii=settings.sentry_send_default_pii,
+        max_request_body_size="never",
+        include_local_variables=False,
+        before_send=scrub_sentry_event,
+        before_send_transaction=scrub_sentry_event,
         integrations=[
             StarletteIntegration(transaction_style="endpoint"),
             FastApiIntegration(transaction_style="endpoint"),
         ],
     )
+
+
+def redact_customer_tokens(value: str) -> str:
+    redacted = _CUSTOMER_API_TOKEN_PATH.sub(r"\1[redacted]", value)
+    redacted = _CUSTOMER_PAGE_TOKEN_PATH.sub(r"\1\2[redacted]", redacted)
+    redacted = _CUSTOMER_TOKEN_QUERY.sub(r"\1\2[redacted]", redacted)
+    redacted = _CUSTOMER_TOKEN_FRAGMENT.sub(r"\1\2[redacted]", redacted)
+    return redacted
+
+
+def scrub_sentry_event(event: Event, _hint: Hint | None = None) -> Event:
+    return cast(Event, _scrub_telemetry_value(event))
+
+
+def _scrub_telemetry_value(value: Any) -> Any:
+    if isinstance(value, str):
+        return redact_customer_tokens(value)
+    if isinstance(value, dict):
+        return {
+            key: (
+                "[redacted]"
+                if str(key).lower().replace("_", "-") in _SENSITIVE_TELEMETRY_KEYS
+                else _scrub_telemetry_value(item)
+            )
+            for key, item in value.items()
+        }
+    if isinstance(value, list):
+        return [_scrub_telemetry_value(item) for item in value]
+    if isinstance(value, tuple):
+        return tuple(_scrub_telemetry_value(item) for item in value)
+    return value
 
 
 def configure_structlog(settings: Settings) -> None:
@@ -109,7 +168,7 @@ class RequestIDMiddleware:
         request_id = incoming or uuid.uuid4().hex
         token = _request_id_ctx.set(request_id)
 
-        async def send_with_header(message: dict) -> None:
+        async def send_with_header(message: dict[str, Any]) -> None:
             if message["type"] == "http.response.start":
                 headers = list(message.get("headers", []))
                 headers.append((b"x-request-id", request_id.encode("ascii")))

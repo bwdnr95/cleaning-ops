@@ -2,7 +2,14 @@ from datetime import date, datetime
 
 from pydantic import Field, field_validator
 
-from app.domain.constants import OrderStatus, PhotoType, ReceiptStatus, ReceiptType, VatType
+from app.domain.constants import (
+    CustomerAftercareStatus,
+    OrderStatus,
+    PhotoType,
+    ReceiptStatus,
+    ReceiptType,
+    VatType,
+)
 from app.schemas.common import ApiModel, TimelineEventRead
 from app.schemas.message import MessageLogRead
 from app.schemas.photo import PartnerPhotoRead, PhotoRead
@@ -119,6 +126,7 @@ class AdminOrderRead(OrderLineBase):
     # AS(사후관리) 요청 상태는 읽기 전용으로만 노출한다. 쓰기(주문 생성/수정)로는 바꿀 수 없고
     # AS 전송 액션(request_as)으로만 세팅되어 AS_REQUESTED 타임라인/협력사 통지를 강제한다.
     as_requested: bool = False
+    as_intake_pending: bool = False
     as_memo: str | None = None
     work_started_at: datetime | None = None
     work_completed_at: datetime | None = None
@@ -241,6 +249,8 @@ class PartnerJobRead(ApiModel):
     as_requested: bool = False
     as_memo: str | None = None
     as_requested_at: datetime | None = None
+    evidence_required_after: datetime | None = None
+    partner_confirmation_required: bool = False
     work_started_at: datetime | None = None
     work_completed_at: datetime | None = None
     has_recorded_customer_signature: bool = False
@@ -273,6 +283,7 @@ class CustomerOrderLineRead(ApiModel):
     deposit_amount: float | None = None
     balance_amount: float | None = None
     payment_status: str | None = None
+    aftercare_status: CustomerAftercareStatus | None = None
     photos: list[CustomerPhotoRead] = Field(default_factory=list)
 
 
@@ -288,6 +299,20 @@ class CustomerOrderGroupRead(ApiModel):
 
 class CustomerVerifyRequest(ApiModel):
     phone_suffix: str = Field(min_length=4, max_length=4, pattern=r"^\d{4}$")
+
+
+class CustomerAsRequest(ApiModel):
+    phone_suffix: str = Field(min_length=4, max_length=4, pattern=r"^\d{4}$")
+    order_id: str = Field(min_length=1, max_length=36)
+    memo: str = Field(min_length=1, max_length=2000)
+
+    @field_validator("memo")
+    @classmethod
+    def _strip_memo(cls, value: str) -> str:
+        stripped = value.strip()
+        if not stripped:
+            raise ValueError("as_memo_required")
+        return stripped
 
 
 CustomerOrderRead = CustomerOrderGroupRead

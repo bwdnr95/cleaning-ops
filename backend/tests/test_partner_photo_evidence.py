@@ -24,9 +24,9 @@ from app.main import create_app
 from app.models import Base, Order, OrderGroup, OrderPhoto, Partner
 from app.services.photos import PhotoService
 
-
 SeedCallback = Callable[[Session], None]
 PNG_BYTES = b"\x89PNG\r\n\x1a\ncleanops-test-image"
+CUSTOMER_HEADERS = {"X-Customer-Token": "ct2_seed-customer-token-2450"}
 
 
 def make_test_client(
@@ -62,10 +62,17 @@ def make_test_client(
     return TestClient(app)
 
 
-def login(client: TestClient, path: str, identifier: str, password: str) -> dict:
+def login(
+    client: TestClient,
+    path: str,
+    identifier: str,
+    password: str,
+) -> str:
     response = client.post(path, json={"identifier": identifier, "password": password})
     assert response.status_code == 200, response.text
-    return response.json()
+    access_token = response.json().get("access_token")
+    assert isinstance(access_token, str)
+    return access_token
 
 
 def auth_headers(access_token: str) -> dict[str, str]:
@@ -73,13 +80,23 @@ def auth_headers(access_token: str) -> dict[str, str]:
 
 
 def partner_headers(client: TestClient) -> dict[str, str]:
-    session = login(client, "/api/auth/partner/login", DEV_PARTNER_PHONE, DEV_PARTNER_PASSWORD)
-    return auth_headers(session["access_token"])
+    access_token = login(
+        client,
+        "/api/auth/partner/login",
+        DEV_PARTNER_PHONE,
+        DEV_PARTNER_PASSWORD,
+    )
+    return auth_headers(access_token)
 
 
 def admin_headers(client: TestClient) -> dict[str, str]:
-    session = login(client, "/api/auth/admin/login", DEV_ADMIN_EMAIL, DEV_ADMIN_PASSWORD)
-    return auth_headers(session["access_token"])
+    access_token = login(
+        client,
+        "/api/auth/admin/login",
+        DEV_ADMIN_EMAIL,
+        DEV_ADMIN_PASSWORD,
+    )
+    return auth_headers(access_token)
 
 
 def seed_photo(
@@ -299,7 +316,8 @@ def test_customer_dto_exposes_only_approved_photos(tmp_path, monkeypatch) -> Non
     client = make_test_client(tmp_path, monkeypatch, seed)
 
     response = client.post(
-        "/api/customer/orders/seed-customer-token-2450/verify",
+        "/api/customer/orders/verify",
+        headers=CUSTOMER_HEADERS,
         json={"phone_suffix": "5432"},
     )
 

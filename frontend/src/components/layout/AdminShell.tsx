@@ -58,7 +58,7 @@ export function AdminShell({
         </div>
 
         <nav style={{ padding: 8, flex: 1, display: 'flex', flexDirection: 'column', gap: 1 }}>
-          <div style={{ fontSize: 10.5, color: 'var(--text-quaternary)', padding: '10px 8px 4px', letterSpacing: '0.06em', fontWeight: 600 }}>운영 메뉴</div>
+          <div style={{ fontSize: 10.5, color: 'var(--text-secondary)', padding: '10px 8px 4px', letterSpacing: '0.06em', fontWeight: 600 }}>운영 메뉴</div>
           {NAV.map((n) => {
             const active = page === n.key;
             const badge = navBadges[n.key] ?? n.badge;

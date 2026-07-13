@@ -27,27 +27,83 @@ test('admin sees blocked message actions clearly on orders without partner or cu
   await expect(page.getByTestId('send-customer-photo-ready')).toHaveAttribute('title', '공개 사진이 1장 이상 필요합니다.');
 });
 
-test('admin previews message channel readiness before sending', async ({ page }) => {
+test('admin previews message channel readiness before sending', async ({ page, request }) => {
+  const order = await createAdminOrder(request, {
+    status: '작업예정',
+    scheduled_date: koreaDateOffset(1),
+    requested_time: '09:30',
+  });
   await loginAsAdmin(page);
   await page.getByTestId('admin-nav-orders').click();
   await expect(page.getByTestId('orders-date-preset-upcoming')).toHaveAttribute('aria-pressed', 'true');
   await page.getByTestId('orders-date-preset-all').click();
-  await page.getByTestId('admin-order-row-seed-order-2450').click();
+  await page.getByTestId(`admin-order-row-${order.id}`).click();
   await expect(page.getByTestId('admin-order-detail-page')).toBeVisible();
 
   await page.getByTestId('send-customer-day-before').click();
   await expect(page.getByTestId('message-preview-modal')).toBeVisible();
   await expect(page.getByTestId('message-preview-channel-alimtalk')).toHaveAttribute('aria-pressed', 'true');
   await expect(page.getByTestId('message-preview-template-id')).toBeVisible();
-  await expect(page.getByTestId('message-preview-content')).toContainText('/c/seed-customer-token-2450');
+  await expect(page.getByTestId('message-preview-content')).toContainText('/c#token=');
 
   await page.getByTestId('message-preview-channel-sms').click();
   await expect(page.getByTestId('message-preview-channel-sms')).toHaveAttribute('aria-pressed', 'true');
-  await expect(page.getByTestId('message-preview-content')).toContainText('/c/seed-customer-token-2450');
+  await expect(page.getByTestId('message-preview-content')).toContainText('/c#token=');
 
   await page.getByTestId('message-preview-send').click();
   await expect(page.getByTestId('message-preview-modal')).toHaveCount(0);
   await expect(page.getByTestId('admin-action-notice')).toContainText('SMS');
+});
+
+test('admin sends an auditable customer access link LMS during active work', async ({ page, request }) => {
+  const order = await createAdminOrder(request, {
+    status: '작업진행',
+    scheduled_date: koreaDateOffset(0),
+    requested_time: '11:00',
+  });
+  await loginAsAdmin(page);
+  await openAdminOrder(page, order.id);
+
+  await page.getByTestId('send-customer-access-link').click();
+  await expect(page.getByTestId('message-preview-modal')).toBeVisible();
+  await expect(page.getByTestId('message-preview-channel-lms')).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByTestId('message-preview-content')).toContainText('/c#token=');
+  await page.getByTestId('message-preview-send').click();
+  await expect(page.getByTestId('admin-action-notice')).toContainText('LMS');
+
+  const adminSession = await loginViaApi(request);
+  const detail = await checkedJson(await request.get(`${backendUrl}/api/admin/orders/${order.id}`, {
+    headers: authHeaders(adminSession.access_token),
+  }));
+  expect(detail.message_logs).toEqual(expect.arrayContaining([
+    expect.objectContaining({
+      message_type: 'customer_access_link',
+      channel: 'lms',
+      status: 'sent',
+    }),
+  ]));
+  expect(detail.timeline).toEqual(expect.arrayContaining([
+    expect.objectContaining({ event_type: 'customer_link_sent' }),
+  ]));
+});
+
+test('admin cannot send a day-before notice before the actual day before', async ({ page, request }) => {
+  const order = await createAdminOrder(request, {
+    status: '작업예정',
+    scheduled_date: koreaDateOffset(10),
+    requested_time: '09:30',
+  });
+  await loginAsAdmin(page);
+  await page.getByTestId('admin-nav-orders').click();
+  await page.getByTestId('orders-date-preset-all').click();
+  await page.getByTestId(`admin-order-row-${order.id}`).click();
+
+  const action = page.getByTestId('send-customer-day-before');
+  await expect(action).toBeDisabled();
+  await expect(action).toHaveAttribute(
+    'title',
+    '방문 하루 전인 주문에서만 전날 안내를 발송할 수 있습니다.',
+  );
 });
 
 test('admin sends AS request from explicit review modal', async ({ page, request }) => {
@@ -88,8 +144,18 @@ test('admin sends AS request from explicit review modal', async ({ page, request
   await openAdminOrder(page, order.id);
   await expect(page.getByTestId('order-workflow-guide')).toBeVisible();
 
-  await page.getByTestId('send-order-as-request').click();
+  const asRequestTrigger = page.getByTestId('send-order-as-request');
+  await asRequestTrigger.click();
   await expect(page.getByTestId('as-request-modal')).toBeVisible();
+  await expect(page.getByTestId('as-request-memo')).toBeFocused();
+  await page.keyboard.press('Escape');
+  await expect(page.getByTestId('as-request-modal')).toHaveCount(0);
+  await expect(asRequestTrigger).toBeFocused();
+  await asRequestTrigger.click();
+  await expect(page.getByTestId('as-request-memo')).toBeFocused();
+  await page.getByRole('button', { name: '닫기' }).focus();
+  await page.keyboard.press('Shift+Tab');
+  await expect(page.getByTestId('as-request-cancel')).toBeFocused();
   await expect(page.getByTestId('as-request-submit')).toBeDisabled();
 
   await page.getByTestId('as-request-template-partial').click();
@@ -98,7 +164,7 @@ test('admin sends AS request from explicit review modal', async ({ page, request
   await page.getByTestId('as-request-submit').click();
 
   await expect(page.getByTestId('as-request-modal')).toHaveCount(0);
-  await expect(page.getByTestId('admin-action-notice')).toContainText('AS 요청 상태로 전환');
+  await expect(page.getByTestId('admin-action-notice')).toContainText('AS 처리를 등록했고');
   await expect(page.getByTestId('order-workflow-guide')).toContainText('AS 요청');
 
   const adminSession = await loginViaApi(request);
@@ -192,7 +258,7 @@ test('admin balance due action is gated by work phase, unpaid balance, and saved
 });
 
 test('customer wrong phone suffix stays behind verification gate', async ({ page }) => {
-  await page.goto('/c/seed-customer-token-2450');
+  await page.goto('/c#token=ct2_seed-customer-token-2450');
   await expect(page.getByTestId('customer-verify-form')).toBeVisible();
 
   await page.getByTestId('customer-phone-suffix').fill('0000');
@@ -283,4 +349,18 @@ function authHeaders(accessToken) {
   return {
     Authorization: `Bearer ${accessToken}`,
   };
+}
+
+function koreaDateOffset(offsetDays) {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'Asia/Seoul',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(new Date());
+  const values = Object.fromEntries(
+    parts.filter((part) => part.type !== 'literal').map((part) => [part.type, Number(part.value)]),
+  );
+  const date = new Date(Date.UTC(values.year, values.month - 1, values.day + offsetDays));
+  return date.toISOString().slice(0, 10);
 }

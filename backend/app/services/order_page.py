@@ -36,7 +36,8 @@ from app.repositories.orders import (
     order_received_sort_key,
     order_visit_sort_key,
 )
-from app.services.orders import to_admin_order_dto
+from app.schemas.order import AdminOrderRead
+from app.services.orders import is_customer_as_intake_pending, to_admin_order_dto
 
 
 @dataclass
@@ -62,7 +63,7 @@ class OrderPageInsight:
 
 @dataclass
 class OrderPageResult:
-    items: list
+    items: list[AdminOrderRead]
     total: int
     status_counts: dict[str, int]
     summary: OrderPageSummary = field(default_factory=OrderPageSummary)
@@ -413,6 +414,11 @@ class OrderPageService:
                 order.status in WORK_DONE_STATUSES
                 and order.payment_status in _PAYMENT_CHECK_STATUSES
             )
+        if status_key in {"customer_check", "customer_check_needed"}:
+            return (
+                order.status == OrderStatus.CUSTOMER_CHECK_NEEDED
+                or is_customer_as_intake_pending(order)
+            )
         if status_key == "payment_check":
             # (레거시 탭) 미납 계열 + 취소 제외 + 방문일이 미래면 제외.
             today = business_today()
@@ -446,7 +452,14 @@ class OrderPageService:
         for order in rows:
             workflow = order_workflow_status(order.status, order.payment_status)
             for key, tab_status in ORDER_STATUS_TAB_OPTIONS:
-                if workflow == tab_status:
+                if key == "customer_check_needed":
+                    matches = (
+                        order.status == OrderStatus.CUSTOMER_CHECK_NEEDED
+                        or is_customer_as_intake_pending(order)
+                    )
+                else:
+                    matches = workflow == tab_status
+                if matches:
                     counts[key] += 1
         return counts
 

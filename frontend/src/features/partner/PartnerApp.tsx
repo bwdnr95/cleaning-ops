@@ -19,7 +19,7 @@ export function PartnerApp() {
   const title = company || manager;
 
   return (
-    <div style={{ height: '100%', display: 'flex', flexDirection: 'column', background: '#f4f6f8', overflow: 'hidden' }}>
+    <main style={{ height: '100%', display: 'flex', flexDirection: 'column', background: 'var(--bg-subtle)', overflow: 'hidden' }}>
       {showShell && (
         <PartnerTopBar
           title={title}
@@ -37,7 +37,7 @@ export function PartnerApp() {
       </div>
 
       {showShell && (
-        <nav style={navBarStyle}>
+        <nav aria-label="협력사 메뉴" style={navBarStyle}>
           <NavButton
             testId="partner-nav-jobs"
             icon="truck"
@@ -54,18 +54,17 @@ export function PartnerApp() {
           />
         </nav>
       )}
-    </div>
+    </main>
   );
 }
 
 function PartnerTopBar({ title, subtitle, onLogout }) {
-  const initial = (title || '협').charAt(0) || '협';
   return (
     <header
       data-testid="partner-topbar"
       style={{
         flexShrink: 0,
-        background: '#fff',
+        background: 'var(--surface)',
         borderBottom: '1px solid var(--border)',
         padding: '11px 16px',
         display: 'flex',
@@ -76,13 +75,10 @@ function PartnerTopBar({ title, subtitle, onLogout }) {
       <BrandLogo size="sm" />
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ fontSize: 10, fontWeight: 800, letterSpacing: '0.06em', color: 'var(--brand)' }}>클린잡 · 협력사 작업센터</div>
-        <div style={{ fontSize: 15.5, fontWeight: 800, color: 'var(--text)', letterSpacing: '-0.01em', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-          {title} <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--text-tertiary)' }}>· {subtitle}</span>
+        <div title={`${title} · ${subtitle}`} style={{ fontSize: 15.5, fontWeight: 800, color: 'var(--text)', letterSpacing: '-0.01em', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+          {title} <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--text-secondary)' }}>· {subtitle}</span>
         </div>
       </div>
-      <span style={{ width: 36, height: 36, borderRadius: '50%', background: 'var(--brand-bg)', color: 'var(--brand)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 15, fontWeight: 800, flexShrink: 0 }}>
-        {initial}
-      </span>
       <button
         type="button"
         data-testid="partner-topbar-logout"
@@ -117,6 +113,7 @@ function NavButton({ testId, icon, label, active, onClick }) {
     <button
       type="button"
       data-testid={testId}
+      aria-current={active ? 'page' : undefined}
       onClick={onClick}
       style={{
         flex: 1,
@@ -148,6 +145,6 @@ const navBarStyle = {
   paddingBottom: 'env(safe-area-inset-bottom)',
   display: 'flex',
   alignItems: 'stretch',
-  background: '#fff',
+  background: 'var(--surface)',
   borderTop: '1px solid var(--border)',
 };

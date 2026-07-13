@@ -24,6 +24,14 @@ def _upload_photo(client: TestClient, token: str, order_id: str, photo_type: str
     assert response.status_code == 200, response.text
 
 
+def _confirm_partner_job(client: TestClient, token: str, order_id: str) -> None:
+    response = client.post(
+        f"/api/partner/jobs/{order_id}/confirm",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert response.status_code == 200, response.text
+
+
 def test_partner_upload_is_auto_visible(
     client: TestClient,
     seed_partner_token: str,
@@ -97,6 +105,7 @@ def test_start_partner_job_requires_before_photo(
     seed_partner_token: str,
     seed_order_id: str,
 ) -> None:
+    _confirm_partner_job(client, seed_partner_token, seed_order_id)
     response = client.post(
         f"/api/partner/jobs/{seed_order_id}/start",
         headers={"Authorization": f"Bearer {seed_partner_token}"},
@@ -112,6 +121,7 @@ def test_complete_partner_job_advances_to_delivery_needed(
     seed_admin_token: str,
     seed_order_id: str,
 ) -> None:
+    _confirm_partner_job(client, seed_partner_token, seed_order_id)
     _upload_photo(client, seed_partner_token, seed_order_id, "before")
     client.post(
         f"/api/partner/jobs/{seed_order_id}/start",
@@ -140,7 +150,10 @@ def test_complete_partner_job_advances_to_delivery_needed(
     assert order["work_started_at"]
     assert order["work_completed_at"]
     assert order["customer_signature_file_url"]
-    assert [log["message_type"] for log in order["message_logs"]] == ["customer_balance_due"]
+    assert sorted(log["message_type"] for log in order["message_logs"]) == [
+        "customer_balance_due",
+        "customer_schedule_confirmed",
+    ]
 
 
 def test_complete_partner_job_requires_after_photo_and_signature(
@@ -148,6 +161,7 @@ def test_complete_partner_job_requires_after_photo_and_signature(
     seed_partner_token: str,
     seed_order_id: str,
 ) -> None:
+    _confirm_partner_job(client, seed_partner_token, seed_order_id)
     _upload_photo(client, seed_partner_token, seed_order_id, "before")
     client.post(
         f"/api/partner/jobs/{seed_order_id}/start",
@@ -169,6 +183,7 @@ def test_complete_partner_job_rejects_spoofed_signature(
     seed_partner_token: str,
     seed_order_id: str,
 ) -> None:
+    _confirm_partner_job(client, seed_partner_token, seed_order_id)
     _upload_photo(client, seed_partner_token, seed_order_id, "before")
     client.post(
         f"/api/partner/jobs/{seed_order_id}/start",

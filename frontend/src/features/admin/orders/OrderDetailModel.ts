@@ -1,5 +1,5 @@
 import type { AdminOrder } from '../../../api/admin';
-import type { AdminMessageRecipient, AdminMessageType } from '../../../api/messages';
+import type { AdminMessageChannel, AdminMessageRecipient, AdminMessageType } from '../../../api/messages';
 
 export interface AdminPartnerOption {
   readonly id: string;
@@ -62,6 +62,7 @@ export interface MessageActionDraft {
   readonly recipientType: AdminMessageRecipient;
   readonly title: string;
   readonly successText: string;
+  readonly initialChannel?: AdminMessageChannel;
 }
 
 export interface MessagePreviewData {

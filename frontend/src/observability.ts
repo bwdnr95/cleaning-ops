@@ -1,5 +1,7 @@
 import * as Sentry from '@sentry/react';
 
+import { scrubCustomerTokensFromTelemetry } from './domain/customerTokenPrivacy';
+
 type SentryEnv = {
   VITE_SENTRY_DSN?: string;
   VITE_SENTRY_ENVIRONMENT?: string;
@@ -24,6 +26,9 @@ export function initSentry(): void {
     replaysSessionSampleRate: parseRate(env.VITE_SENTRY_REPLAYS_SAMPLE_RATE, 0),
     replaysOnErrorSampleRate: 1.0,
     integrations: [Sentry.browserTracingIntegration()],
+    beforeSend: (event) => scrubCustomerTokensFromTelemetry(event),
+    beforeSendTransaction: (event) => scrubCustomerTokensFromTelemetry(event),
+    beforeBreadcrumb: (breadcrumb) => scrubCustomerTokensFromTelemetry(breadcrumb),
   });
 }
 

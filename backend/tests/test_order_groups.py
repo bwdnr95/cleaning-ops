@@ -2,6 +2,8 @@ from fastapi.testclient import TestClient
 
 from app.domain.constants import OrderStatus, TimelineEventType
 
+CUSTOMER_HEADERS = {"X-Customer-Token": "ct2_seed-customer-token-2450"}
+
 
 def test_create_group_with_multiple_lines(client: TestClient, seed_admin_token: str) -> None:
     response = client.post(
@@ -47,7 +49,8 @@ def test_create_group_with_multiple_lines(client: TestClient, seed_admin_token: 
 
 def test_customer_verify_returns_group_with_lines(client: TestClient) -> None:
     response = client.post(
-        "/api/customer/orders/seed-customer-token-2450/verify",
+        "/api/customer/orders/verify",
+        headers=CUSTOMER_HEADERS,
         json={"phone_suffix": "5432"},
     )
 

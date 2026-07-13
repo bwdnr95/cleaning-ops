@@ -14,6 +14,7 @@ import {
   messageTypeLabel,
   photoTypeLabel,
   isMessageFailure,
+  isMessagePending,
 } from './OrderDetailFormat';
 import type { AdminOrderDetail, AdminPartnerOption, OrderDetailMessageLog, OrderDetailPhoto } from './OrderDetailModel';
 import { EmptyLine, KV, KVItem, Money, Section } from './OrderDetailPrimitives';
@@ -161,8 +162,8 @@ export function OrderDetailSummarySections({
                 </span>
                 <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 3, minWidth: 0 }}>
                   <Badge tone={messageStatusTone(log.status)}>{messageStatusLabel(log.status)}</Badge>
-                  {isMessageFailure(log.status) && (
-                    <span title={log.error_message || log.provider_error_code || ''} style={{ maxWidth: '100%', color: 'var(--danger-fg)', fontSize: 10, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {(isMessageFailure(log.status) || isMessagePending(log.status)) && (
+                    <span title={log.error_message || log.provider_error_code || ''} style={{ maxWidth: '100%', color: isMessagePending(log.status) ? 'var(--warn-fg)' : 'var(--danger-fg)', fontSize: 10, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                       {messageProviderErrorText(log)}
                     </span>
                   )}

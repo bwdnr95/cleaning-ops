@@ -14,7 +14,13 @@ from app.domain.payment_status import PAYMENT_CHECK_STATUSES, PaymentStatus
 from app.models.message import MessageLog
 from app.models.order import Order
 from app.models.photo import OrderPhoto
-from app.schemas.dashboard import DashboardRecentActivity, DashboardRecentMessage, DashboardRecentPhoto, DashboardSummary
+from app.schemas.dashboard import (
+    DashboardRecentActivity,
+    DashboardRecentMessage,
+    DashboardRecentPhoto,
+    DashboardSummary,
+)
+
 
 class DashboardService:
     def __init__(self, db: Session) -> None:
@@ -23,6 +29,7 @@ class DashboardService:
     def summary(self, *, today: date | None = None) -> DashboardSummary:
         current = today or business_today()
         tomorrow = current + timedelta(days=1)
+        pending_as_intakes = self._count(Order.as_intake_pending.is_(True))
         month_filter = (
             extract("year", Order.scheduled_date) == current.year,
             extract("month", Order.scheduled_date) == current.month,
@@ -56,7 +63,10 @@ class DashboardService:
                 Order.status.in_(WORK_DONE_STATUSES),
                 Order.payment_status.in_(PAYMENT_CHECK_STATUSES),
             ),
-            customer_check_needed=self._count(Order.status == OrderStatus.CUSTOMER_CHECK_NEEDED),
+            customer_check_needed=(
+                self._count(Order.status == OrderStatus.CUSTOMER_CHECK_NEEDED)
+                + pending_as_intakes
+            ),
             # 이번 달 완료 = 당월 방문 + 작업완료 상태.
             monthly_completed=self._count(Order.status.in_(WORK_DONE_STATUSES), *month_filter),
             # 이번 달 계약금액 = 당월 방문건(취소 제외)의 소비자가(총액=계약금+잔금) 합(결제 여부 무관).

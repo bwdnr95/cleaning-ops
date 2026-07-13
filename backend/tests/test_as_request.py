@@ -7,9 +7,19 @@
 from __future__ import annotations
 
 import pytest
+from sqlalchemy import select
 
-from app.db.seed import DEV_ORDER_ID, DEV_PARTNER_ID
-from app.domain.constants import MessageType, OrderStatus, TimelineEventType
+from app.db.seed import DEV_ORDER_ID, DEV_PARTNER_ID, DEV_PARTNER_USER_ID
+from app.domain.constants import MessageType, OrderStatus, PhotoType, TimelineEventType
+from app.models.message import MessageLog
+from app.models.partner import Partner
+from app.schemas.order import OrderUpdate
+from app.schemas.photo import PhotoCreate
+from app.services.orders import OrderService
+from app.services.photos import PhotoService
+
+PNG_BYTES = b"\x89PNG\r\n\x1a\ncleanops-test-image"
+CUSTOMER_HEADERS = {"X-Customer-Token": "ct2_seed-customer-token-2450"}
 
 
 def test_as_request_sets_flags_notifies_and_shows_on_partner_link(
@@ -47,6 +57,24 @@ def test_as_request_sets_flags_notifies_and_shows_on_partner_link(
         log["message_type"] == MessageType.CUSTOMER_AS_NOTICE.value
         for log in detail["message_logs"]
     )
+
+    retry = client.post(
+        f"/api/admin/orders/{DEV_ORDER_ID}/as-request",
+        json={"memo": "화장실 코너 재시공 필요"},
+        headers=admin_h,
+    )
+    assert retry.status_code == 409
+    detail_after_retry = client.get(
+        f"/api/admin/orders/{DEV_ORDER_ID}", headers=admin_h
+    ).json()
+    assert sum(
+        log["message_type"] == MessageType.PARTNER_AS_REQUEST.value
+        for log in detail_after_retry["message_logs"]
+    ) == 1
+    assert sum(
+        log["message_type"] == MessageType.CUSTOMER_AS_NOTICE.value
+        for log in detail_after_retry["message_logs"]
+    ) == 1
 
     # 운영자 결정(2026-07-03): AS 안내도 협력사가 고객에게 직접 재방문 조율하도록 실번호를 전달한다.
     messages = client.get("/api/admin/messages", headers=admin_h).json()
@@ -147,6 +175,327 @@ def test_customer_dto_excludes_as_fields():
     fields = set(CustomerOrderLineRead.model_fields.keys())
     assert "as_memo" not in fields
     assert "as_requested" not in fields
+
+
+def test_customer_as_intake_waits_for_admin_acceptance(
+    client,
+    seed_admin_token,
+    seed_partner_token,
+):
+    admin_h = {"Authorization": f"Bearer {seed_admin_token}"}
+    status_response = client.patch(
+        f"/api/admin/orders/{DEV_ORDER_ID}",
+        json={"status": OrderStatus.CUSTOMER_DELIVERY_DONE.value},
+        headers=admin_h,
+    )
+    assert status_response.status_code == 200, status_response.text
+
+    intake = client.post(
+        "/api/customer/orders/as-requests",
+        headers=CUSTOMER_HEADERS,
+        json={
+            "phone_suffix": "5432",
+            "order_id": DEV_ORDER_ID,
+            "memo": "욕실 실리콘 마감 상태를 다시 확인해주세요.",
+        },
+    )
+    assert intake.status_code == 200, intake.text
+    customer_line = next(line for line in intake.json()["lines"] if line["id"] == DEV_ORDER_ID)
+    assert customer_line["aftercare_status"] == "pending"
+    assert "as_requested" not in customer_line
+    assert "as_memo" not in customer_line
+
+    admin_detail = client.get(f"/api/admin/orders/{DEV_ORDER_ID}", headers=admin_h).json()
+    assert admin_detail["status"] == OrderStatus.CUSTOMER_DELIVERY_DONE.value
+    assert admin_detail["as_requested"] is False
+    assert admin_detail["as_intake_pending"] is True
+    assert admin_detail["as_memo"] == "욕실 실리콘 마감 상태를 다시 확인해주세요."
+    assert all(
+        log["message_type"]
+        not in {MessageType.PARTNER_AS_REQUEST.value, MessageType.CUSTOMER_AS_NOTICE.value}
+        for log in admin_detail["message_logs"]
+    )
+    assert any(
+        event["event_type"] == TimelineEventType.AS_INTAKE_REQUESTED.value
+        for event in admin_detail["timeline"]
+    )
+
+    partner_h = {"Authorization": f"Bearer {seed_partner_token}"}
+    pending_partner_job = client.get(
+        f"/api/partner/jobs/{DEV_ORDER_ID}",
+        headers=partner_h,
+    )
+    assert pending_partner_job.status_code == 200
+    assert pending_partner_job.json()["as_requested"] is False
+    assert pending_partner_job.json()["as_memo"] is None
+    assert pending_partner_job.json()["as_requested_at"] is None
+    blocked_start = client.post(
+        f"/api/partner/jobs/{DEV_ORDER_ID}/start",
+        headers=partner_h,
+    )
+    blocked_upload = client.post(
+        f"/api/partner/jobs/{DEV_ORDER_ID}/photos",
+        headers=partner_h,
+        data={"photo_type": "before"},
+        files={"file": ("pending-as.png", PNG_BYTES, "image/png")},
+    )
+    assert blocked_start.status_code == 409
+    assert blocked_upload.status_code == 409
+
+    dashboard = client.get("/api/admin/dashboard/summary", headers=admin_h)
+    assert dashboard.status_code == 200
+    assert dashboard.json()["customer_check_needed"] >= 1
+    pending_page = client.get(
+        "/api/admin/orders/page",
+        params={"status": "customer_check", "visit_preset": "all"},
+        headers=admin_h,
+    )
+    assert pending_page.status_code == 200
+    assert any(item["id"] == DEV_ORDER_ID for item in pending_page.json()["items"])
+
+    accepted = client.post(
+        f"/api/admin/orders/{DEV_ORDER_ID}/as-request",
+        json={"memo": ""},
+        headers=admin_h,
+    )
+    assert accepted.status_code == 200, accepted.text
+    assert accepted.json()["as_requested"] is True
+    assert accepted.json()["as_intake_pending"] is False
+    assert accepted.json()["as_memo"] == "욕실 실리콘 마감 상태를 다시 확인해주세요."
+
+    paid_during_as = client.patch(
+        f"/api/admin/orders/{DEV_ORDER_ID}",
+        json={"payment_status": "paid"},
+        headers=admin_h,
+    )
+    assert paid_during_as.status_code == 200
+    assert paid_during_as.json()["status"] == OrderStatus.CUSTOMER_CHECK_NEEDED.value
+    assert paid_during_as.json()["as_requested"] is True
+
+    accepted_detail = client.get(f"/api/admin/orders/{DEV_ORDER_ID}", headers=admin_h).json()
+    as_message_types = [
+        log["message_type"]
+        for log in accepted_detail["message_logs"]
+        if log["message_type"]
+        in {MessageType.PARTNER_AS_REQUEST.value, MessageType.CUSTOMER_AS_NOTICE.value}
+    ]
+    assert sorted(as_message_types) == sorted(
+        [MessageType.PARTNER_AS_REQUEST, MessageType.CUSTOMER_AS_NOTICE]
+    )
+    verified = client.post(
+        "/api/customer/orders/verify",
+        headers=CUSTOMER_HEADERS,
+        json={"phone_suffix": "5432"},
+    )
+    customer_line = next(line for line in verified.json()["lines"] if line["id"] == DEV_ORDER_ID)
+    assert customer_line["aftercare_status"] == "in_progress"
+
+
+def test_customer_as_intake_is_authenticated_and_idempotent(
+    client,
+    seed_admin_token,
+):
+    admin_h = {"Authorization": f"Bearer {seed_admin_token}"}
+    client.patch(
+        f"/api/admin/orders/{DEV_ORDER_ID}",
+        json={"status": OrderStatus.CUSTOMER_DELIVERY_DONE.value},
+        headers=admin_h,
+    )
+    url = "/api/customer/orders/as-requests"
+    payload = {
+        "phone_suffix": "5432",
+        "order_id": DEV_ORDER_ID,
+        "memo": "현관 바닥 오염을 확인해주세요.",
+    }
+
+    wrong_suffix = client.post(
+        url,
+        json={**payload, "phone_suffix": "0000"},
+        headers=CUSTOMER_HEADERS,
+    )
+    assert wrong_suffix.status_code == 404
+    foreign_order = client.post(
+        url,
+        json={**payload, "order_id": "not-this-group"},
+        headers=CUSTOMER_HEADERS,
+    )
+    assert foreign_order.status_code == 404
+
+    first = client.post(url, json=payload, headers=CUSTOMER_HEADERS)
+    second = client.post(url, json=payload, headers=CUSTOMER_HEADERS)
+    conflicting = client.post(
+        url,
+        json={**payload, "memo": "다른 요청"},
+        headers=CUSTOMER_HEADERS,
+    )
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert conflicting.status_code == 409
+    detail = client.get(f"/api/admin/orders/{DEV_ORDER_ID}", headers=admin_h).json()
+    intake_events = [
+        event
+        for event in detail["timeline"]
+        if event["event_type"] == TimelineEventType.AS_INTAKE_REQUESTED.value
+    ]
+    assert len(intake_events) == 1
+
+
+def test_pending_as_reassignment_waits_for_admin_acceptance(
+    db_session,
+    seed_order,
+) -> None:
+    partner = Partner(
+        id="pending-as-partner",
+        name="Pending AS Partner",
+        phone="01044445555",
+        is_active=True,
+    )
+    db_session.add(partner)
+    seed_order.status = OrderStatus.CUSTOMER_DELIVERY_DONE
+    db_session.commit()
+    service = OrderService(db_session)
+    service.submit_customer_as_intake(
+        seed_order.id,
+        group_id=seed_order.group_id,
+        memo="Pending review",
+    )
+
+    service.update(seed_order.id, OrderUpdate(partner_id=partner.id))
+    pending_partner_messages = list(
+        db_session.scalars(
+            select(MessageLog).where(
+                MessageLog.order_id == seed_order.id,
+                MessageLog.recipient_partner_id == partner.id,
+            )
+        )
+    )
+    assert pending_partner_messages == []
+
+    service.request_as(seed_order.id, memo="", actor_user_id=None)
+    accepted_partner_types = list(
+        db_session.scalars(
+            select(MessageLog.message_type).where(
+                MessageLog.order_id == seed_order.id,
+                MessageLog.recipient_partner_id == partner.id,
+            )
+        )
+    )
+    assert accepted_partner_types == [MessageType.PARTNER_AS_REQUEST]
+
+
+def test_as_acceptance_rejects_inactive_partner(db_session, seed_order) -> None:
+    inactive_partner = Partner(
+        id="inactive-as-partner",
+        name="Inactive AS Partner",
+        phone="01055556666",
+        is_active=False,
+    )
+    db_session.add(inactive_partner)
+    seed_order.status = OrderStatus.CUSTOMER_DELIVERY_DONE
+    seed_order.partner_id = inactive_partner.id
+    db_session.commit()
+
+    with pytest.raises(ValueError, match="partner_not_found"):
+        OrderService(db_session).request_as(
+            seed_order.id,
+            memo="Do not disclose",
+            actor_user_id=None,
+        )
+
+    db_session.refresh(seed_order)
+    assert seed_order.as_requested is False
+
+
+def test_paid_active_as_stays_startable_until_partner_completion(
+    db_session,
+    seed_order,
+) -> None:
+    seed_order.status = OrderStatus.CUSTOMER_DELIVERY_DONE
+    seed_order.partner_id = DEV_PARTNER_ID
+    db_session.commit()
+    service = OrderService(db_session)
+    service.request_as(seed_order.id, memo="Paid rework", actor_user_id=None)
+
+    updated = service.update(
+        seed_order.id,
+        OrderUpdate(payment_status="paid"),
+    )
+
+    assert updated.status == OrderStatus.CUSTOMER_CHECK_NEEDED
+    assert updated.as_requested is True
+    PhotoService(db_session).upload_for_partner(
+        PhotoCreate(
+            order_id=seed_order.id,
+            photo_type=PhotoType.BEFORE,
+            file_url="/uploads/paid-active-as-before.png",
+            file_name="paid-active-as-before.png",
+        ),
+        user_id=DEV_PARTNER_USER_ID,
+        partner_id=DEV_PARTNER_ID,
+    )
+    started = service.start_partner_job(
+        seed_order.id,
+        actor_user_id=DEV_PARTNER_USER_ID,
+        partner_id=DEV_PARTNER_ID,
+    )
+    assert started.status == OrderStatus.IN_PROGRESS
+
+
+def test_legacy_completed_as_memo_is_not_treated_as_pending_intake(
+    db_session,
+    seed_order,
+) -> None:
+    seed_order.status = OrderStatus.COMPLETED
+    seed_order.as_requested = False
+    seed_order.as_intake_pending = False
+    seed_order.as_memo = "Completed legacy AS memo"
+    db_session.commit()
+
+    submitted = OrderService(db_session).submit_customer_as_intake(
+        seed_order.id,
+        group_id=seed_order.group_id,
+        memo="New AS request",
+    )
+
+    assert submitted.as_intake_pending is True
+    assert submitted.as_memo == "New AS request"
+
+
+def test_cancelling_pending_as_clears_customer_pending_state(
+    client,
+    seed_admin_token,
+) -> None:
+    admin_h = {"Authorization": f"Bearer {seed_admin_token}"}
+    client.patch(
+        f"/api/admin/orders/{DEV_ORDER_ID}",
+        json={"status": OrderStatus.CUSTOMER_DELIVERY_DONE.value},
+        headers=admin_h,
+    )
+    intake = client.post(
+        "/api/customer/orders/as-requests",
+        headers=CUSTOMER_HEADERS,
+        json={
+            "phone_suffix": "5432",
+            "order_id": DEV_ORDER_ID,
+            "memo": "Cancel pending intake",
+        },
+    )
+    assert intake.status_code == 200
+
+    cancelled = client.patch(
+        f"/api/admin/orders/{DEV_ORDER_ID}",
+        json={"status": OrderStatus.CANCELLED.value},
+        headers=admin_h,
+    )
+    assert cancelled.status_code == 200
+    assert cancelled.json()["as_intake_pending"] is False
+    verified = client.post(
+        "/api/customer/orders/verify",
+        headers=CUSTOMER_HEADERS,
+        json={"phone_suffix": "5432"},
+    )
+    line = next(item for item in verified.json()["lines"] if item["id"] == DEV_ORDER_ID)
+    assert line["aftercare_status"] is None
 
 
 def test_create_order_cannot_set_as_fields(client, seed_admin_token):

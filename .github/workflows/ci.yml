@@ -14,6 +14,20 @@ jobs:
   backend:
     name: Backend (ruff + pytest)
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: cleanops
+          POSTGRES_PASSWORD: cleanops
+          POSTGRES_DB: cleanops_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U cleanops -d cleanops_ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     defaults:
       run:
         working-directory: backend
@@ -48,10 +62,21 @@ jobs:
           SECRET_KEY: "ci-secret-not-used-in-prod-but-32chars-long-x"
         run: python -m pytest -q
 
-      - name: Render Alembic SQL (PostgreSQL)
+      - name: Apply Alembic migrations (SQLite)
         env:
-          DATABASE_URL: "postgresql+psycopg://user:pass@localhost:5432/cleanops"
-        run: python -m alembic upgrade head --sql > /tmp/alembic_render.sql
+          DATABASE_URL: "sqlite:///./ci_migrations.sqlite"
+        run: |
+          python -m alembic upgrade head
+          python -m scripts.seed_dev
+          python -m alembic current
+
+      - name: Apply Alembic migrations (PostgreSQL)
+        env:
+          DATABASE_URL: "postgresql+psycopg://cleanops:cleanops@localhost:5432/cleanops_ci"
+        run: |
+          python -m alembic upgrade head
+          python -m scripts.seed_dev
+          python -m alembic current
 
   frontend:
     name: Frontend (typecheck + lint + build)

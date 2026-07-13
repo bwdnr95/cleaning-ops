@@ -55,6 +55,7 @@ export function PartnerJobDetail({ onDetailOpenChange = undefined } = {}) {
   const beforeInputRef = React.useRef<HTMLInputElement | null>(null);
   const afterInputRef = React.useRef<HTMLInputElement | null>(null);
   const etcInputRef = React.useRef<HTMLInputElement | null>(null);
+  const detailRegionRef = React.useRef<HTMLDivElement | null>(null);
 
   React.useEffect(() => {
     onDetailOpenChange?.(Boolean(selectedJobId));
@@ -75,6 +76,14 @@ export function PartnerJobDetail({ onDetailOpenChange = undefined } = {}) {
     () => groupJobPhotos(filterCurrentEvidencePhotos(job)),
     [job],
   );
+
+  React.useEffect(() => {
+    if (!selectedJobId || !job?.id) {
+      return undefined;
+    }
+    const frameId = window.requestAnimationFrame(() => detailRegionRef.current?.focus());
+    return () => window.cancelAnimationFrame(frameId);
+  }, [selectedJobId, job?.id]);
 
   React.useEffect(() => {
     setUploadError(null);
@@ -188,8 +197,12 @@ export function PartnerJobDetail({ onDetailOpenChange = undefined } = {}) {
       }
       refreshFlow();
     } catch (requestError) {
-      if (requestError instanceof ApiError && requestError.detail === 'before_photo_required_for_start') {
+      if (requestError instanceof ApiError && requestError.detail === 'partner_confirmation_required') {
+        setStatusError('작업 일정을 먼저 확인해주세요.');
+      } else if (requestError instanceof ApiError && requestError.detail === 'before_photo_required_for_start') {
         setStatusError('비포 사진을 1장 이상 업로드한 뒤 작업을 시작해주세요.');
+      } else if (requestError instanceof ApiError && requestError.detail === 'schedule_required_for_confirmation') {
+        setStatusError('관리자가 방문일을 확정한 뒤 작업 일정을 확인할 수 있습니다.');
       } else if (requestError instanceof ApiError && requestError.detail === 'completion_evidence_required') {
         setStatusError('비포/애프터 사진과 고객 서명을 모두 준비한 뒤 완료 처리해주세요.');
       } else {
@@ -237,12 +250,14 @@ export function PartnerJobDetail({ onDetailOpenChange = undefined } = {}) {
     );
   }
 
-  const canConfirm = CONFIRMABLE_JOB_STATUSES.includes(job.status);
-  const canStart = STARTABLE_JOB_STATUSES.includes(job.status);
+  const hasConfirmAction = CONFIRMABLE_JOB_STATUSES.includes(job.status) || Boolean(job.partner_confirmation_required);
+  const canConfirm = hasConfirmAction && Boolean(job.scheduled_date);
+  const hasApprovedAftercare = job.status !== '고객확인필요' || job.as_requested;
+  const canStart = STARTABLE_JOB_STATUSES.includes(job.status) && hasApprovedAftercare && !job.partner_confirmation_required;
   const canComplete = COMPLETABLE_JOB_STATUSES.includes(job.status);
-  const canUploadPhotos = PHOTO_UPLOADABLE_JOB_STATUSES.includes(job.status);
+  const canUploadPhotos = PHOTO_UPLOADABLE_JOB_STATUSES.includes(job.status) && hasApprovedAftercare && !job.partner_confirmation_required;
   const photoUploadDisabled = isUploading || !canUploadPhotos;
-  const statusLock = getPartnerStatusLock(job.status);
+  const statusLock = getPartnerStatusLock(job.status, job.as_requested);
   const jobAddress = formatJobAddress(job);
   const hasBeforePhoto = currentEvidencePhotoGroups.before.length > 0;
   const hasAfterPhoto = currentEvidencePhotoGroups.after.length > 0;
@@ -251,13 +266,13 @@ export function PartnerJobDetail({ onDetailOpenChange = undefined } = {}) {
   const hasChecklistSignature = canComplete ? hasCurrentSignature : hasRecordedSignature;
   const canSubmitStart = canStart && hasBeforePhoto;
   const canSubmitComplete = canComplete && hasBeforePhoto && hasAfterPhoto && hasCurrentSignature;
-  const footerHelpText = partnerFooterHelpText(job.status);
+  const footerHelpText = partnerFooterHelpText(job.status, job.as_requested);
 
   return (
-    <div data-testid="partner-job-detail-page" style={{ height: '100%', display: 'flex', flexDirection: 'column', background: '#f4f6f8', overflow: 'hidden' }}>
-      <div style={{ padding: '12px 16px 10px', background: '#fff', borderBottom: '1px solid var(--border)' }}>
+    <div data-testid="partner-job-detail-page" style={{ height: '100%', display: 'flex', flexDirection: 'column', background: 'var(--bg-subtle)', overflow: 'hidden' }}>
+      <div style={{ padding: '12px 16px 10px', background: 'var(--surface)', borderBottom: '1px solid var(--border)' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-          <button onClick={() => setSelectedJobId(null)} style={{ padding: 0, border: 'none', background: 'transparent', cursor: 'pointer' }}>
+          <button type="button" aria-label="작업 목록으로 돌아가기" onClick={() => setSelectedJobId(null)} style={{ padding: 0, border: 'none', background: 'transparent', cursor: 'pointer' }}>
             <Icon name="chevronLeft" size={20}/>
           </button>
           <PartnerStatusBadge status={job.status}/>
@@ -267,7 +282,7 @@ export function PartnerJobDetail({ onDetailOpenChange = undefined } = {}) {
         <div style={{ fontSize: 12, color: 'var(--text-tertiary)', marginTop: 2 }}>{formatQuantity(job.size_or_quantity) || job.service_detail || '상세 수량 미입력'}</div>
       </div>
 
-      <div className="scroll" style={{ flex: 1, overflow: 'auto', padding: 12 }}>
+      <div ref={detailRegionRef} role="region" aria-label="작업 상세" tabIndex={0} className="scroll" style={{ flex: 1, overflow: 'auto', padding: 12 }}>
         <Panel>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10, paddingBottom: 10, borderBottom: '1px solid var(--divider)' }}>
             <span style={{ width: 32, height: 32, borderRadius: 8, background: 'var(--info-bg)', color: 'var(--info-fg)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -300,7 +315,7 @@ export function PartnerJobDetail({ onDetailOpenChange = undefined } = {}) {
             </div>
           </div>
           <SectionLabel>특별 요청</SectionLabel>
-          <div className="multiline-text" style={{ padding: 10, background: 'var(--warn-bg)', border: '1px solid var(--warn-border)', borderRadius: 8, fontSize: 12.5, lineHeight: 1.5, color: '#78350f' }}>
+          <div className="multiline-text" style={{ padding: 10, background: 'var(--warn-bg)', border: '1px solid var(--warn-border)', borderRadius: 8, fontSize: 12.5, lineHeight: 1.5, color: 'var(--warn-fg)' }}>
             {job.special_request || '별도 요청 사항이 없습니다.'}
           </div>
           {job.as_requested && (
@@ -326,7 +341,7 @@ export function PartnerJobDetail({ onDetailOpenChange = undefined } = {}) {
               (job.memos || []).map((memo, index) => (
                 <div key={memo.id || index} data-testid="partner-memo-item" style={{ padding: 10, background: 'var(--bg-subtle)', border: '1px solid var(--border)', borderRadius: 8 }}>
                   <div className="multiline-text" style={{ fontSize: 12.5, lineHeight: 1.5, color: 'var(--text)' }}>{memo.text}</div>
-                  <div style={{ fontSize: 10.5, color: 'var(--text-tertiary)', marginTop: 6 }}>{formatKoreanDateTime(memo.created_at)}</div>
+                  <div style={{ fontSize: 10.5, color: 'var(--text-secondary)', marginTop: 6 }}>{formatKoreanDateTime(memo.created_at)}</div>
                 </div>
               ))
             )}
@@ -358,7 +373,7 @@ export function PartnerJobDetail({ onDetailOpenChange = undefined } = {}) {
         <PartnerMessagesPanel jobId={job.id} />
 
         {!canUploadPhotos && (
-          <div data-testid="partner-photo-upload-locked" style={{ margin: '0 2px 10px', padding: '8px 10px', border: '1px solid var(--border)', borderRadius: 8, background: 'var(--bg-subtle)', color: 'var(--text-secondary)', fontSize: 11.5, lineHeight: 1.45 }}>
+          <div className="ko-copy" data-testid="partner-photo-upload-locked" style={{ margin: '0 2px 10px', padding: '8px 10px', border: '1px solid var(--border)', borderRadius: 8, background: 'var(--bg-subtle)', color: 'var(--text-secondary)', fontSize: 11.5, lineHeight: 1.45 }}>
             {photoUploadLockMessage(job.status)}
           </div>
         )}
@@ -418,7 +433,7 @@ export function PartnerJobDetail({ onDetailOpenChange = undefined } = {}) {
           <Panel>
             <SectionLabel>고객 서명</SectionLabel>
             {job.has_recorded_customer_signature && !signatureDataUrl && (
-              <div style={{ marginBottom: 8, fontSize: 11.5, color: 'var(--text-tertiary)', lineHeight: 1.5 }}>
+              <div className="ko-copy" style={{ marginBottom: 8, fontSize: 11.5, color: 'var(--text-tertiary)', lineHeight: 1.5 }}>
                 이전 서명 기록이 있어도 이번 작업 완료에는 고객님의 새 서명이 필요합니다.
               </div>
             )}
@@ -431,13 +446,18 @@ export function PartnerJobDetail({ onDetailOpenChange = undefined } = {}) {
         )}
       </div>
 
-      <div style={{ padding: '10px 14px calc(12px + env(safe-area-inset-bottom))', background: '#fff', borderTop: '1px solid var(--border)', boxShadow: '0 -4px 12px rgba(15,23,42,0.04)' }}>
-        {canConfirm || canStart || canComplete ? (
+      <div style={{ padding: '10px 14px calc(12px + env(safe-area-inset-bottom))', background: 'var(--surface)', borderTop: '1px solid var(--border)' }}>
+        {hasConfirmAction || canStart || canComplete ? (
           <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: 8 }}>
-            {canConfirm && (
-              <button data-testid="partner-confirm-job" disabled={isSavingStatus} onClick={() => void handleStatusAction('confirm')} style={primaryCtaStyle(isSavingStatus)}>
+            {hasConfirmAction && (
+              <button data-testid="partner-confirm-job" disabled={isSavingStatus || !canConfirm} onClick={() => void handleStatusAction('confirm')} style={primaryCtaStyle(isSavingStatus || !canConfirm)}>
                 <Icon name="check" size={16}/> 작업 일정 확인
               </button>
+            )}
+            {hasConfirmAction && !canConfirm && (
+              <div role="status" style={{ color: 'var(--warn-fg)', fontSize: 12, lineHeight: 1.45 }}>
+                관리자가 방문일을 확정하면 작업 일정을 확인할 수 있습니다.
+              </div>
             )}
             {canStart && (
               <button data-testid="partner-start-job" disabled={isSavingStatus || !canSubmitStart} onClick={() => void handleStatusAction('start')} style={secondaryCtaStyle(isSavingStatus || !canSubmitStart)}>
@@ -451,13 +471,13 @@ export function PartnerJobDetail({ onDetailOpenChange = undefined } = {}) {
             )}
           </div>
         ) : (
-          <div data-testid="partner-status-locked" style={{ minHeight: 48, border: '1px solid var(--border)', borderRadius: 10, background: statusLock.tone === 'danger' ? 'var(--danger-bg)' : 'var(--bg-subtle)', color: statusLock.tone === 'danger' ? 'var(--danger-fg)' : 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: 10, padding: '8px 10px' }}>
+          <div className="ko-copy" data-testid="partner-status-locked" style={{ minHeight: 48, border: '1px solid var(--border)', borderRadius: 10, background: statusLock.tone === 'danger' ? 'var(--danger-bg)' : 'var(--bg-subtle)', color: statusLock.tone === 'danger' ? 'var(--danger-fg)' : 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: 10, padding: '8px 10px' }}>
             <span style={{ width: 30, height: 30, borderRadius: 8, background: statusLock.tone === 'success' ? 'var(--success-bg)' : statusLock.tone === 'danger' ? 'var(--danger-bg)' : 'var(--warn-bg)', color: statusLock.tone === 'success' ? 'var(--success-fg)' : statusLock.tone === 'danger' ? 'var(--danger-fg)' : 'var(--warn-fg)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
               <Icon name={statusLock.icon} size={15}/>
             </span>
             <span style={{ minWidth: 0 }}>
               <span style={{ display: 'block', fontSize: 12.5, fontWeight: 800, color: 'var(--text)' }}>{statusLock.title}</span>
-              <span style={{ display: 'block', fontSize: 11, color: 'var(--text-tertiary)', marginTop: 1 }}>{statusLock.description}</span>
+              <span style={{ display: 'block', fontSize: 11, color: 'var(--text-secondary)', marginTop: 1 }}>{statusLock.description}</span>
             </span>
           </div>
         )}
@@ -495,19 +515,19 @@ function PartnerJobList({ jobs, onSelect, onReload = undefined }) {
   }, [jobs, filter]);
 
   return (
-    <div data-testid="partner-jobs-page" style={{ height: '100%', background: '#f4f6f8', overflow: 'auto', padding: 14 }}>
+    <div data-testid="partner-jobs-page" style={{ height: '100%', background: 'var(--bg-subtle)', overflow: 'auto', padding: 14 }}>
       <PartnerHomeHero jobs={jobs} activeFilter={filter} onToggleFilter={toggleFilter} />
 
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
         <h2 style={{ margin: 0, fontSize: 16.5, fontWeight: 800 }}>
           {filter ? `${BUCKET_LABELS[filter]} 작업` : '내 작업'}
           {jobs.length > 0 && (
-            <span style={{ marginLeft: 6, fontSize: 13, fontWeight: 600, color: 'var(--text-tertiary)' }}>{visibleJobs.length}건</span>
+            <span style={{ marginLeft: 6, fontSize: 13, fontWeight: 600, color: 'var(--text-secondary)' }}>{visibleJobs.length}건</span>
           )}
         </h2>
         <div style={{ flex: 1 }} />
         {filter && (
-          <button type="button" onClick={() => setFilter(null)} style={{ height: 32, padding: '0 11px', borderRadius: 8, border: '1px solid var(--border)', background: '#fff', color: 'var(--text-secondary)', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>
+          <button type="button" onClick={() => setFilter(null)} style={{ height: 32, padding: '0 11px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text-secondary)', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>
             전체 보기
           </button>
         )}
@@ -517,7 +537,7 @@ function PartnerJobList({ jobs, onSelect, onReload = undefined }) {
             data-testid="partner-jobs-refresh"
             onClick={onReload}
             aria-label="새로고침"
-            style={{ width: 34, height: 34, flexShrink: 0, borderRadius: 9, border: '1px solid var(--border)', background: '#fff', color: 'var(--text-secondary)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}
+            style={{ width: 34, height: 34, flexShrink: 0, borderRadius: 8, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text-secondary)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}
           >
             <Icon name="refresh" size={15} />
           </button>
@@ -525,7 +545,7 @@ function PartnerJobList({ jobs, onSelect, onReload = undefined }) {
       </div>
 
       {jobs.length === 0 ? (
-        <div data-testid="partner-jobs-empty" style={{ marginTop: 8, background: '#fff', border: '1px solid var(--border)', borderRadius: 12, padding: '34px 20px', textAlign: 'center' }}>
+        <div data-testid="partner-jobs-empty" style={{ marginTop: 8, background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8, padding: '34px 20px', textAlign: 'center' }}>
           <div style={{ width: 54, height: 54, margin: '0 auto 14px', borderRadius: 15, background: 'var(--brand-bg)', color: 'var(--brand)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
             <Icon name="inbox" size={26} />
           </div>
@@ -537,23 +557,23 @@ function PartnerJobList({ jobs, onSelect, onReload = undefined }) {
             <button
               type="button"
               onClick={onReload}
-              style={{ marginTop: 18, height: 40, padding: '0 18px', borderRadius: 10, border: '1px solid var(--brand)', background: '#fff', color: 'var(--brand)', fontSize: 13, fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}
+              style={{ marginTop: 18, height: 40, padding: '0 18px', borderRadius: 8, border: '1px solid var(--brand)', background: 'var(--surface)', color: 'var(--brand)', fontSize: 13, fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}
             >
               <Icon name="refresh" size={14} /> 새로고침
             </button>
           )}
         </div>
       ) : visibleJobs.length === 0 ? (
-        <div style={{ background: '#fff', border: '1px solid var(--border)', borderRadius: 12, padding: '26px 20px', textAlign: 'center', color: 'var(--text-tertiary)' }}>
+        <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8, padding: '26px 20px', textAlign: 'center', color: 'var(--text-secondary)' }}>
           <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 12 }}>{BUCKET_LABELS[filter]} 상태인 작업이 없어요</div>
-          <button type="button" onClick={() => setFilter(null)} style={{ height: 36, padding: '0 16px', borderRadius: 9, border: '1px solid var(--brand)', background: '#fff', color: 'var(--brand)', fontSize: 12.5, fontWeight: 700, cursor: 'pointer' }}>
+          <button type="button" onClick={() => setFilter(null)} style={{ height: 36, padding: '0 16px', borderRadius: 8, border: '1px solid var(--brand)', background: 'var(--surface)', color: 'var(--brand)', fontSize: 12.5, fontWeight: 700, cursor: 'pointer' }}>
             전체 보기
           </button>
         </div>
       ) : (
         <div style={{ display: 'grid', gap: 10 }}>
           {visibleJobs.map((job) => (
-            <button key={job.id} data-testid={`partner-job-row-${job.id}`} onClick={() => onSelect(job.id)} style={{ textAlign: 'left', background: '#fff', border: '1px solid var(--border)', borderRadius: 10, padding: 14, cursor: 'pointer' }}>
+            <button type="button" key={job.id} data-testid={`partner-job-row-${job.id}`} onClick={() => onSelect(job.id)} style={{ textAlign: 'left', background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8, padding: 14, cursor: 'pointer' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
                 <PartnerStatusBadge status={job.status}/>
                 {job.is_recurring && <span data-testid="partner-recurring-badge"><Badge tone="brand">정기</Badge></span>}
@@ -589,19 +609,18 @@ function PartnerHomeHero({ jobs, activeFilter = null, onToggleFilter = undefined
     <div
       data-testid="partner-home-hero"
       style={{
-        background: 'linear-gradient(135deg, rgba(255,255,255,0.16), rgba(0,0,0,0.10)), var(--brand)',
-        borderRadius: 16,
+        background: 'var(--brand)',
+        borderRadius: 8,
         padding: '16px 16px 14px',
         marginBottom: 14,
-        color: '#fff',
-        boxShadow: '0 8px 20px rgba(15,23,42,0.16)',
+        color: 'var(--surface)',
       }}
     >
       <div style={{ fontSize: 13.5, fontWeight: 700 }}>
         {greetingPrefix()}{manager ? `, ${manager}님` : ''}
       </div>
-      <div style={{ fontSize: 11.5, opacity: 0.85, display: 'flex', alignItems: 'center', gap: 5, marginTop: 5 }}>
-        <Icon name="calendar" size={12} color="#fff" /> {todayLabel()}
+      <div style={{ fontSize: 11.5, display: 'flex', alignItems: 'center', gap: 5, marginTop: 5 }}>
+        <Icon name="calendar" size={12} color="var(--surface)" /> {todayLabel()}
       </div>
       <div style={{ fontSize: 16.5, fontWeight: 800, marginTop: 6, letterSpacing: 0 }}>
         {heroHeadline(jobs, summary)}
@@ -620,19 +639,20 @@ function HeroStat({ label, value, active, onClick }) {
     <button
       type="button"
       onClick={onClick}
+      aria-pressed={active}
       style={{
         flex: 1,
-        border: active ? '1.5px solid #fff' : '1.5px solid transparent',
-        background: active ? 'rgba(255,255,255,0.30)' : 'rgba(255,255,255,0.16)',
-        color: '#fff',
-        borderRadius: 11,
+        border: active ? '2px solid var(--surface)' : '1px solid var(--border)',
+        background: active ? 'var(--brand-bg)' : 'var(--surface)',
+        color: 'var(--brand)',
+        borderRadius: 8,
         padding: '9px 6px',
         textAlign: 'center',
         cursor: 'pointer',
       }}
     >
       <div style={{ fontSize: 19, fontWeight: 800, lineHeight: 1 }}>{value}</div>
-      <div style={{ fontSize: 11, opacity: 0.95, marginTop: 4 }}>{label}</div>
+      <div style={{ fontSize: 11, marginTop: 4 }}>{label}</div>
     </button>
   );
 }
@@ -734,7 +754,7 @@ function EvidenceRow({ label, value, done }) {
     <div style={{ display: 'flex', alignItems: 'center', gap: 8, minHeight: 26 }}>
       <Badge tone={done ? 'success' : 'warn'}>{done ? '완료' : '필요'}</Badge>
       <span style={{ flex: 1, fontSize: 12.5, color: 'var(--text)', fontWeight: 600 }}>{label}</span>
-      <span style={{ fontSize: 11.5, color: 'var(--text-tertiary)' }}>{value}</span>
+      <span style={{ fontSize: 11.5, color: 'var(--text-secondary)' }}>{value}</span>
     </div>
   );
 }
@@ -748,7 +768,7 @@ function PhotoPanel({ title, tone, photos, onAdd, disabled, isUploading = false 
         <span style={{ fontSize: 13, fontWeight: 600 }}>{title}</span>
         <Badge tone={tone}>{photos.length}장</Badge>
         <div style={{ flex: 1 }}/>
-        <button onClick={onAdd} disabled={disabled} style={{ height: 26, padding: '0 10px', border: 'none', borderRadius: 6, background: tone === 'success' ? 'var(--success-bg)' : 'var(--brand-bg)', color: tone === 'success' ? 'var(--success-fg)' : 'var(--brand)', fontSize: 12, fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: 4, cursor: disabled ? 'default' : 'pointer' }}>
+        <button onClick={onAdd} disabled={disabled} style={{ height: 26, padding: '0 10px', border: `1px solid ${disabled ? 'var(--border)' : 'transparent'}`, borderRadius: 6, background: disabled ? 'var(--bg-muted)' : tone === 'success' ? 'var(--success-bg)' : 'var(--brand-bg)', color: disabled ? 'var(--text-tertiary)' : tone === 'success' ? 'var(--success-fg)' : 'var(--brand)', fontSize: 12, fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: 4, cursor: disabled ? 'not-allowed' : 'pointer' }}>
           <Icon name="plus" size={12}/> 추가
         </button>
       </div>
@@ -761,12 +781,12 @@ function PhotoPanel({ title, tone, photos, onAdd, disabled, isUploading = false 
               loading="lazy"
               style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
             />
-            <span style={{ position: 'absolute', left: 4, bottom: 4, maxWidth: 'calc(100% - 8px)', height: 16, padding: '0 4px', borderRadius: 4, background: 'rgba(15,23,42,0.78)', color: '#fff', fontSize: 9, fontWeight: 700, display: 'inline-flex', alignItems: 'center' }}>
+            <span style={{ position: 'absolute', left: 4, bottom: 4, maxWidth: 'calc(100% - 8px)', height: 16, padding: '0 4px', borderRadius: 4, background: 'var(--text)', color: 'var(--surface)', fontSize: 9, fontWeight: 700, display: 'inline-flex', alignItems: 'center' }}>
               {index + 1}
             </span>
           </figure>
         ))}
-        <button onClick={onAdd} disabled={disabled} style={{ aspectRatio: '1', border: '1.5px dashed var(--border-strong)', borderRadius: 6, background: 'var(--bg-subtle)', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: disabled ? 'default' : 'pointer', flexDirection: 'column', gap: 2, color: 'var(--text-tertiary)' }}>
+        <button onClick={onAdd} disabled={disabled} style={{ aspectRatio: '1', border: '1.5px dashed var(--border-strong)', borderRadius: 6, background: disabled ? 'var(--bg-muted)' : 'var(--bg-subtle)', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: disabled ? 'not-allowed' : 'pointer', flexDirection: 'column', gap: 2, color: disabled ? 'var(--text-tertiary)' : 'var(--text-secondary)', opacity: disabled ? 0.72 : 1 }}>
           <Icon name="camera" size={16}/>
           <span style={{ fontSize: 9.5 }}>{uploadLabel}</span>
         </button>
@@ -775,7 +795,10 @@ function PhotoPanel({ title, tone, photos, onAdd, disabled, isUploading = false 
   );
 }
 
-function partnerFooterHelpText(status) {
+function partnerFooterHelpText(status, asRequested = false) {
+  if (status === '고객확인필요' && !asRequested) {
+    return '운영팀 확인이 끝나면 작업 가능 여부와 일정을 안내드립니다.';
+  }
   if (status === '고객확인필요') {
     return 'AS 요청을 확인한 뒤 비포 사진을 올리고 작업을 시작하세요.';
   }
@@ -812,7 +835,7 @@ function PartnerMessagesPanel({ jobId }) {
               <span style={{ marginLeft: 'auto' }}><Badge tone={messageStatusTone(message.status)}>{messageStatusLabel(message.status)}</Badge></span>
             </div>
             <div className="multiline-text" style={{ fontSize: 12.5, lineHeight: 1.5, color: 'var(--text)' }}>{message.content}</div>
-            <div style={{ fontSize: 10.5, color: 'var(--text-tertiary)', marginTop: 6 }}>{formatKoreanDateTime(message.sent_at || message.created_at)}</div>
+            <div style={{ fontSize: 10.5, color: 'var(--text-secondary)', marginTop: 6 }}>{formatKoreanDateTime(message.sent_at || message.created_at)}</div>
           </div>
         ))}
       </div>
@@ -820,7 +843,7 @@ function PartnerMessagesPanel({ jobId }) {
   }
 
   return (
-    <div data-testid="partner-messages-panel" style={{ background: '#fff', borderRadius: 10, padding: 14, marginBottom: 10, border: '1px solid var(--border)' }}>
+    <div data-testid="partner-messages-panel" style={{ background: 'var(--surface)', borderRadius: 8, padding: 14, marginBottom: 10, border: '1px solid var(--border)' }}>
       <SectionLabel>운영팀 안내</SectionLabel>
       {body}
     </div>
@@ -828,7 +851,7 @@ function PartnerMessagesPanel({ jobId }) {
 }
 
 function Panel({ children }) {
-  return <div style={{ background: '#fff', borderRadius: 10, padding: 14, marginBottom: 10, border: '1px solid var(--border)' }}>{children}</div>;
+  return <div style={{ background: 'var(--surface)', borderRadius: 8, padding: 14, marginBottom: 10, border: '1px solid var(--border)' }}>{children}</div>;
 }
 
 function InfoRow({ icon, children }) {
@@ -845,7 +868,7 @@ function ActionButton({ icon, label, href }) {
     height: 36,
     border: '1px solid var(--border)',
     borderRadius: 8,
-    background: '#fff',
+    background: 'var(--surface)',
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
@@ -884,7 +907,7 @@ function PartnerStatusBadge({ status }) {
 
 function PartnerState({ text, tone = 'muted', actions = null }) {
   return (
-    <div style={{ height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 14, padding: 24, background: '#f4f6f8', color: tone === 'danger' ? 'var(--danger-fg)' : 'var(--text-tertiary)', fontSize: 13, textAlign: 'center' }}>
+    <div style={{ height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 14, padding: 24, background: 'var(--bg-subtle)', color: tone === 'danger' ? 'var(--danger-fg)' : 'var(--text-secondary)', fontSize: 13, textAlign: 'center' }}>
       <div>{text}</div>
       {actions}
     </div>
@@ -898,8 +921,8 @@ function partnerStateButtonStyle(variant) {
     padding: '0 16px',
     borderRadius: 10,
     border: isBrand ? 'none' : '1px solid var(--border)',
-    background: isBrand ? 'var(--brand)' : '#fff',
-    color: isBrand ? '#fff' : 'var(--text)',
+    background: isBrand ? 'var(--brand)' : 'var(--surface)',
+    color: isBrand ? 'var(--surface)' : 'var(--text)',
     fontSize: 13,
     fontWeight: 700,
     cursor: 'pointer',
@@ -930,10 +953,10 @@ function filterCurrentEvidencePhotos(job) {
   if (!job?.photos) {
     return [];
   }
-  if (!job.as_requested || !job.as_requested_at) {
+  if (!job.evidence_required_after) {
     return job.photos;
   }
-  const requestedAt = Date.parse(job.as_requested_at);
+  const requestedAt = Date.parse(job.evidence_required_after);
   if (Number.isNaN(requestedAt)) {
     return job.photos;
   }
@@ -1042,7 +1065,7 @@ function memoSaveButtonStyle(disabled) {
     height: 44,
     marginTop: 8,
     background: disabled ? 'var(--bg-subtle)' : 'var(--brand)',
-    color: disabled ? 'var(--text-tertiary)' : '#fff',
+    color: disabled ? 'var(--text-tertiary)' : 'var(--surface)',
     border: disabled ? '1px solid var(--border)' : 'none',
     borderRadius: 10,
     fontSize: 14,
@@ -1092,7 +1115,15 @@ function partnerStatusTone(status) {
   return 'neutral';
 }
 
-function getPartnerStatusLock(status) {
+function getPartnerStatusLock(status, asRequested = false) {
+  if (status === '고객확인필요' && !asRequested) {
+    return {
+      icon: 'clock',
+      tone: 'neutral',
+      title: '운영팀 확인 중입니다',
+      description: '운영팀에서 요청 내용을 확인한 뒤 작업 가능 여부와 일정을 안내드립니다.',
+    };
+  }
   if (status === '취소') {
     return {
       icon: 'x',
@@ -1129,9 +1160,9 @@ function primaryCtaStyle(disabled) {
   return {
     width: '100%',
     height: 46,
-    background: 'var(--brand)',
-    color: '#fff',
-    border: 'none',
+    background: disabled ? 'var(--bg-muted)' : 'var(--brand)',
+    color: disabled ? 'var(--text-tertiary)' : 'var(--surface)',
+    border: disabled ? '1px solid var(--border)' : '1px solid var(--brand)',
     borderRadius: 10,
     fontSize: 14.5,
     fontWeight: 700,
@@ -1139,15 +1170,15 @@ function primaryCtaStyle(disabled) {
     alignItems: 'center',
     justifyContent: 'center',
     gap: 6,
-    cursor: disabled ? 'default' : 'pointer',
+    cursor: disabled ? 'not-allowed' : 'pointer',
   };
 }
 
 function secondaryCtaStyle(disabled) {
   return {
     ...primaryCtaStyle(disabled),
-    background: '#fff',
-    color: 'var(--brand)',
-    border: '1px solid var(--brand)',
+    background: disabled ? 'var(--bg-muted)' : 'var(--surface)',
+    color: disabled ? 'var(--text-tertiary)' : 'var(--brand)',
+    border: `1px solid ${disabled ? 'var(--border)' : 'var(--brand)'}`,
   };
 }

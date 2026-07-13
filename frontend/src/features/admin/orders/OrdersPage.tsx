@@ -26,24 +26,29 @@ import {
 
 // status → soft dot color (used in dot-style badge)
 const STATUS_DOT = {
-  '신규접수':     '#94a3b8',
-  '상담중':       '#8b5cf6',
-  '협력사확인중': '#f59e0b',
-  '일정확정':     '#3b82f6',
-  '전날안내필요': '#f59e0b',
-  '전날안내완료': '#3b82f6',
-  '작업예정':     '#3b82f6',
-  '작업진행':     '#4f46e5',
-  '사진검수대기': '#f59e0b',
-  '고객전달필요': '#f59e0b',
-  '고객전달완료': '#10b981',
-  '고객확인필요': '#ef4444',
-  '서비스완료':   '#10b981',
-  '취소':         '#cbd5e1',
+  '신규접수':     'var(--text-tertiary)',
+  '상담중':       'var(--purple-fg)',
+  '협력사확인중': 'var(--warn-fg)',
+  '일정확정':     'var(--info-fg)',
+  '전날안내필요': 'var(--warn-fg)',
+  '전날안내완료': 'var(--info-fg)',
+  '작업예정':     'var(--info-fg)',
+  '작업진행':     'var(--brand)',
+  '사진검수대기': 'var(--warn-fg)',
+  '고객전달필요': 'var(--warn-fg)',
+  '고객전달완료': 'var(--success-fg)',
+  '고객확인필요': 'var(--danger-fg)',
+  '서비스완료':   'var(--success-fg)',
+  '취소':         'var(--text-tertiary)',
 };
 
-function StatusDot({ status }) {
-  const color = STATUS_DOT[status] || '#94a3b8';
+function StatusDot({ status, asIntakePending = false, asRequested = false }) {
+  const color = asIntakePending
+    ? 'var(--warn-fg)'
+    : (asRequested && status === '고객확인필요' ? 'var(--info-fg)' : (STATUS_DOT[status] || 'var(--text-tertiary)'));
+  const label = asIntakePending
+    ? 'AS 접수 확인'
+    : (asRequested && status === '고객확인필요' ? 'AS 처리 중' : orderStatusLabel(status));
   return (
     <span style={{
       display: 'inline-flex', alignItems: 'center', gap: 6,
@@ -55,9 +60,9 @@ function StatusDot({ status }) {
       <span style={{
         width: 7, height: 7, borderRadius: '50%',
         background: color, flexShrink: 0,
-        boxShadow: `0 0 0 3px ${color}1a`,
+        boxShadow: '0 0 0 3px var(--bg-muted)',
       }}/>
-      <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>{orderStatusLabel(status)}</span>
+      <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>{label}</span>
     </span>
   );
 }
@@ -66,11 +71,11 @@ function PaidPill({ paid, isUnpaid }) {
   const map = {
     paid:    { label: '완납',   color: 'var(--paid-fg)' },
     partial: { label: '계약금', color: 'var(--deposit-fg)' },
-    pending: { label: isUnpaid ? '미수' : '대기', color: isUnpaid ? 'var(--unpaid-fg)' : 'var(--text-quaternary)' },
+    pending: { label: isUnpaid ? '미수' : '대기', color: isUnpaid ? 'var(--unpaid-fg)' : 'var(--text-secondary)' },
     refund:  { label: '환불',   color: 'var(--danger-fg)' },
   };
   const c = map[paid];
-  if (!c) return <span style={{ color: 'var(--text-quaternary)' }}>—</span>;
+  if (!c) return <span style={{ color: 'var(--text-secondary)' }}>—</span>;
   return (
     <span style={{
       display: 'inline-flex', alignItems: 'center', gap: 5,
@@ -85,7 +90,7 @@ function PaidPill({ paid, isUnpaid }) {
 function EvidencePill({ type, status }) {
   const badge = receiptBadge(type, status);
   if (badge.text === '-') return <span style={{ color: 'var(--text-quaternary)' }}>—</span>;
-  const color = badge.tone === 'ok' ? '#10b981' : badge.tone === 'warn' ? '#f59e0b' : 'var(--text-quaternary)';
+  const color = badge.tone === 'ok' ? 'var(--success-fg)' : badge.tone === 'warn' ? 'var(--warn-fg)' : 'var(--text-secondary)';
   return (
     <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 11, fontWeight: 500, color }}>
       <span style={{ width: 5, height: 5, borderRadius: '50%', background: color }}/>
@@ -97,18 +102,18 @@ function EvidencePill({ type, status }) {
 function SimplePill({ kind, value }) {
   const photo = {
     none:     null,
-    partial:  { label: '진행', color: '#3b82f6' },
-    wait:     { label: '비공개', color: '#f59e0b' },
-    approved: { label: '공개', color: '#10b981' },
+    partial:  { label: '진행', color: 'var(--info-fg)' },
+    wait:     { label: '비공개', color: 'var(--warn-fg)' },
+    approved: { label: '공개', color: 'var(--success-fg)' },
   };
   const deliver = {
-    pending:   { label: '대기', color: '#94a3b8' },
-    done:      { label: '전달', color: '#10b981' },
+    pending:   { label: '대기', color: 'var(--text-secondary)' },
+    done:      { label: '전달', color: 'var(--success-fg)' },
     cancelled: null,
   };
   const map = kind === 'photo' ? photo : deliver;
   const c = map[value];
-  if (!c) return <span style={{ color: 'var(--text-quaternary)' }}>—</span>;
+  if (!c) return <span style={{ color: 'var(--text-secondary)' }}>—</span>;
   return (
     <span style={{
       display: 'inline-flex', alignItems: 'center', gap: 5,
@@ -216,6 +221,7 @@ const BULK_MESSAGE_OPTIONS: ReadonlyArray<{
   { value: 'partner_assignment', label: '협력사 배정 안내', recipient: 'partner' },
   { value: 'customer_photo_ready', label: '고객 사진 확인 안내', recipient: 'customer' },
   { value: 'customer_balance_due', label: '고객 잔금 안내', recipient: 'customer' },
+  { value: 'customer_access_link', label: '고객 접속 링크 LMS', recipient: 'customer' },
 ];
 // v3: 상태 칸(한글 라벨 '일정 및 협력사 확인중' 등)이 좁아 옆 칸으로 글자가 겹치던 문제 해결.
 // 상태 폭을 키우고 주소를 약간 줄여 재배분. 키를 올려 저장된(또는 드래그로 깨진) 폭을 새 기본값으로 리셋한다.
@@ -981,7 +987,7 @@ export function OrdersPage({ onOpenOrder, onCreateOrder, onEditOrder, initialTab
       {/* Table — airy, no inner borders, hover float.
           넓은 화면에선 칸이 화면폭에 맞춰 늘어나고(유동), 화면이 좁아지면 칸을 뭉개지 않고
           최소너비(min-width)를 유지한 채 가로 스크롤이 생긴다 → 글자 겹침/뭉개짐 없이 항상 가독. */}
-      <div ref={tableScrollRef} data-testid="orders-table-scroll" className="scroll" style={{ flex: 1, overflowY: 'auto', overflowX: 'auto', padding: '4px 4px 20px' }}>
+      <div ref={tableScrollRef} role="region" aria-label="주문 목록 표" tabIndex={0} data-testid="orders-table-scroll" className="scroll" style={{ flex: 1, overflowY: 'auto', overflowX: 'auto', padding: '4px 4px 20px' }}>
         {actionError && <ListNotice text={actionError} tone="danger" />}
         {actionNotice && <ListNotice testId="orders-bulk-notice" text={actionNotice.text} tone={actionNotice.tone} />}
         {ordersResource.isLoading && <ListNotice text="주문 목록을 불러오는 중입니다." />}
@@ -1057,7 +1063,11 @@ export function OrdersPage({ onOpenOrder, onCreateOrder, onEditOrder, initialTab
                   </td>
                   <td>
                     <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-                      <StatusDot status={o.status}/>
+                      <StatusDot
+                        status={o.status}
+                        asIntakePending={o.asIntakePending}
+                        asRequested={o.asRequested}
+                      />
                       {o.isGroupFirst && o.isGroupCancelled && (
                         <span style={{ fontSize: 10.5, color: 'var(--danger-fg)', background: 'var(--danger-bg)', borderRadius: 4, padding: '1px 5px' }}>
                           취소됨
@@ -1081,10 +1091,10 @@ export function OrdersPage({ onOpenOrder, onCreateOrder, onEditOrder, initialTab
                   <td>
                     {isUnassigned
                       ? <span style={{
-                          fontSize: 11.5, fontWeight: 500, color: '#b45309',
+                          fontSize: 11.5, fontWeight: 500, color: 'var(--warn-fg)',
                           display: 'inline-flex', alignItems: 'center', gap: 5,
                         }}>
-                          <span style={{ width: 5, height: 5, borderRadius: '50%', background: '#f59e0b' }}/>
+                          <span style={{ width: 5, height: 5, borderRadius: '50%', background: 'var(--warn-fg)' }}/>
                           미배정
                         </span>
                       : <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
@@ -1136,7 +1146,7 @@ export function OrdersPage({ onOpenOrder, onCreateOrder, onEditOrder, initialTab
                   <td>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}>
                       <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{o.customer}</span>
-                      <span className="mono" style={{ fontSize: 10.5, color: 'var(--text-quaternary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      <span className="mono" style={{ fontSize: 10.5, color: 'var(--text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                         {o.phone}
                       </span>
                     </div>
@@ -1145,10 +1155,10 @@ export function OrdersPage({ onOpenOrder, onCreateOrder, onEditOrder, initialTab
                     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 2 }}>
                       <span style={{ fontWeight: 600 }}>
                         {o.amount === 0
-                          ? <span style={{ color: 'var(--text-quaternary)', fontWeight: 400 }}>—</span>
+                          ? <span style={{ color: 'var(--text-secondary)', fontWeight: 400 }}>—</span>
                           : `₩${o.amount.toLocaleString()}`}
                       </span>
-                      <span style={{ color: 'var(--text-quaternary)', fontSize: 10.5, fontWeight: 500 }}>
+                      <span style={{ color: 'var(--text-secondary)', fontSize: 10.5, fontWeight: 500 }}>
                         도급 {o.partnerPrice === 0 ? '—' : `₩${o.partnerPrice.toLocaleString()}`}
                       </span>
                       {o.vatType === 'excluded' && <span style={{ color: 'var(--warn-fg)', fontSize: 10.5, fontWeight: 500 }}>VAT 별도</span>}
@@ -1215,7 +1225,7 @@ export function OrdersPage({ onOpenOrder, onCreateOrder, onEditOrder, initialTab
 }
 
 function Insight({ num, label, warn = false, danger = false, muted = false }) {
-  const numColor = danger ? '#dc2626' : warn ? '#b45309' : muted ? 'var(--text-secondary)' : 'var(--text)';
+  const numColor = danger ? 'var(--danger-fg)' : warn ? 'var(--warn-fg)' : muted ? 'var(--text-secondary)' : 'var(--text)';
   return (
     <span style={{ display: 'inline-flex', alignItems: 'baseline', gap: 6 }}>
       <span style={{
@@ -1556,6 +1566,8 @@ function toOrderRow(order) {
     recurringContractId: order.recurring_contract_id || null,
     status,
     rawStatus,
+    asIntakePending: Boolean(order.as_intake_pending),
+    asRequested: Boolean(order.as_requested),
     receivedRaw: order.received_date,
     received: formatDate(order.received_date),
     visit: formatDate(order.scheduled_date) || '미정',

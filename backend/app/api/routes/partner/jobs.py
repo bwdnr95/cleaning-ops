@@ -1,8 +1,8 @@
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from sqlalchemy.orm import Session
 
-from app.core.config import settings
 from app.api.deps import CurrentUser, ensure_partner_scope, get_session, require_partner
+from app.core.config import settings
 from app.domain.constants import PhotoType, RecipientType, TimelineEventType
 from app.repositories.messages import MessageRepository
 from app.repositories.order_groups import OrderGroupRepository
@@ -12,9 +12,16 @@ from app.repositories.timeline import TimelineRepository
 from app.schemas.message import PartnerMessageRead
 from app.schemas.order import PartnerJobCompleteRequest, PartnerJobRead, PartnerMemoCreate
 from app.schemas.photo import PartnerPhotoRead
-from app.services.orders import OrderService, partner_memo_events, to_partner_job_dto
+from app.services.orders import (
+    OrderService,
+    is_partner_confirmation_required,
+    is_partner_photo_uploadable,
+    partner_memo_events,
+    to_partner_job_dto,
+)
 from app.services.photos import PhotoService, normalize_uploaded_photo_content_type
 from app.services.storage import get_storage_provider
+from app.services.timeline import TimelineService
 
 router = APIRouter()
 
@@ -36,6 +43,16 @@ def list_my_jobs(
             as_requested_at=timeline_repo.latest_created_at(
                 order_id=order.id,
                 event_type=TimelineEventType.AS_REQUESTED,
+            ),
+            evidence_required_after=TimelineService(db).latest_partner_work_epoch(
+                order_id=order.id,
+                partner_id=order.partner_id,
+                work_completed_at=order.work_completed_at,
+                work_is_active=is_partner_photo_uploadable(order),
+            ),
+            partner_confirmation_required=is_partner_confirmation_required(
+                order,
+                TimelineService(db),
             ),
         )
         for order in OrderRepository(db).list_for_partner(partner_id)
@@ -66,6 +83,16 @@ def get_my_job(
             order_id=order.id,
             event_type=TimelineEventType.AS_REQUESTED,
         ),
+        evidence_required_after=TimelineService(db).latest_partner_work_epoch(
+            order_id=order.id,
+            partner_id=order.partner_id,
+            work_completed_at=order.work_completed_at,
+            work_is_active=is_partner_photo_uploadable(order),
+        ),
+        partner_confirmation_required=is_partner_confirmation_required(
+            order,
+            TimelineService(db),
+        ),
     )
 
 
@@ -83,8 +110,12 @@ def start_my_job(
             partner_id=partner_id,
         )
     except ValueError as exc:
+        if str(exc) == "as_intake_approval_required":
+            raise HTTPException(status_code=409, detail="as_intake_approval_required") from exc
         if str(exc) == "invalid_status_transition":
             raise HTTPException(status_code=409, detail="invalid_status_transition") from exc
+        if str(exc) == "partner_confirmation_required":
+            raise HTTPException(status_code=409, detail="partner_confirmation_required") from exc
         if str(exc) == "before_photo_required_for_start":
             raise HTTPException(status_code=422, detail="before_photo_required_for_start") from exc
         raise HTTPException(status_code=404, detail="order_not_found") from exc
@@ -97,6 +128,16 @@ def start_my_job(
         as_requested_at=TimelineRepository(db).latest_created_at(
             order_id=order.id,
             event_type=TimelineEventType.AS_REQUESTED,
+        ),
+        evidence_required_after=TimelineService(db).latest_partner_work_epoch(
+            order_id=order.id,
+            partner_id=order.partner_id,
+            work_completed_at=order.work_completed_at,
+            work_is_active=is_partner_photo_uploadable(order),
+        ),
+        partner_confirmation_required=is_partner_confirmation_required(
+            order,
+            TimelineService(db),
         ),
     )
 
@@ -115,8 +156,15 @@ def confirm_my_job(
             partner_id=partner_id,
         )
     except ValueError as exc:
+        if str(exc) == "as_intake_approval_required":
+            raise HTTPException(status_code=409, detail="as_intake_approval_required") from exc
         if str(exc) == "invalid_status_transition":
             raise HTTPException(status_code=409, detail="invalid_status_transition") from exc
+        if str(exc) == "schedule_required_for_confirmation":
+            raise HTTPException(
+                status_code=422,
+                detail="schedule_required_for_confirmation",
+            ) from exc
         raise HTTPException(status_code=404, detail="order_not_found") from exc
     photos = PhotoRepository(db).list_for_order(order.id)
     group = OrderGroupRepository(db).get(order.group_id)
@@ -127,6 +175,16 @@ def confirm_my_job(
         as_requested_at=TimelineRepository(db).latest_created_at(
             order_id=order.id,
             event_type=TimelineEventType.AS_REQUESTED,
+        ),
+        evidence_required_after=TimelineService(db).latest_partner_work_epoch(
+            order_id=order.id,
+            partner_id=order.partner_id,
+            work_completed_at=order.work_completed_at,
+            work_is_active=is_partner_photo_uploadable(order),
+        ),
+        partner_confirmation_required=is_partner_confirmation_required(
+            order,
+            TimelineService(db),
         ),
     )
 
@@ -147,6 +205,8 @@ def complete_my_job(
             customer_signature_data_url=payload.customer_signature_data_url if payload else "",
         )
     except ValueError as exc:
+        if str(exc) == "as_intake_approval_required":
+            raise HTTPException(status_code=409, detail="as_intake_approval_required") from exc
         if str(exc) == "invalid_status_transition":
             raise HTTPException(status_code=409, detail="invalid_status_transition") from exc
         if str(exc) == "completion_evidence_required":
@@ -161,6 +221,16 @@ def complete_my_job(
         as_requested_at=TimelineRepository(db).latest_created_at(
             order_id=order.id,
             event_type=TimelineEventType.AS_REQUESTED,
+        ),
+        evidence_required_after=TimelineService(db).latest_partner_work_epoch(
+            order_id=order.id,
+            partner_id=order.partner_id,
+            work_completed_at=order.work_completed_at,
+            work_is_active=is_partner_photo_uploadable(order),
+        ),
+        partner_confirmation_required=is_partner_confirmation_required(
+            order,
+            TimelineService(db),
         ),
     )
 
@@ -244,6 +314,16 @@ def add_job_memo(
             order_id=order.id,
             event_type=TimelineEventType.AS_REQUESTED,
         ),
+        evidence_required_after=TimelineService(db).latest_partner_work_epoch(
+            order_id=order.id,
+            partner_id=order.partner_id,
+            work_completed_at=order.work_completed_at,
+            work_is_active=is_partner_photo_uploadable(order),
+        ),
+        partner_confirmation_required=is_partner_confirmation_required(
+            order,
+            TimelineService(db),
+        ),
     )
 
 
@@ -274,6 +354,5 @@ def list_job_messages(
             created_at=log.created_at,
         )
         for log in logs
-        if log.recipient_type == RecipientType.PARTNER
-        and log.recipient_partner_id == partner_id
+        if log.recipient_type == RecipientType.PARTNER and log.recipient_partner_id == partner_id
     ]

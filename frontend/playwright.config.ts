@@ -1,7 +1,10 @@
 import { defineConfig, devices } from '@playwright/test';
 
-const frontendPort = Number(process.env.E2E_FRONTEND_PORT ?? 5176);
-const backendPort = Number(process.env.E2E_BACKEND_PORT ?? 8003);
+const runSlot = process.pid % 1_000;
+const frontendPort = Number(process.env.E2E_FRONTEND_PORT ?? 21_000 + runSlot);
+const backendPort = Number(process.env.E2E_BACKEND_PORT ?? 31_000 + runSlot);
+process.env.E2E_FRONTEND_PORT = String(frontendPort);
+process.env.E2E_BACKEND_PORT = String(backendPort);
 const frontendUrl = `http://127.0.0.1:${frontendPort}`;
 const backendUrl = `http://127.0.0.1:${backendPort}`;
 

@@ -172,7 +172,7 @@ export function RecurringContractDetail({
           <Term label="협력사 정산 방식" value={formatBillingMode(contract.partner_billing_mode)} />
           <Term label="협력사 도급가" value={formatAmount(contract.partner_payment_amount ?? null)} />
           <Term label="다음 회차" value={contract.next_due_date ?? '-'} />
-          <Term label="고객 링크" value={`/c/${contract.customer_token}`} mono />
+          <Term label="고객 링크" value={`/c#token=${encodeURIComponent(contract.customer_token)}`} mono />
         </dl>
 
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 16 }}>

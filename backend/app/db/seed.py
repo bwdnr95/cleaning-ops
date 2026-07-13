@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 from datetime import date
+from decimal import Decimal
 
 from sqlalchemy.orm import Session
 
@@ -30,7 +31,7 @@ DEV_PARTNER_USER_ID = "seed-partner-user"
 DEV_ORDER_GROUP_ID = "seed-order-group-2450"
 DEV_ORDER_ID = "seed-order-2450"
 DEV_ORDER_TIMELINE_ID = "seed-order-2450-created"
-DEV_CUSTOMER_TOKEN = "seed-customer-token-2450"
+DEV_CUSTOMER_TOKEN = "ct2_seed-customer-token-2450"
 DEV_SERVICE_CATEGORY_ID = "seed-service-category-cleaning"
 DEV_SERVICE_ITEM_ID = "seed-service-item-move-in"
 
@@ -177,7 +178,7 @@ def ensure_service_catalog(db: Session) -> tuple[ServiceCategory, ServiceItem]:
         )
         db.add(item)
     elif not item.partner_base_price:
-        item.partner_base_price = 215600
+        item.partner_base_price = Decimal("215600")
 
     return category, item
 

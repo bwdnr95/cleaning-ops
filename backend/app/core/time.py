@@ -12,10 +12,14 @@ def utc_now() -> datetime:
     return datetime.now(UTC)
 
 
-def to_business_time(value: datetime) -> datetime:
+def to_utc(value: datetime) -> datetime:
     if value.tzinfo is None:
-        value = value.replace(tzinfo=UTC)
-    return value.astimezone(business_timezone())
+        return value.replace(tzinfo=UTC)
+    return value.astimezone(UTC)
+
+
+def to_business_time(value: datetime) -> datetime:
+    return to_utc(value).astimezone(business_timezone())
 
 
 def business_now() -> datetime:

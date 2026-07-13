@@ -1,15 +1,13 @@
 from __future__ import annotations
 
 from decimal import Decimal
-from typing import Protocol
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from app.models.order import Order
 
 
-class _ConsumerTotalOrder(Protocol):
-    total_amount: Decimal | None
-    onsite_extra_amount: Decimal | None
-
-
-def order_consumer_total(order: _ConsumerTotalOrder) -> Decimal:
+def order_consumer_total(order: Order) -> Decimal:
     """소비자가 총금액(VAT 포함) = total_amount + onsite_extra_amount.
 
     total_amount 는 현장추가를 제외한 소비자 기본가이고,

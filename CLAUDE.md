@@ -56,7 +56,7 @@ Defined in `backend/app/db/seed.py`:
 - Admin: `admin@cleanops.kr` / `AdminPass123!`
 - Partner: `01012345678` (or `partner@cleanops.kr`) / `PartnerPass123!`
 - Sample order: `seed-order-2450`
-- Customer link token: `seed-customer-token-2450`, phone suffix `5432`
+- Customer link token: `ct2_seed-customer-token-2450`, phone suffix `5432`
 
 ## Architecture (the parts that take multiple files to understand)
 
@@ -87,7 +87,7 @@ Top-level composition lives in `app/api/router.py` (see `.master/first_demo_code
 Partner upload → `is_customer_visible=true` (자동 공개). **상태는 변경되지 않는다** (협력사가 사진을 여러 번 나눠 올려도 IN_PROGRESS 그대로). timeline에는 `photo_uploaded` + `photo_approved`(system actor)만 기록된다. 협력사가 명시적으로 "작업 완료" 액션을 실행하면 비로소 `IN_PROGRESS → 고객전달필요`로 전환(사진 1장 이상 + IN_PROGRESS 가드 통과 시). 관리자는 잘못 올라온 사진을 `POST /api/admin/photos/{id}/revoke`로 비공개로 되돌릴 수 있고, 이 때 `photo_revoked` 이벤트가 남는다. 마지막 공개 사진이 사라지고 주문이 `고객전달필요` 상태였다면 `작업진행`으로 되돌아간다(`고객전달완료`/`서비스완료`는 유지). 파일 타입은 **byte signature**로 검증한다 (`services/photos.py`).
 
 ### Message provider abstraction
-`services/messages.py` exposes a `MessageProvider` interface. `MockMessageProvider` and an SOL-API provider both exist; provider is selected via `core/config.py` settings. SOL credentials/template IDs are not yet wired — Mock is the default. Webhook receiver is at `api/routes/webhooks.py`. Both success and failure must land in `message_logs`. Templates and required variables live in `domain/message_templates.py`. The four message types are `customer_schedule_confirmed`, `customer_day_before`, `partner_assignment`, `customer_photo_ready`.
+`services/messages.py` exposes a `MessageProvider` interface. `MockMessageProvider` and the SOLAPI provider both exist; provider is selected via `core/config.py` settings. Production fails closed unless the approved SOLAPI profile and all nine template IDs are configured. Webhook receiver is at `api/routes/webhooks.py`. Both success and failure must land in `message_logs`. Templates and required variables live in `domain/message_templates.py`.
 
 ### Domain constants — one place
 `backend/app/domain/constants.py` is the central definition for the 14 order statuses, photo types (`before` / `after` / `etc`), message types, and timeline event types. Do not introduce parallel string literals.
@@ -97,7 +97,7 @@ Partner upload → `is_customer_visible=true` (자동 공개). **상태는 변�
 - `src/store/authStore.tsx` — auth state; tokens currently in `localStorage` (R1 convenience; httpOnly cookie is the eventual target).
 - `src/app/App.tsx` — assembles admin desktop / partner mobile / customer mobile shells; mode switch is a demo affordance.
 - `src/features/<role>/<screen>/` — feature-organized screens. Backend DTOs map 1:1 to feature page concerns.
-- Customer link routing: `/c/...` and `/customer?t=...` both supported (sessionStorage holds the token across the suffix-verify step).
+- Customer link routing: only `/c#token=<customer-token>` carries an authentication token. Startup captures the fragment into redacted history state, clears the URL to `/c`, and customer API calls use the stable path plus `X-Customer-Token`. Legacy path/query token URLs are discarded and must not be generated.
 
 ## Working Style for This Repo
 

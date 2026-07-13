@@ -28,7 +28,7 @@ test('고객이 같은 링크로 두 라인 카드를 모두 본다', async ({ p
     { service_name: 'line B', partner_id: null, total_amount: 100000 },
   ]);
 
-  await page.goto(`/c/${flow.customerToken}`);
+  await page.goto(`/c#token=${encodeURIComponent(flow.customerToken)}`);
   await page.getByTestId('customer-phone-suffix').fill(flow.phoneSuffix);
   await page.getByTestId('customer-verify-submit').click();
 

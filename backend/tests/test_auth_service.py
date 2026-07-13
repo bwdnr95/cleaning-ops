@@ -1,7 +1,18 @@
+from concurrent.futures import ThreadPoolExecutor
+from typing import cast
+
+import pytest
+from sqlalchemy.orm import Session
+
+import app.services.auth as auth_module
+from app.core.config import settings
 from app.core.security import create_refresh_token, hash_password, hash_token_jti
 from app.domain.constants import UserRole
 from app.models.refresh_token import RefreshToken
 from app.models.user import User
+from app.repositories.refresh_tokens import RefreshTokenRepository
+from app.repositories.users import UserRepository
+from app.services.audit import AuditService
 from app.services.auth import AuthError, AuthService
 
 
@@ -10,7 +21,15 @@ class FakeUserRepository:
         self.user = user
 
     def get_by_identifier(self, identifier: str) -> User | None:
-        return self.user
+        if self.user is None:
+            return None
+        normalized = identifier.strip().lower()
+        candidates = {
+            value.strip().lower()
+            for value in (self.user.email, self.user.phone)
+            if value
+        }
+        return self.user if normalized in candidates else None
 
     def get(self, id_: str) -> User | None:
         if self.user and self.user.id == id_:
@@ -68,11 +87,23 @@ def make_user(*, role: UserRole, partner_id: str | None = None, active: bool = T
 
 def make_service(user: User | None) -> AuthService:
     service = AuthService.__new__(AuthService)
-    service.db = FakeDb()
-    service.users = FakeUserRepository(user)
-    service.refresh_tokens = FakeRefreshTokenRepository()
-    service.audit = FakeAuditService()
+    service.db = cast(Session, cast(object, FakeDb()))
+    service.users = cast(UserRepository, cast(object, FakeUserRepository(user)))
+    service.refresh_tokens = cast(
+        RefreshTokenRepository,
+        cast(object, FakeRefreshTokenRepository()),
+    )
+    service.audit = cast(AuditService, cast(object, FakeAuditService()))
     return service
+
+
+@pytest.fixture(autouse=True)
+def reset_login_attempt_cache():
+    with auth_module._login_attempts_lock:
+        auth_module._login_attempts.clear()
+    yield
+    with auth_module._login_attempts_lock:
+        auth_module._login_attempts.clear()
 
 
 def test_admin_login_returns_token_and_user() -> None:
@@ -119,6 +150,72 @@ def test_login_rejects_wrong_role() -> None:
         raise AssertionError("expected AuthError")
 
 
+def test_login_attempt_reservation_is_atomic(monkeypatch) -> None:
+    service = make_service(make_user(role=UserRole.ADMIN))
+    login_key = "admin:user:user-1"
+    monkeypatch.setattr(settings, "login_max_attempts", 2)
+
+    def consume() -> str:
+        try:
+            service._consume_login_attempt(login_key)
+        except AuthError as exc:
+            return str(exc)
+        return "allowed"
+
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        results = list(executor.map(lambda _: consume(), range(8)))
+
+    assert results.count("allowed") == 2
+    assert results.count("login_locked") == 6
+
+
+def test_unknown_identifier_churn_cannot_evict_locked_account(monkeypatch) -> None:
+    service = make_service(make_user(role=UserRole.ADMIN))
+    monkeypatch.setattr(settings, "login_max_attempts", 2)
+    monkeypatch.setattr(auth_module, "LOGIN_ATTEMPT_CACHE_MAX_ENTRIES", 2)
+
+    for _ in range(2):
+        with pytest.raises(AuthError, match="invalid_credentials"):
+            service.login(
+                identifier="test@example.com",
+                password="wrong-password",
+                expected_role=UserRole.ADMIN,
+            )
+
+    for index in range(20):
+        try:
+            service.login(
+                identifier=f"unknown-{index}@example.com",
+                password="wrong-password",
+                expected_role=UserRole.ADMIN,
+            )
+        except AuthError:
+            pass
+
+    with pytest.raises(AuthError, match="login_locked"):
+        service.login(
+            identifier="test@example.com",
+            password="password",
+            expected_role=UserRole.ADMIN,
+        )
+    assert len(auth_module._login_attempts) <= 2
+
+
+def test_login_failure_audit_records_supplied_peer_ip() -> None:
+    service = make_service(make_user(role=UserRole.ADMIN))
+
+    with pytest.raises(AuthError, match="invalid_credentials"):
+        service.login(
+            identifier="test@example.com",
+            password="wrong-password",
+            expected_role=UserRole.ADMIN,
+            ip_address="127.0.0.1",
+        )
+
+    audit = cast(FakeAuditService, cast(object, service.audit))
+    assert audit.records[-1]["ip_address"] == "127.0.0.1"
+
+
 def test_refresh_rotates_refresh_token() -> None:
     user = make_user(role=UserRole.ADMIN)
     service = make_service(user)
@@ -136,7 +233,8 @@ def test_refresh_rotates_refresh_token() -> None:
 
     assert response.refresh_token != old_token
     assert old_record.revoked_at is not None
-    assert len(service.refresh_tokens.added) == 2
+    refresh_tokens = cast(FakeRefreshTokenRepository, cast(object, service.refresh_tokens))
+    assert len(refresh_tokens.added) == 2
 
 
 def test_refresh_rejects_reused_refresh_token() -> None:
@@ -171,5 +269,7 @@ def test_change_password_revokes_existing_sessions() -> None:
     )
 
     assert response.refresh_token
-    assert service.refresh_tokens.revoked_user_ids == [user.id]
-    assert service.db.commits == 1
+    refresh_tokens = cast(FakeRefreshTokenRepository, cast(object, service.refresh_tokens))
+    db = cast(FakeDb, cast(object, service.db))
+    assert refresh_tokens.revoked_user_ids == [user.id]
+    assert db.commits == 1

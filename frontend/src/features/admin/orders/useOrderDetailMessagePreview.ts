@@ -4,6 +4,7 @@ import type { AdminMessageChannel } from '../../../api/messages';
 import { previewAdminMessage, sendAdminMessage } from '../../../api/messages';
 import {
   isMessageFailure,
+  isMessagePending,
   messageChannelLabel,
   messageProviderErrorText,
   messageStatusLabel,
@@ -63,7 +64,7 @@ export function useOrderDetailMessagePreview({
     setError('');
     setNotice('');
     setMessageDraft(draft);
-    const initialChannel = defaultChannel;
+    const initialChannel = draft.initialChannel || defaultChannel;
     setMessagePreviewChannel(initialChannel);
     setMessagePreviewData(null);
     setMessagePreviewError(null);
@@ -111,6 +112,8 @@ export function useOrderDetailMessagePreview({
       const channelLabel = messageChannelLabel(sent.channel || messagePreviewChannel);
       if (isMessageFailure(sent.status)) {
         setError(`${messageDraft.title} 발송 결과: ${messageStatusLabel(sent.status)} (${channelLabel}) - ${messageProviderErrorText(sent)}`);
+      } else if (isMessagePending(sent.status)) {
+        setError(`${messageDraft.title} 결과를 확인 중입니다. SOLAPI 콘솔 확인 전에는 재발송하지 마세요. (${channelLabel})`);
       } else {
         setNotice(`${messageDraft.successText} (${channelLabel})`);
       }

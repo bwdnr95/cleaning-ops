@@ -106,7 +106,7 @@ export function App() {
   }
 
   return (
-    <main style={{ height: '100dvh', width: '100vw', overflow: 'hidden', background: 'var(--bg)' }}>
+    <div style={{ height: '100dvh', width: '100vw', overflow: 'hidden', background: 'var(--bg)' }}>
       <React.Suspense fallback={<RouteState text="화면을 불러오는 중입니다." />}>
         {mode === 'admin' && (
           <>
@@ -246,6 +246,6 @@ export function App() {
           <>{isSwitchingRole ? <RouteState text="화면을 전환하는 중입니다." /> : partnerSession.user?.role === 'partner' ? <PartnerApp /> : <PartnerLoginPage />}</>
         )}
       </React.Suspense>
-    </main>
+    </div>
   );
 }

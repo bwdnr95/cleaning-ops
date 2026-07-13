@@ -6,8 +6,8 @@ from app.services.storage import S3StorageProvider
 
 class FakeS3Client:
     def __init__(self) -> None:
-        self.put_calls: list[dict] = []
-        self.delete_calls: list[dict] = []
+        self.put_calls: list[dict[str, object]] = []
+        self.delete_calls: list[dict[str, object]] = []
 
     def put_object(self, **kwargs) -> object:
         self.put_calls.append(kwargs)
@@ -59,7 +59,26 @@ def test_s3_storage_provider_requires_public_url_and_credentials() -> None:
 
 def test_production_requires_object_storage_settings() -> None:
     with pytest.raises(ValueError, match="production requires object storage"):
-        Settings(environment="production", secret_key="x" * 32)
+        Settings(
+            environment="production",
+            secret_key="x" * 32,
+            message_provider="solapi",
+        )
 
     with pytest.raises(ValueError, match="production s3 storage missing settings"):
-        Settings(environment="production", secret_key="x" * 32, storage_provider="s3")
+        Settings(
+            environment="production",
+            secret_key="x" * 32,
+            storage_provider="s3",
+            message_provider="solapi",
+        )
+
+
+def test_production_rejects_documented_secret_key_placeholder() -> None:
+    with pytest.raises(ValueError, match="production requires a strong secret_key"):
+        Settings(
+            environment="production",
+            secret_key="replace-with-at-least-32-random-characters",
+            storage_provider="s3",
+            message_provider="solapi",
+        )

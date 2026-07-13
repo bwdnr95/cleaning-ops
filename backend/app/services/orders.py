@@ -3,14 +3,15 @@ import binascii
 from contextlib import suppress
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from secrets import token_urlsafe
 from uuid import uuid4
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
+from app.core.time import to_utc
 from app.domain.constants import (
+    CustomerAftercareStatus,
     MessageType,
     OrderStatus,
     PhotoType,
@@ -18,22 +19,28 @@ from app.domain.constants import (
     ReceiptType,
     RecipientType,
     TimelineEventType,
+    VatType,
 )
+from app.domain.customer_token import generate_customer_token
 from app.domain.order_pricing import order_consumer_total
 from app.domain.payment_status import PAYMENT_TRACKED_FIELDS, PaymentStatus
 from app.domain.phone import normalize_phone
+from app.models.message import MessageLog
 from app.models.order import Order
 from app.models.order_group import OrderGroup
 from app.models.photo import OrderPhoto
 from app.models.timeline import OrderTimeline
+from app.repositories.messages import MessageRepository
 from app.repositories.order_groups import OrderGroupRepository
 from app.repositories.orders import OrderRepository
+from app.repositories.partners import PartnerRepository
 from app.repositories.photos import PhotoRepository
 from app.repositories.timeline import TimelineRepository
+from app.schemas.common import TimelineEventRead
 from app.schemas.message import MessageLogRead, MessageSendRequest
 from app.schemas.order import (
-    AdminOrderGroupRead,
     AdminOrderDetailRead,
+    AdminOrderGroupRead,
     AdminOrderRead,
     AdminOrderSiblingRead,
     CustomerOrderGroupRead,
@@ -49,16 +56,22 @@ from app.schemas.order import (
     PartnerMemoRead,
 )
 from app.schemas.photo import PartnerPhotoRead, PhotoRead
-from app.services.messages import MessageService, has_customer_balance_due
+from app.services.messages import (
+    PARTNER_ASSIGNMENT_RECOVERY_STATUSES,
+    SCHEDULE_CONFIRMATION_RECOVERY_STATUSES,
+    MessageService,
+    has_customer_balance_due,
+)
 from app.services.service_catalog import ServiceCatalogService
 from app.services.storage import get_storage_provider
 from app.services.timeline import TimelineService
 
 
-def _normalize_receipt_fields(values: dict) -> None:
+def _normalize_receipt_fields(values: dict[str, object]) -> None:
     """증빙 유형이 발급X(NONE)면 발급 상태를 '해당없음'으로 강제한다."""
     if values.get("receipt_type") == ReceiptType.NONE:
         values["receipt_status"] = ReceiptStatus.NOT_APPLICABLE
+
 
 PARTNER_JOB_STARTABLE_STATUSES = {
     OrderStatus.SCHEDULE_CONFIRMED.value,
@@ -72,13 +85,6 @@ PARTNER_JOB_CONFIRMABLE_STATUSES = {
     OrderStatus.PARTNER_CONFIRMING.value,
 }
 
-# 방문일이 없던(미배정) 주문에 방문일을 새로 지정하면 자동으로 '일정확정'으로 올릴 수 있는 상태들.
-AUTO_CONFIRM_ON_SCHEDULE_STATUSES = (
-    OrderStatus.NEW,
-    OrderStatus.CONSULTING,
-    OrderStatus.PARTNER_CONFIRMING,
-)
-
 PARTNER_JOB_COMPLETABLE_STATUSES = {
     OrderStatus.IN_PROGRESS.value,
 }
@@ -90,15 +96,64 @@ AS_REQUEST_ALLOWED_STATUSES = {
     OrderStatus.COMPLETED.value,
 }
 
+CUSTOMER_AS_INTAKE_ALLOWED_STATUSES = {
+    OrderStatus.CUSTOMER_DELIVERY_NEEDED.value,
+    OrderStatus.CUSTOMER_DELIVERY_DONE.value,
+    OrderStatus.COMPLETED.value,
+}
+
+CONFIRMATION_INVALIDATABLE_STATUSES = {
+    OrderStatus.SCHEDULE_CONFIRMED.value,
+    OrderStatus.DAY_BEFORE_NOTICE_NEEDED.value,
+    OrderStatus.DAY_BEFORE_NOTICE_DONE.value,
+    OrderStatus.SCHEDULED.value,
+}
+
 # 협력사 사진 업로드 허용 상태 집합.
 # 시작 가능(STARTABLE) 상태 + 작업진행(IN_PROGRESS)을 합친 "활성 작업 구간"으로 정의한다.
-# - STARTABLE 포함: 현재 플로우에서 협력사가 '작업 시작'을 누르기 전(작업예정 등)에도 사진을 올릴 수 있도록 허용.
+# - STARTABLE 포함: 협력사가 '작업 시작'을 누르기 전에도 사진 업로드를 허용.
 # - IN_PROGRESS 포함: 멀티 배치 업로드를 허용하는 invariant 보장(작업진행 중 여러 번 나눠 업로드).
 # - 제외: 사전/상담 상태(신규접수·상담중·협력사확인중), 검수/전달 단계(사진검수대기·고객전달필요),
 #   종료/봉인 상태(고객전달완료·서비스완료·취소)에는 자동 공개 사진이 새로 올라오지 못하게 막는다.
 PARTNER_PHOTO_UPLOADABLE_STATUSES = (
     PARTNER_JOB_STARTABLE_STATUSES | PARTNER_JOB_COMPLETABLE_STATUSES
 )
+
+
+def is_partner_job_startable(order: Order) -> bool:
+    if order.as_intake_pending:
+        return False
+    if order.status not in PARTNER_JOB_STARTABLE_STATUSES:
+        return False
+    if order.status == OrderStatus.CUSTOMER_CHECK_NEEDED.value:
+        return bool(order.as_requested)
+    return True
+
+
+def is_partner_photo_uploadable(order: Order) -> bool:
+    if order.as_intake_pending:
+        return False
+    return order.status in PARTNER_JOB_COMPLETABLE_STATUSES or is_partner_job_startable(order)
+
+
+def is_customer_as_intake_pending(order: Order) -> bool:
+    return bool(order.as_intake_pending)
+
+
+def is_partner_confirmation_required(
+    order: Order,
+    timeline: TimelineService,
+) -> bool:
+    if order.status not in (PARTNER_JOB_CONFIRMABLE_STATUSES | CONFIRMATION_INVALIDATABLE_STATUSES):
+        return False
+    return (
+        timeline.latest_current_partner_confirmation(
+            order_id=order.id,
+            partner_id=order.partner_id,
+        )
+        is None
+    )
+
 
 SIGNATURE_DATA_URL_PREFIX = "data:image/png;base64,"
 PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
@@ -120,7 +175,9 @@ class OrderService:
     def __init__(self, db: Session) -> None:
         self.db = db
         self.orders = OrderRepository(db)
+        self.messages = MessageRepository(db)
         self.photos = PhotoRepository(db)
+        self.partners = PartnerRepository(db)
         self.timelines = TimelineRepository(db)
         self.service_catalog = ServiceCatalogService(db)
         self.timeline = TimelineService(db)
@@ -178,7 +235,7 @@ class OrderService:
             raise ValueError("at_least_one_line_required")
         group = OrderGroup(
             id=str(uuid4()),
-            customer_token=token_urlsafe(24),
+            customer_token=generate_customer_token(),
             customer_name=payload.customer_name,
             customer_phone=normalize_phone(payload.customer_phone),
             customer_address=payload.customer_address,
@@ -225,7 +282,7 @@ class OrderService:
         """라인 0개 그룹 생성(정기계약 전용). payload.lines는 무시한다."""
         group = OrderGroup(
             id=str(uuid4()),
-            customer_token=token_urlsafe(24),
+            customer_token=generate_customer_token(),
             customer_name=payload.customer_name,
             customer_phone=normalize_phone(payload.customer_phone),
             customer_address=payload.customer_address,
@@ -260,6 +317,9 @@ class OrderService:
         actor_user_id: str | None,
     ) -> Order:
         values = payload.model_dump()
+        self._require_active_partner(values.get("partner_id"))
+        if values.get("partner_id") and values.get("status") in CONFIRMATION_INVALIDATABLE_STATUSES:
+            values["status"] = OrderStatus.PARTNER_CONFIRMING
         self._apply_service_catalog(values)
         _normalize_receipt_fields(values)
         order = Order(
@@ -288,20 +348,46 @@ class OrderService:
                 title="협력사 배정",
                 metadata={"partner_id": order.partner_id},
             )
+            if order.status == OrderStatus.PARTNER_CONFIRMING:
+                self.timeline.record(
+                    order_id=order.id,
+                    actor_user_id=actor_user_id,
+                    event_type=TimelineEventType.PARTNER_CONFIRMATION_REQUIRED,
+                    title="협력사 작업 확인 요청",
+                    metadata={"partner_id": order.partner_id, "initial_assignment": True},
+                )
         return order
 
-    def update(self, order_id: str, payload: OrderUpdate, *, actor_user_id: str | None = None) -> Order:
-        order = self.orders.get(order_id)
+    def update(
+        self, order_id: str, payload: OrderUpdate, *, actor_user_id: str | None = None
+    ) -> Order:
+        order = self.db.execute(
+            select(Order)
+            .where(
+                Order.id == order_id,
+                Order.deleted_at.is_(None),
+            )
+            .with_for_update()
+        ).scalar_one_or_none()
         if order is None:
             raise ValueError("order_not_found")
 
         changes = payload.model_dump(exclude_unset=True)
+        has_effective_change = any(getattr(order, key) != value for key, value in changes.items())
+        if has_effective_change and self.messages.has_pending_dispatch_for_order(order.id):
+            raise ValueError("message_dispatch_in_progress")
+        if (
+            order.as_intake_pending
+            and "status" in changes
+            and changes["status"] not in {order.status, OrderStatus.CANCELLED}
+        ):
+            raise ValueError("as_intake_approval_required")
+        if "partner_id" in changes and changes["partner_id"] != order.partner_id:
+            self._require_active_partner(changes["partner_id"])
         self._apply_service_catalog(changes)
         _normalize_receipt_fields(changes)
         old_status = order.status
         old_partner_id = order.partner_id
-        old_scheduled_date = order.scheduled_date
-        should_send_schedule_confirmed = False
         payment_changes = collect_payment_changes(order, changes)
         schedule_changes = collect_schedule_changes(order, changes)
         for key, value in changes.items():
@@ -309,25 +395,35 @@ class OrderService:
                 value = normalize_phone(value)
             setattr(order, key, value)
 
-        # 방문일 미배정(미정) 주문에 방문일을 새로 지정하면 자동으로 '일정확정'으로 전환한다.
-        # (운영자가 같은 요청에서 상태를 직접 지정했으면 그 값을 존중하여 건드리지 않음)
-        if (
-            "scheduled_date" in changes
-            and order.scheduled_date is not None
-            and old_scheduled_date is None
-            and "status" not in changes
-            and order.status in AUTO_CONFIRM_ON_SCHEDULE_STATUSES
-        ):
-            order.status = OrderStatus.SCHEDULE_CONFIRMED
-            self.timeline.record(
-                order_id=order.id,
-                actor_user_id=actor_user_id,
-                event_type=TimelineEventType.STATUS_CHANGED,
-                title="상태 변경",
-                description="방문일 지정으로 자동 일정확정 처리되었습니다.",
-                metadata={"from": old_status, "to": OrderStatus.SCHEDULE_CONFIRMED.value, "auto": True},
+        partner_changed = "partner_id" in changes and order.partner_id != old_partner_id
+        requested_status = changes.get("status")
+        explicit_confirmation_reset = (
+            requested_status == OrderStatus.PARTNER_CONFIRMING
+            and old_status != OrderStatus.PARTNER_CONFIRMING
+        )
+        current_confirmation = self.timeline.latest_current_partner_confirmation(
+            order_id=order.id,
+            partner_id=order.partner_id,
+        )
+        status_preserves_confirmation_flow = (
+            "status" not in changes
+            or requested_status == OrderStatus.PARTNER_CONFIRMING
+            or requested_status in CONFIRMATION_INVALIDATABLE_STATUSES
+        )
+        should_invalidate_confirmation = (
+            explicit_confirmation_reset
+            or (
+                old_status
+                in (CONFIRMATION_INVALIDATABLE_STATUSES | PARTNER_JOB_CONFIRMABLE_STATUSES)
+                and bool(partner_changed or schedule_changes)
+                and status_preserves_confirmation_flow
             )
-            should_send_schedule_confirmed = True
+            or (
+                order.partner_id is not None
+                and requested_status in CONFIRMATION_INVALIDATABLE_STATUSES
+                and current_confirmation is None
+            )
+        )
 
         # #2: 완납(paid) 처리 시 자동 최종결제완료(서비스완료). 운영자가 같은 요청에서 상태를
         # 직접 지정했으면 그 값을 존중하고, 취소/이미 완료 건은 건드리지 않는다.
@@ -335,6 +431,8 @@ class OrderService:
             changes.get("payment_status") == PaymentStatus.PAID
             and "status" not in changes
             and order.status not in (OrderStatus.CANCELLED, OrderStatus.COMPLETED)
+            and not order.as_intake_pending
+            and not order.as_requested
         ):
             from_status = order.status
             order.status = OrderStatus.COMPLETED
@@ -363,12 +461,51 @@ class OrderService:
                 title="결제/정산 변경",
                 description="최종결제완료(서비스완료) 전환으로 자동 완납 처리되었습니다.",
                 metadata={
-                    "changes": {"payment_status": {"from": from_payment, "to": PaymentStatus.PAID.value}},
+                    "changes": {
+                        "payment_status": {"from": from_payment, "to": PaymentStatus.PAID.value}
+                    },
                     "auto": True,
                 },
             )
 
-        if "status" in changes and changes["status"] != old_status:
+        will_invalidate_confirmation = should_invalidate_confirmation and order.status not in {
+            OrderStatus.CANCELLED,
+            OrderStatus.COMPLETED,
+        }
+        if will_invalidate_confirmation:
+            order.status = old_status
+            self._change_status(
+                order,
+                OrderStatus.PARTNER_CONFIRMING,
+                actor_user_id=actor_user_id,
+                title="협력사 재확인 필요",
+                description="협력사 또는 방문 일정이 변경되어 작업 확인을 다시 요청합니다.",
+            )
+            self.timeline.record(
+                order_id=order.id,
+                actor_user_id=actor_user_id,
+                event_type=TimelineEventType.PARTNER_CONFIRMATION_REQUIRED,
+                title="협력사 재확인 요청",
+                metadata={
+                    "partner_changed": partner_changed,
+                    "schedule_changed": bool(schedule_changes),
+                    "explicit_status_reset": explicit_confirmation_reset,
+                    "confirmation_missing": current_confirmation is None,
+                },
+            )
+
+        if order.status == OrderStatus.CANCELLED and (
+            order.as_requested or order.as_intake_pending
+        ):
+            order.as_requested = False
+            order.as_intake_pending = False
+            order.as_memo = None
+
+        if (
+            "status" in changes
+            and changes["status"] != old_status
+            and not will_invalidate_confirmation
+        ):
             self.timeline.record(
                 order_id=order.id,
                 actor_user_id=actor_user_id,
@@ -377,7 +514,7 @@ class OrderService:
                 metadata={"from": old_status, "to": changes["status"]},
             )
 
-        if "partner_id" in changes:
+        if partner_changed:
             self.timeline.record(
                 order_id=order.id,
                 actor_user_id=actor_user_id,
@@ -406,25 +543,38 @@ class OrderService:
                 metadata={"changes": schedule_changes},
             )
 
-        self.db.commit()
-        self.db.refresh(order)
-        if (
+        should_send_partner_assignment = (
             settings.automation_send_partner_assignment
             and "partner_id" in changes
             and order.partner_id
             and order.partner_id != old_partner_id
-        ):
-            self._send_partner_assignment_if_needed(order, actor_user_id=actor_user_id)
-        if settings.automation_send_schedule_confirmed and should_send_schedule_confirmed:
+            and not order.as_intake_pending
+            and not order.as_requested
+            and order.status in PARTNER_ASSIGNMENT_RECOVERY_STATUSES
+        )
+        should_send_active_as_request = (
+            partner_changed and bool(order.partner_id) and order.as_requested
+        )
+        if should_send_active_as_request:
             self._send_automation_message(
                 order,
                 MessageSendRequest(
                     order_id=order.id,
-                    message_type=MessageType.CUSTOMER_SCHEDULE_CONFIRMED,
-                    recipient_type=RecipientType.CUSTOMER,
+                    message_type=MessageType.PARTNER_AS_REQUEST,
+                    recipient_type=RecipientType.PARTNER,
+                    memo=order.as_memo,
                 ),
                 actor_user_id=actor_user_id,
+                should_send_once=True,
+                successful_since=self.timelines.latest_created_at(
+                    order_id=order.id,
+                    event_type=TimelineEventType.PARTNER_ASSIGNED,
+                ),
             )
+        elif should_send_partner_assignment:
+            self._send_partner_assignment_if_needed(order, actor_user_id=actor_user_id)
+        else:
+            self.db.commit()
         self.db.refresh(order)
         return order
 
@@ -442,6 +592,28 @@ class OrderService:
         changes = payload.model_dump(exclude_unset=True)
         if "customer_phone" in changes and changes["customer_phone"] is not None:
             changes["customer_phone"] = normalize_phone(changes["customer_phone"])
+        has_effective_change = any(getattr(group, key) != value for key, value in changes.items())
+
+        lines: list[Order] = []
+        if has_effective_change:
+            # MessageService.send acquires the same Order row lock before rendering and
+            # committing its PENDING claim. Lock every active line in a stable order,
+            # then re-check the claim, so a group edit cannot race a send that rendered
+            # the previous customer details.
+            lines = list(
+                self.db.scalars(
+                    select(Order)
+                    .where(
+                        Order.group_id == group_id,
+                        Order.deleted_at.is_(None),
+                    )
+                    .order_by(Order.id.asc())
+                    .execution_options(populate_existing=True)
+                    .with_for_update()
+                )
+            )
+            if self.messages.has_pending_dispatch_for_group(group.id):
+                raise ValueError("message_dispatch_in_progress")
 
         group_only_changes: dict[str, dict[str, object | None]] = {}
         if "customer_address_detail" in changes:
@@ -462,12 +634,6 @@ class OrderService:
         }
         mirror_changes = {key: changes[key] for key in mirror_fields if key in changes}
         if mirror_changes or group_only_changes:
-            lines = self.db.scalars(
-                select(Order).where(
-                    Order.group_id == group_id,
-                    Order.deleted_at.is_(None),
-                )
-            ).all()
             for line in lines:
                 line_mirror_changes: dict[str, dict[str, object | None]] = dict(group_only_changes)
                 for key, value in mirror_changes.items():
@@ -494,9 +660,9 @@ class OrderService:
         self.db.refresh(group)
         return group
 
-    def _apply_service_catalog(self, values: dict) -> None:
+    def _apply_service_catalog(self, values: dict[str, object]) -> None:
         service_item_id = values.get("service_item_id")
-        if service_item_id:
+        if isinstance(service_item_id, str) and service_item_id:
             item, _category = self.service_catalog.get_available_item(service_item_id)
             values["service_category_id"] = item.category_id
             values["service_name"] = item.name
@@ -507,7 +673,7 @@ class OrderService:
             return
 
         service_category_id = values.get("service_category_id")
-        if service_category_id:
+        if isinstance(service_category_id, str) and service_category_id:
             self.service_catalog.require_available_category(service_category_id)
 
     def get_for_partner(self, order_id: str, *, partner_id: str) -> Order:
@@ -523,18 +689,55 @@ class OrderService:
         actor_user_id: str,
         partner_id: str,
     ) -> Order:
-        order = self.get_for_partner(order_id, partner_id=partner_id)
-        if order.status not in PARTNER_JOB_CONFIRMABLE_STATUSES:
+        order = self.db.execute(
+            select(Order)
+            .where(
+                Order.id == order_id,
+                Order.partner_id == partner_id,
+                Order.deleted_at.is_(None),
+            )
+            .with_for_update()
+        ).scalar_one_or_none()
+        if order is None:
+            raise ValueError("order_not_found")
+        if order.as_intake_pending:
+            raise ValueError("as_intake_approval_required")
+        if order.status not in (
+            PARTNER_JOB_CONFIRMABLE_STATUSES | CONFIRMATION_INVALIDATABLE_STATUSES
+        ):
             raise ValueError("invalid_status_transition")
+        if order.scheduled_date is None:
+            raise ValueError("schedule_required_for_confirmation")
 
-        self._change_status(
-            order,
-            OrderStatus.SCHEDULED,
-            actor_user_id=actor_user_id,
-            title="작업 일정 확인",
-            description="협력사가 배정된 작업 일정을 확인했습니다.",
+        partner_confirmed_at = self.timeline.latest_current_partner_confirmation(
+            order_id=order.id,
+            partner_id=partner_id,
         )
-        self.db.commit()
+        has_current_confirmation = partner_confirmed_at is not None
+        if order.status in PARTNER_JOB_CONFIRMABLE_STATUSES:
+            self._change_status(
+                order,
+                OrderStatus.SCHEDULED,
+                actor_user_id=actor_user_id,
+                title="작업 일정 확인",
+                description="협력사가 배정된 작업 일정을 확인했습니다.",
+            )
+        if not has_current_confirmation:
+            self.timeline.record(
+                order_id=order.id,
+                actor_user_id=actor_user_id,
+                event_type=TimelineEventType.PARTNER_CONFIRMED,
+                title="협력사 작업 확인",
+                description="협력사가 작업 일정과 배정 내용을 확인했습니다.",
+                metadata={"partner_id": partner_id},
+            )
+        if (
+            settings.automation_send_schedule_confirmed
+            and order.status in SCHEDULE_CONFIRMATION_RECOVERY_STATUSES
+        ):
+            self._send_schedule_confirmed_once(order, actor_user_id=actor_user_id)
+        else:
+            self.db.commit()
         self.db.refresh(order)
         return order
 
@@ -545,9 +748,23 @@ class OrderService:
         actor_user_id: str,
         partner_id: str,
     ) -> Order:
-        order = self.get_for_partner(order_id, partner_id=partner_id)
-        if order.status not in PARTNER_JOB_STARTABLE_STATUSES:
+        order = self.db.execute(
+            select(Order)
+            .where(
+                Order.id == order_id,
+                Order.partner_id == partner_id,
+                Order.deleted_at.is_(None),
+            )
+            .with_for_update()
+        ).scalar_one_or_none()
+        if order is None:
+            raise ValueError("order_not_found")
+        if order.as_intake_pending:
+            raise ValueError("as_intake_approval_required")
+        if not is_partner_job_startable(order):
             raise ValueError("invalid_status_transition")
+        if is_partner_confirmation_required(order, self.timeline):
+            raise ValueError("partner_confirmation_required")
         if not self.photos.has_visible_type(
             order.id,
             PhotoType.BEFORE.value,
@@ -572,8 +789,15 @@ class OrderService:
         *,
         actor_user_id: str | None,
     ) -> None:
-        if not settings.automation_send_partner_assignment or not order.partner_id:
+        if (
+            not settings.automation_send_partner_assignment
+            or not order.partner_id
+            or order.as_intake_pending
+            or order.as_requested
+            or order.status not in PARTNER_ASSIGNMENT_RECOVERY_STATUSES
+        ):
             return
+        self.db.flush()
         self._send_automation_message(
             order,
             MessageSendRequest(
@@ -582,6 +806,35 @@ class OrderService:
                 recipient_type=RecipientType.PARTNER,
             ),
             actor_user_id=actor_user_id,
+            should_send_once=True,
+            successful_since=self.timelines.latest_created_at(
+                order_id=order.id,
+                event_type=TimelineEventType.PARTNER_ASSIGNED,
+            ),
+        )
+
+    def _send_schedule_confirmed_once(
+        self,
+        order: Order,
+        *,
+        actor_user_id: str | None,
+    ) -> None:
+        if not settings.automation_send_schedule_confirmed or order.scheduled_date is None:
+            return
+        self.db.flush()
+        self._send_automation_message(
+            order,
+            MessageSendRequest(
+                order_id=order.id,
+                message_type=MessageType.CUSTOMER_SCHEDULE_CONFIRMED,
+                recipient_type=RecipientType.CUSTOMER,
+            ),
+            actor_user_id=actor_user_id,
+            should_send_once=True,
+            successful_since=self.timeline.latest_current_partner_confirmation(
+                order_id=order.id,
+                partner_id=order.partner_id,
+            ),
         )
 
     def _send_automation_message(
@@ -590,9 +843,20 @@ class OrderService:
         payload: MessageSendRequest,
         *,
         actor_user_id: str | None,
+        should_send_once: bool = False,
+        successful_since: datetime | None = None,
     ) -> None:
         try:
-            MessageService(self.db).send(payload, actor_user_id=actor_user_id)
+            self.db.flush()
+            message_service = MessageService(self.db)
+            if should_send_once:
+                message_service.send_automation_once(
+                    payload,
+                    actor_user_id=actor_user_id,
+                    successful_since=successful_since,
+                )
+            else:
+                message_service.send(payload, actor_user_id=actor_user_id)
         except ValueError as exc:
             self.timeline.record(
                 order_id=order.id,
@@ -627,6 +891,8 @@ class OrderService:
         ).scalar_one_or_none()
         if order is None:
             raise ValueError("order_not_found")
+        if order.as_intake_pending:
+            raise ValueError("as_intake_approval_required")
         if order.status not in PARTNER_JOB_COMPLETABLE_STATUSES:
             raise ValueError("invalid_status_transition")
 
@@ -657,22 +923,21 @@ class OrderService:
             order.customer_signature_file_url = stored_signature.file_url
 
             was_as_requested = bool(order.as_requested)
-            next_status = (
-                OrderStatus.COMPLETED
-                if was_as_requested and order.payment_status == PaymentStatus.PAID
-                else OrderStatus.CUSTOMER_DELIVERY_NEEDED
-            )
             order.as_requested = False
+            order.as_intake_pending = False
 
             self._change_status(
                 order,
-                next_status,
+                OrderStatus.CUSTOMER_DELIVERY_NEEDED,
                 actor_user_id=actor_user_id,
                 title="AS 작업 완료" if was_as_requested else "작업 완료",
                 description=(
                     "협력사가 AS 작업 완료를 처리했습니다."
                     if was_as_requested
-                    else "협력사가 작업 완료를 처리했습니다. 자동 공개된 사진으로 고객 전달이 가능합니다."
+                    else (
+                        "협력사가 작업 완료를 처리했습니다. "
+                        "자동 공개된 사진으로 고객 전달이 가능합니다."
+                    )
                 ),
             )
             self.db.commit()
@@ -682,7 +947,9 @@ class OrderService:
             with suppress(Exception):
                 storage.delete(stored_signature.storage_key)
             raise
-        if settings.automation_send_customer_balance_due and should_send_customer_balance_due(order):
+        if settings.automation_send_customer_balance_due and should_send_customer_balance_due(
+            order
+        ):
             self._send_automation_message(
                 order,
                 MessageSendRequest(
@@ -691,6 +958,8 @@ class OrderService:
                     recipient_type=RecipientType.CUSTOMER,
                 ),
                 actor_user_id=actor_user_id,
+                should_send_once=True,
+                successful_since=order.work_completed_at,
             )
             self.db.refresh(order)
         return order
@@ -704,7 +973,17 @@ class OrderService:
         partner_id: str,
     ) -> Order:
         """협력사 현장 메모 추가. 본인 배정 주문만 허용하고 memo_added 타임라인을 남긴다."""
-        order = self.get_for_partner(order_id, partner_id=partner_id)
+        order = self.db.execute(
+            select(Order)
+            .where(
+                Order.id == order_id,
+                Order.partner_id == partner_id,
+                Order.deleted_at.is_(None),
+            )
+            .with_for_update()
+        ).scalar_one_or_none()
+        if order is None:
+            raise ValueError("order_not_found")
         self.timeline.record(
             order_id=order.id,
             actor_user_id=actor_user_id,
@@ -717,75 +996,136 @@ class OrderService:
         self.db.refresh(order)
         return order
 
+    def submit_customer_as_intake(
+        self,
+        order_id: str,
+        *,
+        group_id: str,
+        memo: str,
+    ) -> Order:
+        normalized_memo = (memo or "").strip()
+        if not normalized_memo:
+            raise ValueError("as_memo_required")
+        order = self.db.execute(
+            select(Order)
+            .where(
+                Order.id == order_id,
+                Order.group_id == group_id,
+                Order.deleted_at.is_(None),
+            )
+            .with_for_update()
+        ).scalar_one_or_none()
+        if order is None:
+            raise ValueError("order_not_found")
+        if order.as_requested:
+            raise ValueError("as_request_already_requested")
+
+        is_pending = is_customer_as_intake_pending(order)
+        if is_pending:
+            if order.as_memo == normalized_memo:
+                self.db.commit()
+                self.db.refresh(order)
+                return order
+            raise ValueError("as_request_already_pending")
+        if order.status not in CUSTOMER_AS_INTAKE_ALLOWED_STATUSES:
+            raise ValueError("invalid_as_request_status")
+
+        order.as_memo = normalized_memo
+        order.as_intake_pending = True
+        self.timeline.record(
+            order_id=order.id,
+            actor_user_id=None,
+            event_type=TimelineEventType.AS_INTAKE_REQUESTED,
+            title="고객 AS 접수 알림",
+            description=normalized_memo,
+            metadata={"source": "customer_portal", "admin_attention_required": True},
+        )
+        self.db.commit()
+        self.db.refresh(order)
+        return order
+
     def request_as(
         self,
         order_id: str,
         *,
         memo: str,
-        actor_user_id: str,
+        actor_user_id: str | None,
     ) -> Order:
-        memo = (memo or "").strip()
-        if not memo:
-            raise ValueError("as_memo_required")
-        order = self.orders.get(order_id)
-        if order is None or order.deleted_at is not None:
+        requested_memo = (memo or "").strip()
+        order = self.db.execute(
+            select(Order)
+            .where(
+                Order.id == order_id,
+                Order.deleted_at.is_(None),
+            )
+            .with_for_update()
+        ).scalar_one_or_none()
+        if order is None:
             raise ValueError("order_not_found")
         if not order.partner_id:
             raise ValueError("partner_not_assigned")
+        self._require_active_partner(order.partner_id)
+        if order.as_requested:
+            raise ValueError("as_request_already_requested")
         if order.status not in AS_REQUEST_ALLOWED_STATUSES:
             raise ValueError("invalid_as_request_status")
 
+        is_customer_intake = is_customer_as_intake_pending(order)
+        effective_memo = requested_memo or (
+            (order.as_memo or "").strip() if is_customer_intake else ""
+        )
+        if not effective_memo:
+            raise ValueError("as_memo_required")
+
         order.as_requested = True
-        order.as_memo = memo
+        order.as_intake_pending = False
+        order.as_memo = effective_memo
         self._change_status(
             order,
             OrderStatus.CUSTOMER_CHECK_NEEDED,
             actor_user_id=actor_user_id,
             title="AS 확인 필요",
-            description="운영자가 AS 요청 상태로 변경했습니다.",
+            description=(
+                "운영자가 고객 AS 접수를 확인하고 처리 요청을 승인했습니다."
+                if is_customer_intake
+                else "운영자가 AS 요청 상태로 변경했습니다."
+            ),
         )
-        self.timeline.record(
+        as_event = self.timeline.record(
             order_id=order.id,
             actor_user_id=actor_user_id,
             event_type=TimelineEventType.AS_REQUESTED,
-            title="AS 요청",
-            description=memo,
+            title="AS 처리 승인" if is_customer_intake else "AS 요청",
+            description=effective_memo,
+            metadata={"customer_intake": is_customer_intake},
         )
         self.db.flush()
 
-        message_service = MessageService(self.db)
-        message_committed = False
         if order.partner_id:
-            try:
-                message_service.send(
-                    MessageSendRequest(
-                        order_id=order.id,
-                        message_type=MessageType.PARTNER_AS_REQUEST,
-                        recipient_type=RecipientType.PARTNER,
-                        memo=memo,
-                    ),
-                    actor_user_id=actor_user_id,
-                )
-                message_committed = True
-            except ValueError:
-                pass
-
-        try:
-            message_service.send(
+            self._send_automation_message(
+                order,
                 MessageSendRequest(
                     order_id=order.id,
-                    message_type=MessageType.CUSTOMER_AS_NOTICE,
-                    recipient_type=RecipientType.CUSTOMER,
-                    memo=memo,
+                    message_type=MessageType.PARTNER_AS_REQUEST,
+                    recipient_type=RecipientType.PARTNER,
+                    memo=effective_memo,
                 ),
                 actor_user_id=actor_user_id,
+                should_send_once=True,
+                successful_since=as_event.created_at,
             )
-            message_committed = True
-        except ValueError:
-            pass
-
-        if not message_committed:
-            self.db.commit()
+        self._send_automation_message(
+            order,
+            MessageSendRequest(
+                order_id=order.id,
+                message_type=MessageType.CUSTOMER_AS_NOTICE,
+                recipient_type=RecipientType.CUSTOMER,
+                memo=effective_memo,
+            ),
+            actor_user_id=actor_user_id,
+            should_send_once=True,
+            successful_since=as_event.created_at,
+        )
 
         self.db.refresh(order)
         return order
@@ -868,16 +1208,27 @@ class OrderService:
             metadata={"from": old_status, "to": next_status},
         )
 
+    def _require_active_partner(self, partner_id: object) -> None:
+        if partner_id is None or partner_id == "":
+            return
+        if not isinstance(partner_id, str):
+            raise ValueError("partner_not_found")
+        partner = self.partners.get(partner_id)
+        if partner is None or not partner.is_active:
+            raise ValueError("partner_not_found")
+
     def _completion_evidence_created_after(self, order: Order) -> datetime | None:
-        if not order.as_requested:
-            return None
-        return self.timelines.latest_created_at(
+        return self.timeline.latest_partner_work_epoch(
             order_id=order.id,
-            event_type=TimelineEventType.AS_REQUESTED,
+            partner_id=order.partner_id,
+            work_completed_at=order.work_completed_at,
+            work_is_active=True,
         )
 
 
-def to_admin_group_dto(group: OrderGroup, *, lines: list[Order] | None = None) -> AdminOrderGroupRead:
+def to_admin_group_dto(
+    group: OrderGroup, *, lines: list[Order] | None = None
+) -> AdminOrderGroupRead:
     return AdminOrderGroupRead(
         id=group.id,
         customer_token=group.customer_token,
@@ -898,7 +1249,7 @@ def to_admin_order_dto(
     order: Order,
     *,
     group: OrderGroup | None = None,
-    timeline: list | None = None,
+    timeline: list[OrderTimeline] | None = None,
 ) -> AdminOrderRead:
     customer_name = group.customer_name if group else order.customer_name
     customer_phone = group.customer_phone if group else order.customer_phone
@@ -928,6 +1279,7 @@ def to_admin_order_dto(
         service_detail=order.service_detail,
         special_request=order.special_request,
         as_requested=bool(order.as_requested),
+        as_intake_pending=bool(order.as_intake_pending),
         as_memo=order.as_memo,
         work_started_at=order.work_started_at,
         work_completed_at=order.work_completed_at,
@@ -937,24 +1289,24 @@ def to_admin_order_dto(
         customer_phone=customer_phone or "",
         customer_address=customer_address or "",
         customer_address_detail=customer_address_detail,
-        total_amount=order.total_amount,
-        discount_amount=order.discount_amount,
-        deposit_amount=order.deposit_amount,
-        balance_amount=order.balance_amount,
-        onsite_extra_amount=order.onsite_extra_amount,
-        vat_type=order.vat_type,
+        total_amount=to_float_or_none(order.total_amount),
+        discount_amount=float(order.discount_amount),
+        deposit_amount=to_float_or_none(order.deposit_amount),
+        balance_amount=to_float_or_none(order.balance_amount),
+        onsite_extra_amount=to_float_or_none(order.onsite_extra_amount),
+        vat_type=VatType(order.vat_type) if order.vat_type else None,
         payment_status=order.payment_status,
         payment_memo=order.payment_memo,
         evidence_memo=order.evidence_memo,
-        receipt_type=order.receipt_type,
-        receipt_status=order.receipt_status,
-        partner_payment_amount=order.partner_payment_amount,
+        receipt_type=ReceiptType(order.receipt_type) if order.receipt_type else None,
+        receipt_status=ReceiptStatus(order.receipt_status) if order.receipt_status else None,
+        partner_payment_amount=to_float_or_none(order.partner_payment_amount),
         partner_payment_status=order.partner_payment_status,
-        broker_payment_amount=order.broker_payment_amount,
+        broker_payment_amount=to_float_or_none(order.broker_payment_amount),
         broker_payment_status=order.broker_payment_status,
-        consumer_price=order.total_amount,
-        partner_price=order.partner_payment_amount,
-        broker_price=order.broker_payment_amount,
+        consumer_price=to_float_or_none(order.total_amount),
+        partner_price=to_float_or_none(order.partner_payment_amount),
+        broker_price=to_float_or_none(order.broker_payment_amount),
         partner_settled_at=order.partner_settled_at,
         broker_settled_at=order.broker_settled_at,
         customer_visible_payment=customer_visible_payment,
@@ -962,7 +1314,7 @@ def to_admin_order_dto(
         customer_token=customer_token or "",
         created_at=order.created_at,
         updated_at=order.updated_at,
-        timeline=timeline or [],
+        timeline=[TimelineEventRead.model_validate(event) for event in timeline or []],
     )
 
 
@@ -970,9 +1322,9 @@ def to_admin_order_detail_dto(
     order: Order,
     *,
     group: OrderGroup | None = None,
-    timeline: list | None = None,
+    timeline: list[OrderTimeline] | None = None,
     photos: list[OrderPhoto] | None = None,
-    message_logs: list | None = None,
+    message_logs: list[MessageLog] | None = None,
     sibling_lines: list[AdminOrderSiblingRead] | None = None,
 ) -> AdminOrderDetailRead:
     base = to_admin_order_dto(order, group=group, timeline=timeline)
@@ -1021,11 +1373,14 @@ def to_partner_job_dto(
     photos: list[OrderPhoto] | None = None,
     memos: list[OrderTimeline] | None = None,
     as_requested_at: datetime | None = None,
+    evidence_required_after: datetime | None = None,
+    partner_confirmation_required: bool = False,
 ) -> PartnerJobRead:
     customer_name = group.customer_name if group else order.customer_name
     customer_phone = group.customer_phone if group else order.customer_phone
     customer_address = group.customer_address if group else order.customer_address
     customer_address_detail = group.customer_address_detail if group else None
+    has_approved_as_request = bool(order.as_requested)
     return PartnerJobRead(
         id=order.id,
         status=order.status,
@@ -1035,9 +1390,11 @@ def to_partner_job_dto(
         size_or_quantity=order.size_or_quantity,
         service_detail=order.service_detail,
         special_request=order.special_request,
-        as_requested=bool(order.as_requested),
-        as_memo=order.as_memo,
-        as_requested_at=as_requested_at,
+        as_requested=has_approved_as_request,
+        as_memo=order.as_memo if has_approved_as_request else None,
+        as_requested_at=as_requested_at if has_approved_as_request else None,
+        evidence_required_after=evidence_required_after,
+        partner_confirmation_required=partner_confirmation_required,
         work_started_at=order.work_started_at,
         work_completed_at=order.work_completed_at,
         has_recorded_customer_signature=bool(order.customer_signature_file_url),
@@ -1064,7 +1421,7 @@ def to_partner_photo_dto(photo: OrderPhoto) -> PartnerPhotoRead:
         file_size=photo.file_size,
         content_type=photo.content_type,
         is_customer_visible=photo.is_customer_visible,
-        created_at=photo.created_at,
+        created_at=to_utc(photo.created_at) if photo.created_at is not None else None,
     )
 
 
@@ -1106,15 +1463,30 @@ def _to_customer_line_dto(
         size_or_quantity=line.size_or_quantity,
         service_detail=line.service_detail,
         special_request=line.special_request,
-        total_amount=order_consumer_total(line) if payment_visible else None,
-        deposit_amount=line.deposit_amount if payment_visible else None,
-        balance_amount=line.balance_amount if payment_visible else None,
+        total_amount=float(order_consumer_total(line)) if payment_visible else None,
+        deposit_amount=to_float_or_none(line.deposit_amount) if payment_visible else None,
+        balance_amount=to_float_or_none(line.balance_amount) if payment_visible else None,
         payment_status=line.payment_status if payment_visible else None,
+        aftercare_status=_customer_aftercare_status(line),
         photos=[to_customer_photo_dto(photo) for photo in photos if photo.is_customer_visible],
     )
 
 
-def to_customer_order_dto(order: Order, *, photos: list[OrderPhoto] | None = None) -> CustomerOrderRead:
+def _customer_aftercare_status(order: Order) -> CustomerAftercareStatus | None:
+    if order.status == OrderStatus.CANCELLED:
+        return None
+    if order.as_requested:
+        return CustomerAftercareStatus.IN_PROGRESS
+    if is_customer_as_intake_pending(order):
+        return CustomerAftercareStatus.PENDING
+    if order.status in CUSTOMER_AS_INTAKE_ALLOWED_STATUSES:
+        return CustomerAftercareStatus.AVAILABLE
+    return None
+
+
+def to_customer_order_dto(
+    order: Order, *, photos: list[OrderPhoto] | None = None
+) -> CustomerOrderRead:
     payment_visible = bool(order.customer_visible_payment)
     return CustomerOrderRead(
         id=order.id,
@@ -1136,7 +1508,10 @@ def to_customer_photo_dto(photo: OrderPhoto) -> CustomerPhotoRead:
     )
 
 
-def collect_payment_changes(order: Order, changes: dict) -> dict[str, dict[str, object | None]]:
+def collect_payment_changes(
+    order: Order,
+    changes: dict[str, object],
+) -> dict[str, dict[str, object | None]]:
     payment_changes: dict[str, dict[str, object | None]] = {}
     for field in PAYMENT_TRACKED_FIELDS:
         if field not in changes:
@@ -1148,7 +1523,10 @@ def collect_payment_changes(order: Order, changes: dict) -> dict[str, dict[str, 
     return payment_changes
 
 
-def collect_schedule_changes(order: Order, changes: dict) -> dict[str, dict[str, object | None]]:
+def collect_schedule_changes(
+    order: Order,
+    changes: dict[str, object],
+) -> dict[str, dict[str, object | None]]:
     schedule_changes: dict[str, dict[str, object | None]] = {}
     for field in ("scheduled_date", "requested_time"):
         if field not in changes:
@@ -1158,6 +1536,10 @@ def collect_schedule_changes(order: Order, changes: dict) -> dict[str, dict[str,
         if before != after:
             schedule_changes[field] = {"from": before, "to": after}
     return schedule_changes
+
+
+def to_float_or_none(value: object | None) -> float | None:
+    return float(str(value)) if value is not None else None
 
 
 def decode_signature_data_url(data_url: str) -> bytes | None:
@@ -1178,7 +1560,9 @@ def decode_signature_data_url(data_url: str) -> bytes | None:
 
 
 def should_send_customer_balance_due(order: Order) -> bool:
-    return has_customer_balance_due(order)
+    return (
+        not order.as_intake_pending and not order.as_requested and has_customer_balance_due(order)
+    )
 
 
 def to_timeline_value(value) -> object | None:

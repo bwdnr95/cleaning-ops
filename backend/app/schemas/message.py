@@ -1,4 +1,5 @@
 from datetime import date, datetime
+from typing import Literal
 
 from pydantic import Field
 
@@ -11,7 +12,11 @@ class MessageSendRequest(ApiModel):
     message_type: MessageType
     recipient_type: RecipientType
     channel: MessageChannel | None = None
-    memo: str | None = None
+    memo: str | None = Field(default=None, max_length=2000)
+
+
+class MessageUnknownOutcomeResolutionRequest(ApiModel):
+    resolution: Literal["confirmed_sent", "confirmed_not_sent"]
 
 
 class MessageLogRead(ApiModel):
@@ -88,6 +93,10 @@ class DayBeforeNoticeRunRead(ApiModel):
     sent: int
     skipped_already_sent: int
     failed: int
+    skipped_unconfirmed: int = 0
+    retryable: int = 0
     sent_order_ids: list[str] = Field(default_factory=list)
     skipped_order_ids: list[str] = Field(default_factory=list)
+    unconfirmed_order_ids: list[str] = Field(default_factory=list)
     failed_order_ids: list[str] = Field(default_factory=list)
+    retryable_order_ids: list[str] = Field(default_factory=list)

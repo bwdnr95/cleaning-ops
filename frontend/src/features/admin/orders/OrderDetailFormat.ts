@@ -33,10 +33,12 @@ export function messageTypeLabel(type: string | null | undefined): string {
   if (type === 'partner_customer_info') return '협력사 고객정보';
   if (type === 'partner_as_request') return '협력사 AS';
   if (type === 'customer_as_notice') return '고객 AS';
+  if (type === 'customer_access_link') return '고객 접속 링크';
   return type || '-';
 }
 
 export function messageStatusLabel(status: string | null | undefined): string {
+  if (status === 'pending') return '결과 확인 중';
   if (status === 'sent') return '요청성공';
   if (status === 'failed') return '요청실패';
   if (status === 'delivered') return '배송완료';
@@ -48,9 +50,14 @@ export function isMessageFailure(status: string | null | undefined): boolean {
   return status === 'failed' || status === 'delivery_failed';
 }
 
+export function isMessagePending(status: string | null | undefined): boolean {
+  return status === 'pending';
+}
+
 export function messageStatusTone(status: string | null | undefined): string {
   if (status === 'delivered') return 'success';
   if (status === 'sent') return 'info';
+  if (isMessagePending(status)) return 'warn';
   if (isMessageFailure(status)) return 'danger';
   return 'neutral';
 }
@@ -72,10 +79,12 @@ export function messageProviderErrorText(log: OrderDetailMessageLog): string {
     solapi_missing_credentials: 'SOL API 인증 설정 누락',
     solapi_missing_sender_number: 'SOL API 발신번호 누락',
     solapi_missing_kakao_channel_id: 'SOL API 카카오 채널 ID 누락',
+    solapi_missing_kakao_pf_id: 'SOL API 카카오 발신 프로필 ID 누락',
     solapi_missing_kakao_template_id: '알림톡 승인 템플릿 ID 누락',
     solapi_http_error: 'SOL API HTTP 오류',
     solapi_request_failed: 'SOL API 요청 실패',
     solapi_invalid_response: 'SOL API 응답 오류',
+    solapi_outcome_unknown: 'SOL API 수락 여부 확인 필요',
     solapi_provider_failed: 'SOL API 발송 실패',
     unsupported_message_provider: 'Provider 설정 오류',
   };
@@ -97,6 +106,7 @@ export function messageChannelLabel(channel: string | null | undefined): string 
 export function messagePreviewWarningLabel(warning: string): string {
   const map: Record<string, string> = {
     solapi_missing_kakao_channel_id: 'SOL API 카카오 채널 ID가 아직 설정되지 않았습니다.',
+    solapi_missing_kakao_pf_id: 'SOL API 카카오 발신 프로필 ID가 아직 설정되지 않았습니다.',
     solapi_missing_kakao_template_id: '이 메시지 타입의 승인 템플릿 ID가 아직 설정되지 않았습니다.',
     alimtalk_fallback_sms_enabled: '알림톡 설정이 준비되지 않으면 같은 문구를 SMS로 fallback 발송합니다.',
   };
@@ -121,6 +131,8 @@ export function timelineEventLabel(type: string): string {
     created: '주문 생성',
     status_changed: '상태 변경',
     partner_assigned: '협력사 배정',
+    partner_confirmed: '협력사 작업 확인',
+    partner_confirmation_required: '협력사 재확인 요청',
     message_sent: '안내 발송',
     photo_uploaded: '사진 업로드',
     photo_approved: '사진 공개',
@@ -129,6 +141,7 @@ export function timelineEventLabel(type: string): string {
     memo_added: '메모 추가',
     payment_updated: '결제/정산 변경',
     as_requested: 'AS 요청',
+    as_intake_requested: '고객 AS 접수',
   };
   return labels[type] || type;
 }
@@ -145,6 +158,21 @@ export function toActionErrorMessage(error: { readonly message?: string } | null
   }
   if (error?.message === 'as_request_required') {
     return 'AS 요청 처리 후에만 AS 안내를 다시 발송할 수 있습니다.';
+  }
+  if (error?.message === 'message_outcome_unknown') {
+    return 'SOL API 수락 여부를 확인 중입니다. SOLAPI 콘솔 확인 전에는 재발송할 수 없습니다.';
+  }
+  if (error?.message === 'message_send_in_progress') {
+    return '같은 안내의 발송 결과를 처리 중입니다. 잠시 후 발송이력을 확인해주세요.';
+  }
+  if (error?.message === 'message_dispatch_in_progress') {
+    return '메시지 발송 결과를 처리 중이라 주문을 변경할 수 없습니다. 발송이력을 확인한 뒤 다시 시도해주세요.';
+  }
+  if (error?.message === 'day_before_notice_not_allowed') {
+    return '방문일과 협력사 작업확인이 확정된 주문에서만 전날 안내를 보낼 수 있습니다.';
+  }
+  if (error?.message === 'day_before_notice_not_due') {
+    return '방문 하루 전인 주문에서만 전날 안내를 보낼 수 있습니다.';
   }
   if (error?.message === 'invalid_as_request_status') {
     return 'AS 요청은 작업완료 이후 또는 고객확인필요 상태에서 보낼 수 있습니다.';

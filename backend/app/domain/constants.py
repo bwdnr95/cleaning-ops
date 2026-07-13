@@ -36,13 +36,13 @@ class VatType(StrEnum):
 
 
 class RecurrenceMode(StrEnum):
-    MONTHLY = "monthly"   # 매월 지정일
-    WEEKLY = "weekly"     # N주 간격, start_date 요일 기준
+    MONTHLY = "monthly"  # 매월 지정일
+    WEEKLY = "weekly"  # N주 간격, start_date 요일 기준
 
 
 class RecurringBillingMode(StrEnum):
     PER_VISIT = "per_visit"  # 회당 금액 × 그달 방문 횟수(월 합산). 월액이 방문 횟수에 따라 변동.
-    MONTHLY = "monthly"      # 월 고정 금액(방문 횟수 무관).
+    MONTHLY = "monthly"  # 월 고정 금액(방문 횟수 무관).
 
 
 class RecurringContractStatus(StrEnum):
@@ -52,9 +52,9 @@ class RecurringContractStatus(StrEnum):
 
 
 class RecurringOccurrenceStatus(StrEnum):
-    PENDING = "pending"       # 도래했으나 미생성 (승인 대기)
-    GENERATED = "generated"   # 승인되어 주문 라인 생성됨
-    SKIPPED = "skipped"       # 운영자가 건너뜀
+    PENDING = "pending"  # 도래했으나 미생성 (승인 대기)
+    GENERATED = "generated"  # 승인되어 주문 라인 생성됨
+    SKIPPED = "skipped"  # 운영자가 건너뜀
 
 
 class ReceiptType(StrEnum):
@@ -84,6 +84,7 @@ class MessageType(StrEnum):
     PARTNER_CUSTOMER_INFO = "partner_customer_info"
     PARTNER_AS_REQUEST = "partner_as_request"
     CUSTOMER_AS_NOTICE = "customer_as_notice"
+    CUSTOMER_ACCESS_LINK = "customer_access_link"
 
 
 class MessageChannel(StrEnum):
@@ -100,9 +101,20 @@ class MessageStatus(StrEnum):
     DELIVERY_FAILED = "delivery_failed"
 
 
+MESSAGE_PROVIDER_OUTCOME_UNKNOWN_ERROR_CODES: frozenset[str] = frozenset(
+    {"solapi_outcome_unknown", "solapi_invalid_response"}
+)
+
+
 class RecipientType(StrEnum):
     CUSTOMER = "customer"
     PARTNER = "partner"
+
+
+class CustomerAftercareStatus(StrEnum):
+    AVAILABLE = "available"
+    PENDING = "pending"
+    IN_PROGRESS = "in_progress"
 
 
 class TimelineEventType(StrEnum):
@@ -120,6 +132,9 @@ class TimelineEventType(StrEnum):
     PARTNER_SETTLEMENT_REVERTED = "partner_settlement_reverted"
     BROKER_SETTLED = "broker_settled"
     BROKER_SETTLEMENT_REVERTED = "broker_settlement_reverted"
+    PARTNER_CONFIRMED = "partner_confirmed"
+    PARTNER_CONFIRMATION_REQUIRED = "partner_confirmation_required"
+    AS_INTAKE_REQUESTED = "as_intake_requested"
     AS_REQUESTED = "as_requested"
     QUOTE_SENT = "quote_sent"
     PARTNER_UNPAID_NOTICE_SENT = "partner_unpaid_notice_sent"

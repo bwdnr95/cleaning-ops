@@ -3,19 +3,24 @@ import hmac
 import json
 import logging
 from dataclasses import dataclass
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, date, datetime, time, timedelta
 from decimal import Decimal
+from http.client import HTTPException as HttpClientException
 from json import JSONDecodeError
+from typing import TypedDict
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote
-from urllib.request import Request, urlopen
+from urllib.request import HTTPRedirectHandler, Request, build_opener
 from uuid import uuid4
+from zoneinfo import ZoneInfo
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
-from app.core.time import business_today
+from app.core.time import business_now, business_today, to_business_time, to_utc
 from app.domain.constants import (
+    MESSAGE_PROVIDER_OUTCOME_UNKNOWN_ERROR_CODES,
     MessageChannel,
     MessageStatus,
     MessageType,
@@ -39,15 +44,28 @@ from app.repositories.orders import OrderRepository
 from app.repositories.partners import PartnerRepository
 from app.repositories.photos import PhotoRepository
 from app.schemas.message import (
+    DayBeforeNoticeRunRead,
     MessageLogRead,
     MessagePreviewRead,
     MessageSendRequest,
     MessageSettingsRead,
-    DayBeforeNoticeRunRead,
 )
 from app.services.timeline import TimelineService
 
 logger = logging.getLogger(__name__)
+
+SOLAPI_MESSAGE_LOG_CUSTOM_FIELD = "cleaningOpsMessageLogId"
+SOLAPI_SMS_MAX_BYTES = 90
+
+
+class NoRedirectHandler(HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+def urlopen(request: Request, timeout: float):
+    return build_opener(NoRedirectHandler()).open(request, timeout=timeout)
+
 
 # 본문/카카오 템플릿에 고객 링크(customer_token 기반)가 포함되는 고객 메시지 타입.
 # 이 타입들은 customer_token 이 없으면 죽은 링크를 보내지 않고 발송 실패로 처리한다.
@@ -58,6 +76,7 @@ MESSAGE_TYPES_WITH_CUSTOMER_LINK: frozenset[MessageType] = frozenset(
         MessageType.CUSTOMER_PHOTO_READY,
         MessageType.CUSTOMER_BALANCE_DUE,
         MessageType.CUSTOMER_AS_NOTICE,
+        MessageType.CUSTOMER_ACCESS_LINK,
     }
 )
 
@@ -66,6 +85,41 @@ DAY_BEFORE_NOTICE_AUTOMATION_STATUSES: set[str] = {
     OrderStatus.DAY_BEFORE_NOTICE_NEEDED.value,
     OrderStatus.SCHEDULED.value,
 }
+
+DAY_BEFORE_NOTICE_RECOVERY_STATUSES: frozenset[str] = frozenset(
+    {
+        *DAY_BEFORE_NOTICE_AUTOMATION_STATUSES,
+        OrderStatus.DAY_BEFORE_NOTICE_DONE.value,
+    }
+)
+
+PARTNER_ASSIGNMENT_RECOVERY_STATUSES: frozenset[str] = frozenset(
+    {
+        OrderStatus.NEW.value,
+        OrderStatus.CONSULTING.value,
+        OrderStatus.PARTNER_CONFIRMING.value,
+        OrderStatus.SCHEDULE_CONFIRMED.value,
+        OrderStatus.DAY_BEFORE_NOTICE_NEEDED.value,
+        OrderStatus.DAY_BEFORE_NOTICE_DONE.value,
+        OrderStatus.SCHEDULED.value,
+        OrderStatus.IN_PROGRESS.value,
+    }
+)
+
+SCHEDULE_CONFIRMATION_RECOVERY_STATUSES: frozenset[str] = frozenset(
+    {
+        OrderStatus.SCHEDULE_CONFIRMED.value,
+        OrderStatus.SCHEDULED.value,
+    }
+)
+
+BALANCE_NOTICE_ALLOWED_STATUSES: frozenset[str] = frozenset(
+    {
+        OrderStatus.CUSTOMER_DELIVERY_NEEDED.value,
+        OrderStatus.CUSTOMER_DELIVERY_DONE.value,
+        OrderStatus.COMPLETED.value,
+    }
+)
 
 
 @dataclass(frozen=True)
@@ -84,12 +138,48 @@ class MessageSendResult:
     delivered_at: datetime | None = None
 
 
+def solapi_unknown_outcome(
+    *,
+    channel: MessageChannel | None,
+    error_message: str,
+    error_code: str,
+    provider_response: dict[str, object] | None = None,
+) -> MessageSendResult:
+    return MessageSendResult(
+        status=MessageStatus.PENDING,
+        error_message=error_message,
+        channel=channel,
+        provider="solapi",
+        provider_error_code=error_code,
+        provider_status_message="provider acceptance could not be confirmed",
+        provider_response=provider_response,
+    )
+
+
 @dataclass(frozen=True)
 class SolapiWebhookProcessResult:
     received: int
     updated: int
     ignored: int
     unknown: int
+
+
+@dataclass(frozen=True)
+class NotificationRecoveryTarget:
+    order_id: str
+    message_type: MessageType
+    recipient_type: RecipientType
+    successful_since: datetime
+    expected_scheduled_date: date | None = None
+
+
+@dataclass(frozen=True)
+class NotificationRecoveryRunResult:
+    scanned_orders: int
+    attempted: int
+    sent: int
+    skipped: int
+    failed: int
 
 
 @dataclass(frozen=True)
@@ -101,6 +191,15 @@ class MessageProviderSendInput:
     kakao_template_id: str | None = None
     kakao_variables: dict[str, str] | None = None
     fallback_sms_content: str | None = None
+    message_log_id: str | None = None
+
+
+class KakaoPreviewState(TypedDict):
+    kakao_channel_id_configured: bool
+    kakao_template_configured: bool
+    fallback_sms_enabled: bool
+    can_send: bool
+    warnings: list[str]
 
 
 class MessageProvider:
@@ -182,12 +281,34 @@ class SolapiMessageProvider(MessageProvider):
     def send_with_context(self, send_input: MessageProviderSendInput) -> MessageSendResult:
         if send_input.channel == MessageChannel.ALIMTALK:
             return self._send_kakao_alimtalk(send_input)
-        return self.send(send_input.content, send_input.recipient_phone)
+        return self._send_text_message(
+            send_input.content,
+            send_input.recipient_phone,
+            requested_channel=send_input.channel,
+            message_log_id=send_input.message_log_id,
+        )
 
     def send(self, content: str, recipient_phone: str) -> MessageSendResult:
+        return self._send_text_message(
+            content,
+            recipient_phone,
+            requested_channel=MessageChannel.SMS,
+            message_log_id=None,
+        )
+
+    def _send_text_message(
+        self,
+        content: str,
+        recipient_phone: str,
+        *,
+        requested_channel: MessageChannel,
+        message_log_id: str | None,
+    ) -> MessageSendResult:
+        actual_channel = self._resolve_text_channel(content, requested_channel)
         if not content or not recipient_phone:
             return MessageSendResult(
                 status=MessageStatus.FAILED,
+                channel=actual_channel,
                 error_message="missing_recipient",
                 provider=self.provider_name,
                 provider_error_code="missing_recipient",
@@ -195,6 +316,7 @@ class SolapiMessageProvider(MessageProvider):
         if not self.api_key or not self.api_secret:
             return MessageSendResult(
                 status=MessageStatus.FAILED,
+                channel=actual_channel,
                 error_message="solapi_missing_credentials",
                 provider=self.provider_name,
                 provider_error_code="solapi_missing_credentials",
@@ -204,6 +326,7 @@ class SolapiMessageProvider(MessageProvider):
         if not from_number:
             return MessageSendResult(
                 status=MessageStatus.FAILED,
+                channel=actual_channel,
                 error_message="solapi_missing_sender_number",
                 provider=self.provider_name,
                 provider_error_code="solapi_missing_sender_number",
@@ -213,20 +336,23 @@ class SolapiMessageProvider(MessageProvider):
         if not to_number:
             return MessageSendResult(
                 status=MessageStatus.FAILED,
+                channel=actual_channel,
                 error_message="missing_recipient",
                 provider=self.provider_name,
                 provider_error_code="missing_recipient",
             )
 
-        payload: dict[str, object] = {
-            "messages": [
-                {
-                    "to": to_number,
-                    "from": from_number,
-                    "text": content,
-                }
-            ],
+        message: dict[str, object] = {
+            "to": to_number,
+            "from": from_number,
+            "text": content,
+            "type": actual_channel.value.upper(),
         }
+        if message_log_id:
+            message["customFields"] = {
+                SOLAPI_MESSAGE_LOG_CUSTOM_FIELD: message_log_id,
+            }
+        payload: dict[str, object] = {"messages": [message]}
         body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
         request = Request(
             self.send_url,
@@ -243,42 +369,47 @@ class SolapiMessageProvider(MessageProvider):
                 raw_body = response.read().decode("utf-8")
         except HTTPError as exc:
             logger.warning("Solapi HTTP error: status=%s", exc.code)
+            if exc.code >= 500:
+                return solapi_unknown_outcome(
+                    channel=actual_channel,
+                    error_message="solapi_outcome_unknown",
+                    error_code="solapi_outcome_unknown",
+                )
             return MessageSendResult(
                 status=MessageStatus.FAILED,
+                channel=actual_channel,
                 error_message=f"solapi_http_error: {exc.code} {read_solapi_error_body(exc)}",
                 provider=self.provider_name,
                 provider_error_code="solapi_http_error",
             )
-        except (TimeoutError, URLError, OSError) as exc:
-            logger.warning("Solapi request failed: %s", exc)
-            return MessageSendResult(
-                status=MessageStatus.FAILED,
-                error_message=f"solapi_request_failed: {exc}",
-                provider=self.provider_name,
-                provider_error_code="solapi_request_failed",
+        except (TimeoutError, URLError, OSError, HttpClientException, UnicodeError) as exc:
+            logger.warning("Solapi request outcome is unknown: %s", type(exc).__name__)
+            return solapi_unknown_outcome(
+                channel=actual_channel,
+                error_message="solapi_outcome_unknown",
+                error_code="solapi_outcome_unknown",
             )
 
         try:
             decoded_payload = json.loads(raw_body) if raw_body else {}
         except JSONDecodeError:
-            return MessageSendResult(
-                status=MessageStatus.FAILED,
+            return solapi_unknown_outcome(
+                channel=actual_channel,
                 error_message="solapi_invalid_response",
-                provider=self.provider_name,
-                provider_error_code="solapi_invalid_response",
+                error_code="solapi_invalid_response",
             )
         if not isinstance(decoded_payload, dict):
-            return MessageSendResult(
-                status=MessageStatus.FAILED,
+            return solapi_unknown_outcome(
+                channel=actual_channel,
                 error_message="solapi_invalid_response",
-                provider=self.provider_name,
-                provider_error_code="solapi_invalid_response",
+                error_code="solapi_invalid_response",
             )
 
         failure_reason = extract_solapi_failure_reason(decoded_payload)
         if failure_reason:
             return MessageSendResult(
                 status=MessageStatus.FAILED,
+                channel=actual_channel,
                 error_message=f"solapi_failed: {failure_reason}",
                 provider=self.provider_name,
                 provider_error_code="solapi_provider_failed",
@@ -289,22 +420,68 @@ class SolapiMessageProvider(MessageProvider):
                 provider_response=decoded_payload,
             )
 
+        provider_group_id = extract_solapi_group_id(decoded_payload)
+        provider_message_id = extract_solapi_message_id(decoded_payload)
+        if not provider_group_id and not provider_message_id:
+            return solapi_unknown_outcome(
+                channel=actual_channel,
+                error_message="solapi_invalid_response",
+                error_code="solapi_invalid_response",
+                provider_response=decoded_payload,
+            )
+
         return MessageSendResult(
             status=MessageStatus.SENT,
+            channel=actual_channel,
             provider=self.provider_name,
-            provider_group_id=extract_solapi_group_id(decoded_payload),
-            provider_message_id=extract_solapi_message_id(decoded_payload),
+            provider_group_id=provider_group_id,
+            provider_message_id=provider_message_id,
             provider_status_code=extract_solapi_status_code(decoded_payload),
             provider_status_message=extract_solapi_status_message(decoded_payload),
             provider_response=decoded_payload,
         )
 
+    @staticmethod
+    def _resolve_text_channel(
+        content: str,
+        requested_channel: MessageChannel,
+    ) -> MessageChannel:
+        if requested_channel not in {MessageChannel.SMS, MessageChannel.LMS}:
+            raise ValueError("unsupported_text_channel")
+        if (
+            requested_channel == MessageChannel.LMS
+            or len(content.encode("utf-8")) > SOLAPI_SMS_MAX_BYTES
+        ):
+            return MessageChannel.LMS
+        return MessageChannel.SMS
+
     def _send_kakao_alimtalk(self, send_input: MessageProviderSendInput) -> MessageSendResult:
         result = self._send_kakao_alimtalk_once(send_input)
-        if result.status == MessageStatus.SENT or not send_input.fallback_sms_content:
+        if result.status != MessageStatus.FAILED or not send_input.fallback_sms_content:
             return result
 
-        fallback = self.send(send_input.fallback_sms_content, send_input.recipient_phone)
+        fallback = self._send_text_message(
+            send_input.fallback_sms_content,
+            send_input.recipient_phone,
+            requested_channel=MessageChannel.SMS,
+            message_log_id=send_input.message_log_id,
+        )
+        if fallback.status == MessageStatus.PENDING:
+            return MessageSendResult(
+                status=MessageStatus.PENDING,
+                channel=fallback.channel or MessageChannel.SMS,
+                error_message=fallback.error_message,
+                provider=self.provider_name,
+                provider_error_code=fallback.provider_error_code,
+                provider_message_id=fallback.provider_message_id,
+                provider_group_id=fallback.provider_group_id,
+                provider_status_code=fallback.provider_status_code,
+                provider_status_message="alimtalk_failed_sms_fallback_outcome_unknown",
+                provider_response={
+                    "alimtalk": result.provider_response or {"error": result.error_message},
+                    "fallback_sms": fallback.provider_response or {"error": fallback.error_message},
+                },
+            )
         if fallback.status != MessageStatus.SENT:
             return MessageSendResult(
                 status=MessageStatus.FAILED,
@@ -321,7 +498,7 @@ class SolapiMessageProvider(MessageProvider):
 
         return MessageSendResult(
             status=MessageStatus.SENT,
-            channel=MessageChannel.SMS,
+            channel=fallback.channel or MessageChannel.SMS,
             provider=self.provider_name,
             provider_message_id=fallback.provider_message_id,
             provider_group_id=fallback.provider_group_id,
@@ -371,14 +548,14 @@ class SolapiMessageProvider(MessageProvider):
                 provider_error_code="missing_recipient",
             )
 
-        channel_id = get_solapi_kakao_channel_id()
-        if not channel_id:
+        sender_profile_id = get_solapi_kakao_sender_profile_id()
+        if not sender_profile_id:
             return MessageSendResult(
                 status=MessageStatus.FAILED,
                 channel=MessageChannel.ALIMTALK,
-                error_message="solapi_missing_kakao_channel_id",
+                error_message="solapi_missing_kakao_pf_id",
                 provider=self.provider_name,
-                provider_error_code="solapi_missing_kakao_channel_id",
+                provider_error_code="solapi_missing_kakao_pf_id",
             )
 
         if not send_input.kakao_template_id:
@@ -390,22 +567,23 @@ class SolapiMessageProvider(MessageProvider):
                 provider_error_code="solapi_missing_kakao_template_id",
             )
 
-        payload: dict[str, object] = {
-            "messages": [
-                {
-                    "to": to_number,
-                    "from": from_number,
-                    "text": send_input.fallback_sms_content or send_input.content,
-                    "type": "ATA",
-                    "kakaoOptions": {
-                        "channelId": channel_id,
-                        "templateId": send_input.kakao_template_id,
-                        "disableSms": not settings.solapi_alimtalk_fallback_sms,
-                        "variables": send_input.kakao_variables or {},
-                    },
-                }
-            ],
+        message: dict[str, object] = {
+            "to": to_number,
+            "from": from_number,
+            "text": send_input.fallback_sms_content or send_input.content,
+            "type": "ATA",
+            "kakaoOptions": {
+                "pfId": sender_profile_id,
+                "templateId": send_input.kakao_template_id,
+                "disableSms": not settings.solapi_alimtalk_fallback_sms,
+                "variables": send_input.kakao_variables or {},
+            },
         }
+        if send_input.message_log_id:
+            message["customFields"] = {
+                SOLAPI_MESSAGE_LOG_CUSTOM_FIELD: send_input.message_log_id,
+            }
+        payload: dict[str, object] = {"messages": [message]}
         return self._post_solapi_payload(payload, channel=MessageChannel.ALIMTALK)
 
     def _post_solapi_payload(
@@ -430,6 +608,12 @@ class SolapiMessageProvider(MessageProvider):
                 raw_body = response.read().decode("utf-8")
         except HTTPError as exc:
             logger.warning("Solapi HTTP error: status=%s", exc.code)
+            if exc.code >= 500:
+                return solapi_unknown_outcome(
+                    channel=channel,
+                    error_message="solapi_outcome_unknown",
+                    error_code="solapi_outcome_unknown",
+                )
             return MessageSendResult(
                 status=MessageStatus.FAILED,
                 channel=channel,
@@ -437,33 +621,27 @@ class SolapiMessageProvider(MessageProvider):
                 provider=self.provider_name,
                 provider_error_code="solapi_http_error",
             )
-        except (TimeoutError, URLError, OSError) as exc:
-            logger.warning("Solapi request failed: %s", exc)
-            return MessageSendResult(
-                status=MessageStatus.FAILED,
+        except (TimeoutError, URLError, OSError, HttpClientException, UnicodeError) as exc:
+            logger.warning("Solapi request outcome is unknown: %s", type(exc).__name__)
+            return solapi_unknown_outcome(
                 channel=channel,
-                error_message=f"solapi_request_failed: {exc}",
-                provider=self.provider_name,
-                provider_error_code="solapi_request_failed",
+                error_message="solapi_outcome_unknown",
+                error_code="solapi_outcome_unknown",
             )
 
         try:
             decoded_payload = json.loads(raw_body) if raw_body else {}
         except JSONDecodeError:
-            return MessageSendResult(
-                status=MessageStatus.FAILED,
+            return solapi_unknown_outcome(
                 channel=channel,
                 error_message="solapi_invalid_response",
-                provider=self.provider_name,
-                provider_error_code="solapi_invalid_response",
+                error_code="solapi_invalid_response",
             )
         if not isinstance(decoded_payload, dict):
-            return MessageSendResult(
-                status=MessageStatus.FAILED,
+            return solapi_unknown_outcome(
                 channel=channel,
                 error_message="solapi_invalid_response",
-                provider=self.provider_name,
-                provider_error_code="solapi_invalid_response",
+                error_code="solapi_invalid_response",
             )
 
         failure_reason = extract_solapi_failure_reason(decoded_payload)
@@ -481,12 +659,22 @@ class SolapiMessageProvider(MessageProvider):
                 provider_response=decoded_payload,
             )
 
+        provider_group_id = extract_solapi_group_id(decoded_payload)
+        provider_message_id = extract_solapi_message_id(decoded_payload)
+        if not provider_group_id and not provider_message_id:
+            return solapi_unknown_outcome(
+                channel=channel,
+                error_message="solapi_invalid_response",
+                error_code="solapi_invalid_response",
+                provider_response=decoded_payload,
+            )
+
         return MessageSendResult(
             status=MessageStatus.SENT,
             channel=channel,
             provider=self.provider_name,
-            provider_group_id=extract_solapi_group_id(decoded_payload),
-            provider_message_id=extract_solapi_message_id(decoded_payload),
+            provider_group_id=provider_group_id,
+            provider_message_id=provider_message_id,
             provider_status_code=extract_solapi_status_code(decoded_payload),
             provider_status_message=extract_solapi_status_message(decoded_payload),
             provider_response=decoded_payload,
@@ -514,12 +702,11 @@ def build_solapi_auth_header(
     salt_text = salt or uuid4().hex
     signature = hmac.new(
         api_secret.encode("utf-8"),
-        f"{date_text}{salt_text}".encode("utf-8"),
+        f"{date_text}{salt_text}".encode(),
         hashlib.sha256,
     ).hexdigest()
     return (
-        f"HMAC-SHA256 apiKey={api_key}, "
-        f"date={date_text}, salt={salt_text}, signature={signature}"
+        f"HMAC-SHA256 apiKey={api_key}, date={date_text}, salt={salt_text}, signature={signature}"
     )
 
 
@@ -601,7 +788,7 @@ MESSAGE_LIFECYCLE_ORDER: dict[MessageStatus, int] = {
 
 # 종결(terminal) 상태: 한 번 진입하면 배송 리포트로 덮어쓰지 않는다.
 MESSAGE_TERMINAL_STATUSES: frozenset[MessageStatus] = frozenset(
-    {MessageStatus.FAILED, MessageStatus.DELIVERY_FAILED}
+    {MessageStatus.FAILED, MessageStatus.DELIVERY_FAILED, MessageStatus.DELIVERED}
 )
 
 
@@ -637,9 +824,19 @@ def solapi_delivery_status(status_code: str | None) -> MessageStatus | None:
 
 
 def is_solapi_single_report_event(event: dict[str, object]) -> bool:
-    return bool(string_value(event.get("messageId")) or string_value(event.get("groupId"))) and bool(
-        string_value(event.get("statusCode"))
+    has_correlation_key = bool(
+        extract_solapi_message_log_id(event)
+        or string_value(event.get("messageId"))
+        or string_value(event.get("groupId"))
     )
+    return has_correlation_key and bool(string_value(event.get("statusCode")))
+
+
+def extract_solapi_message_log_id(event: dict[str, object]) -> str | None:
+    custom_fields = event.get("customFields")
+    if not isinstance(custom_fields, dict):
+        return None
+    return string_value(custom_fields.get(SOLAPI_MESSAGE_LOG_CUSTOM_FIELD))
 
 
 def string_value(value: object) -> str | None:
@@ -647,7 +844,10 @@ def string_value(value: object) -> str | None:
 
 
 def read_solapi_error_body(exc: HTTPError) -> str:
-    raw_body = exc.read().decode("utf-8", errors="replace")
+    try:
+        raw_body = exc.read().decode("utf-8", errors="replace")
+    except (AttributeError, OSError, HttpClientException, UnicodeError):
+        return ""
     if not raw_body:
         return ""
     try:
@@ -682,12 +882,97 @@ class MessageService:
             for log, customer_name in self.messages.list_messages_with_customer()
         ]
 
+    def _lock_order_then_message(
+        self,
+        *,
+        order_id: str,
+        message_id: str,
+    ) -> tuple[Order | None, MessageLog | None]:
+        order = self.db.execute(
+            select(Order)
+            .where(Order.id == order_id)
+            .execution_options(populate_existing=True)
+            .with_for_update()
+        ).scalar_one_or_none()
+        log = self.db.execute(
+            select(MessageLog)
+            .where(MessageLog.id == message_id)
+            .execution_options(populate_existing=True)
+            .with_for_update()
+        ).scalar_one_or_none()
+        return order, log
+
+    def resolve_unknown_outcome(
+        self,
+        message_id: str,
+        *,
+        resolution: str,
+        actor_user_id: str,
+    ) -> MessageLog:
+        order_id = self.db.scalar(select(MessageLog.order_id).where(MessageLog.id == message_id))
+        if order_id is None:
+            raise ValueError("message_not_found")
+        order, log = self._lock_order_then_message(
+            order_id=order_id,
+            message_id=message_id,
+        )
+        if log is None:
+            raise ValueError("message_not_found")
+        if (
+            log.provider != "solapi"
+            or log.status != MessageStatus.PENDING
+            or log.provider_error_code not in MESSAGE_PROVIDER_OUTCOME_UNKNOWN_ERROR_CODES
+        ):
+            raise ValueError("message_not_unknown_pending")
+
+        if order is None:
+            raise ValueError("order_not_found")
+
+        now = datetime.now(UTC)
+        if resolution == "confirmed_sent":
+            log.status = MessageStatus.SENT
+            log.error_message = None
+            log.provider_error_code = "manually_confirmed_sent"
+            log.provider_status_message = "operator confirmed sent in SOLAPI console"
+            log.provider_reported_at = now
+            log.sent_at = log.requested_at or now
+            self._apply_confirmed_sent_log_side_effects(
+                order,
+                log,
+                actor_user_id=actor_user_id,
+            )
+        elif resolution == "confirmed_not_sent":
+            log.status = MessageStatus.FAILED
+            log.error_message = "운영자가 SOLAPI 콘솔에서 미발송을 확인했습니다."
+            log.provider_error_code = "manually_confirmed_not_sent"
+            log.provider_status_message = "operator confirmed not sent in SOLAPI console"
+            log.provider_reported_at = now
+            log.sent_at = None
+        else:
+            raise ValueError("invalid_unknown_outcome_resolution")
+
+        self.timeline.record(
+            order_id=log.order_id,
+            actor_user_id=actor_user_id,
+            event_type=TimelineEventType.MESSAGE_SENT,
+            title="SOLAPI 불명 결과 수동 확정",
+            metadata={
+                "message_log_id": log.id,
+                "message_type": log.message_type,
+                "resolution": resolution,
+                "status": log.status,
+            },
+        )
+        self.db.commit()
+        self.db.refresh(log)
+        return log
+
     def settings_status(self) -> MessageSettingsRead:
         provider = settings.message_provider.strip().lower() or "mock"
         credentials_configured = bool(settings.solapi_api_key and settings.solapi_api_secret)
         sender_configured = bool(normalize_phone(settings.solapi_sender_number))
         webhook_configured = bool(settings.solapi_webhook_secret)
-        channel_id_configured = bool(get_solapi_kakao_channel_id())
+        channel_id_configured = bool(get_solapi_kakao_sender_profile_id())
         template_status = {
             message_type.value: bool(getattr(settings, definition.template_id_setting, ""))
             for message_type, definition in KAKAO_TEMPLATE_DEFINITIONS.items()
@@ -714,7 +999,8 @@ class MessageService:
             if not channel_id_configured:
                 warnings.append("solapi_missing_kakao_channel_id")
             missing_templates = [
-                message_type for message_type, is_configured in template_status.items()
+                message_type
+                for message_type, is_configured in template_status.items()
                 if not is_configured
             ]
             if missing_templates:
@@ -736,6 +1022,285 @@ class MessageService:
             warnings=warnings,
         )
 
+    def send_automation_once(
+        self,
+        payload: MessageSendRequest,
+        *,
+        actor_user_id: str | None = None,
+        successful_since: datetime | None = None,
+        expected_scheduled_date: date | None = None,
+    ) -> MessageLog | None:
+        order = self.db.execute(
+            select(Order)
+            .where(
+                Order.id == payload.order_id,
+                Order.deleted_at.is_(None),
+            )
+            .execution_options(populate_existing=True)
+            .with_for_update()
+        ).scalar_one_or_none()
+        if order is None:
+            raise ValueError("order_not_found")
+        self._validate_message_preconditions(
+            order,
+            payload,
+            expected_scheduled_date=expected_scheduled_date,
+        )
+        effective_successful_since = self._effective_successful_since(
+            order,
+            payload,
+            successful_since,
+        )
+
+        pending_before = datetime.now(UTC) - timedelta(
+            minutes=settings.message_pending_retry_after_minutes
+        )
+        recipient_partner_id = (
+            order.partner_id if payload.recipient_type == RecipientType.PARTNER else None
+        )
+        marked_unknown_count = self.messages.mark_stale_solapi_pending_unknown(
+            order_id=order.id,
+            message_type=payload.message_type,
+            pending_before=pending_before,
+            recipient_partner_id=recipient_partner_id,
+        )
+        if marked_unknown_count:
+            self.timeline.record(
+                order_id=order.id,
+                actor_user_id=actor_user_id,
+                event_type=TimelineEventType.MESSAGE_SENT,
+                title="SOLAPI 발송 결과 확인 필요",
+                description="중단된 발송의 수락 여부를 SOLAPI 콘솔에서 확인해야 합니다.",
+                metadata={
+                    "message_type": payload.message_type,
+                    "unknown_pending_count": marked_unknown_count,
+                    "pending_before": pending_before.isoformat(),
+                    "automation_recovery": True,
+                },
+            )
+        expired_count = self.messages.expire_stale_pending_attempts(
+            order_id=order.id,
+            message_type=payload.message_type,
+            pending_before=pending_before,
+            recipient_partner_id=recipient_partner_id,
+        )
+        if expired_count:
+            self.timeline.record(
+                order_id=order.id,
+                actor_user_id=actor_user_id,
+                event_type=TimelineEventType.MESSAGE_SENT,
+                title="멈춘 자동 메시지 재시도",
+                description="응답이 없는 이전 자동 발송 시도를 실패 처리하고 다시 발송합니다.",
+                metadata={
+                    "message_type": payload.message_type,
+                    "expired_pending_count": expired_count,
+                    "pending_before": pending_before.isoformat(),
+                    "automation_recovery": True,
+                },
+            )
+
+        if self.messages.has_blocking_delivery_attempt(
+            order_id=order.id,
+            message_type=payload.message_type,
+            retry_since=pending_before,
+            successful_since=effective_successful_since,
+            recipient_partner_id=recipient_partner_id,
+        ):
+            self.db.commit()
+            return None
+
+        return self.send(
+            payload,
+            actor_user_id=actor_user_id,
+            expected_scheduled_date=expected_scheduled_date,
+        )
+
+    def _effective_successful_since(
+        self,
+        order: Order,
+        payload: MessageSendRequest,
+        successful_since: datetime | None,
+    ) -> datetime | None:
+        timestamps = [successful_since] if successful_since is not None else []
+        if payload.message_type == MessageType.CUSTOMER_DAY_BEFORE:
+            partner_confirmed_at = self.timeline.latest_current_partner_confirmation(
+                order_id=order.id,
+                partner_id=order.partner_id,
+            )
+            if partner_confirmed_at is not None:
+                timestamps.append(to_utc(partner_confirmed_at))
+        return max(timestamps, default=None)
+
+    def recover_workflow_notifications(self) -> NotificationRecoveryRunResult:
+        orders = list(
+            self.db.scalars(
+                select(Order)
+                .where(Order.deleted_at.is_(None))
+                .order_by(Order.created_at.asc(), Order.id.asc())
+            )
+        )
+        targets = [target for order in orders for target in self._workflow_recovery_targets(order)]
+        sent = 0
+        skipped = 0
+        failed = 0
+        for target in targets:
+            try:
+                log = self.send_automation_once(
+                    MessageSendRequest(
+                        order_id=target.order_id,
+                        message_type=target.message_type,
+                        recipient_type=target.recipient_type,
+                    ),
+                    successful_since=target.successful_since,
+                    expected_scheduled_date=target.expected_scheduled_date,
+                )
+            except (RuntimeError, ValueError):
+                self.db.rollback()
+                failed += 1
+                logger.exception(
+                    "workflow_notification_recovery_failed",
+                    extra={
+                        "order_id": target.order_id,
+                        "message_type": target.message_type,
+                    },
+                )
+                continue
+
+            if log is None:
+                skipped += 1
+            elif log.status in {MessageStatus.SENT, MessageStatus.DELIVERED}:
+                sent += 1
+            else:
+                failed += 1
+
+        return NotificationRecoveryRunResult(
+            scanned_orders=len(orders),
+            attempted=len(targets),
+            sent=sent,
+            skipped=skipped,
+            failed=failed,
+        )
+
+    def _workflow_recovery_targets(self, order: Order) -> list[NotificationRecoveryTarget]:
+        targets: list[NotificationRecoveryTarget] = []
+        current_partner = self.partners.get(order.partner_id) if order.partner_id else None
+        has_active_partner = bool(current_partner and current_partner.is_active)
+        tomorrow = business_today() + timedelta(days=1)
+        local_now = business_now()
+        partner_confirmed_at = self.timeline.latest_current_partner_confirmation(
+            order_id=order.id,
+            partner_id=order.partner_id,
+        )
+        is_day_before_recovery_time = (
+            local_now.hour,
+            local_now.minute,
+        ) >= (
+            settings.automation_day_before_notice_hour,
+            settings.automation_day_before_notice_minute,
+        )
+        if (
+            settings.automation_day_before_notice_scheduler_enabled
+            and is_day_before_recovery_time
+            and order.scheduled_date == tomorrow
+            and order.status in DAY_BEFORE_NOTICE_RECOVERY_STATUSES
+            and partner_confirmed_at is not None
+        ):
+            targets.append(
+                NotificationRecoveryTarget(
+                    order_id=order.id,
+                    message_type=MessageType.CUSTOMER_DAY_BEFORE,
+                    recipient_type=RecipientType.CUSTOMER,
+                    successful_since=business_day_start_utc(),
+                    expected_scheduled_date=tomorrow,
+                )
+            )
+        if (
+            settings.automation_send_partner_assignment
+            and has_active_partner
+            and not order.as_intake_pending
+            and not order.as_requested
+            and order.status in PARTNER_ASSIGNMENT_RECOVERY_STATUSES
+        ):
+            partner_assigned_at = self.timeline.latest_created_at(
+                order_id=order.id,
+                event_type=TimelineEventType.PARTNER_ASSIGNED,
+            )
+            if partner_assigned_at is not None:
+                targets.append(
+                    NotificationRecoveryTarget(
+                        order_id=order.id,
+                        message_type=MessageType.PARTNER_ASSIGNMENT,
+                        recipient_type=RecipientType.PARTNER,
+                        successful_since=partner_assigned_at,
+                    )
+                )
+
+        if (
+            settings.automation_send_schedule_confirmed
+            and order.scheduled_date is not None
+            and order.status in SCHEDULE_CONFIRMATION_RECOVERY_STATUSES
+        ):
+            if partner_confirmed_at is not None:
+                targets.append(
+                    NotificationRecoveryTarget(
+                        order_id=order.id,
+                        message_type=MessageType.CUSTOMER_SCHEDULE_CONFIRMED,
+                        recipient_type=RecipientType.CUSTOMER,
+                        successful_since=partner_confirmed_at,
+                    )
+                )
+
+        if order.as_requested and order.status != OrderStatus.CANCELLED:
+            as_requested_at = self.timeline.latest_created_at(
+                order_id=order.id,
+                event_type=TimelineEventType.AS_REQUESTED,
+            )
+            if as_requested_at is not None:
+                partner_assigned_at = self.timeline.latest_created_at(
+                    order_id=order.id,
+                    event_type=TimelineEventType.PARTNER_ASSIGNED,
+                )
+                partner_as_since = max(
+                    timestamp
+                    for timestamp in (as_requested_at, partner_assigned_at)
+                    if timestamp is not None
+                )
+                if has_active_partner:
+                    targets.append(
+                        NotificationRecoveryTarget(
+                            order_id=order.id,
+                            message_type=MessageType.PARTNER_AS_REQUEST,
+                            recipient_type=RecipientType.PARTNER,
+                            successful_since=partner_as_since,
+                        ),
+                    )
+                targets.append(
+                    NotificationRecoveryTarget(
+                        order_id=order.id,
+                        message_type=MessageType.CUSTOMER_AS_NOTICE,
+                        recipient_type=RecipientType.CUSTOMER,
+                        successful_since=as_requested_at,
+                    )
+                )
+
+        if (
+            settings.automation_send_customer_balance_due
+            and order.work_completed_at is not None
+            and order.status in BALANCE_NOTICE_ALLOWED_STATUSES
+            and not order.as_intake_pending
+            and not order.as_requested
+            and has_customer_balance_due(order)
+        ):
+            targets.append(
+                NotificationRecoveryTarget(
+                    order_id=order.id,
+                    message_type=MessageType.CUSTOMER_BALANCE_DUE,
+                    recipient_type=RecipientType.CUSTOMER,
+                    successful_since=order.work_completed_at,
+                )
+            )
+        return targets
+
     def send_day_before_notices(
         self,
         *,
@@ -747,51 +1312,102 @@ class MessageService:
             target_date=notice_date,
             statuses=DAY_BEFORE_NOTICE_AUTOMATION_STATUSES,
         )
+        order_ids = [order.id for order in orders]
         sent_order_ids: list[str] = []
         skipped_order_ids: list[str] = []
         failed_order_ids: list[str] = []
+        retryable_order_ids: list[str] = []
+        unconfirmed_order_ids: list[str] = []
+        day_start = business_day_start_utc()
 
-        for order in orders:
-            if self.messages.last_sent_at(
-                order_id=order.id,
-                message_type=MessageType.CUSTOMER_DAY_BEFORE,
-            ):
-                skipped_order_ids.append(order.id)
-                self._mark_day_before_notice_done(order, actor_user_id=actor_user_id)
-                self.db.commit()
+        for order_id in order_ids:
+            order = self.orders.get(order_id)
+            if order is None:
+                failed_order_ids.append(order_id)
                 continue
-
+            if (
+                self.timeline.latest_current_partner_confirmation(
+                    order_id=order.id,
+                    partner_id=order.partner_id,
+                )
+                is None
+            ):
+                unconfirmed_order_ids.append(order_id)
+                continue
+            payload = MessageSendRequest(
+                order_id=order_id,
+                message_type=MessageType.CUSTOMER_DAY_BEFORE,
+                recipient_type=RecipientType.CUSTOMER,
+            )
             try:
-                log = self.send(
-                    MessageSendRequest(
-                        order_id=order.id,
-                        message_type=MessageType.CUSTOMER_DAY_BEFORE,
-                        recipient_type=RecipientType.CUSTOMER,
-                    ),
+                log = self.send_automation_once(
+                    payload,
                     actor_user_id=actor_user_id,
+                    successful_since=day_start,
+                    expected_scheduled_date=notice_date,
                 )
             except ValueError:
-                failed_order_ids.append(order.id)
+                self.db.rollback()
+                failed_order_ids.append(order_id)
+                continue
+
+            if log is None:
+                skipped_order_ids.append(order_id)
+                current_order = self.orders.get(order_id)
+                sent_since = (
+                    self._effective_successful_since(
+                        current_order,
+                        payload,
+                        day_start,
+                    )
+                    if current_order is not None
+                    else day_start
+                )
+                last_sent_at = self.messages.last_sent_at(
+                    order_id=order_id,
+                    message_type=MessageType.CUSTOMER_DAY_BEFORE,
+                    sent_since=sent_since,
+                )
+                if last_sent_at:
+                    if current_order is not None:
+                        self._mark_day_before_notice_done(
+                            current_order,
+                            actor_user_id=actor_user_id,
+                        )
+                        self.db.commit()
+                elif current_order is not None and not self.messages.has_unknown_delivery_outcome(
+                    order_id=order_id,
+                    message_type=MessageType.CUSTOMER_DAY_BEFORE,
+                    attempted_since=sent_since,
+                ):
+                    retryable_order_ids.append(order_id)
                 continue
 
             if log.status in {MessageStatus.SENT, MessageStatus.DELIVERED}:
-                sent_order_ids.append(order.id)
+                sent_order_ids.append(order_id)
             else:
-                failed_order_ids.append(order.id)
+                failed_order_ids.append(order_id)
 
         return DayBeforeNoticeRunRead(
             target_date=notice_date,
-            scanned=len(orders),
+            scanned=len(order_ids),
             sent=len(sent_order_ids),
             skipped_already_sent=len(skipped_order_ids),
+            skipped_unconfirmed=len(unconfirmed_order_ids),
             failed=len(failed_order_ids),
+            retryable=len(retryable_order_ids),
             sent_order_ids=sent_order_ids,
             skipped_order_ids=skipped_order_ids,
+            unconfirmed_order_ids=unconfirmed_order_ids,
             failed_order_ids=failed_order_ids,
+            retryable_order_ids=retryable_order_ids,
         )
 
     def preview(self, payload: MessageSendRequest) -> MessagePreviewRead:
         payload = self._resolve_message_channel(payload)
+        channel = payload.channel
+        if channel is None:
+            raise RuntimeError("message_channel_not_resolved")
         order = self.orders.get(payload.order_id)
         if order is None:
             raise ValueError("order_not_found")
@@ -819,30 +1435,119 @@ class MessageService:
             recipient_type=recipient_type,
             recipient_name=recipient_name,
             recipient_phone=recipient_phone,
-            channel=payload.channel,
+            channel=channel,
             content=content,
             kakao_template_id=kakao_template_id,
             kakao_variables=kakao_variables,
             fallback_sms_content=(
                 content
-                if payload.channel == MessageChannel.ALIMTALK
-                and settings.solapi_alimtalk_fallback_sms
+                if channel == MessageChannel.ALIMTALK and settings.solapi_alimtalk_fallback_sms
                 else None
             ),
             **kakao_preview_state,
         )
 
-    def send(self, payload: MessageSendRequest, *, actor_user_id: str | None = None) -> MessageLog:
+    def send(
+        self,
+        payload: MessageSendRequest,
+        *,
+        actor_user_id: str | None = None,
+        expected_scheduled_date: date | None = None,
+    ) -> MessageLog:
         payload = self._resolve_message_channel(payload)
-        order = self.orders.get(payload.order_id)
+        channel = payload.channel
+        if channel is None:
+            raise RuntimeError("message_channel_not_resolved")
+        order = self.db.execute(
+            select(Order)
+            .where(
+                Order.id == payload.order_id,
+                Order.deleted_at.is_(None),
+            )
+            .execution_options(populate_existing=True)
+            .with_for_update()
+        ).scalar_one_or_none()
         if order is None:
             raise ValueError("order_not_found")
-        self._validate_message_preconditions(order, payload)
+        self._validate_message_preconditions(
+            order,
+            payload,
+            expected_scheduled_date=expected_scheduled_date,
+        )
+        dispatch_scheduled_date = order.scheduled_date
+        dispatch_requested_time = order.requested_time
+        dispatch_partner_confirmed_at = (
+            self.timeline.latest_current_partner_confirmation(
+                order_id=order.id,
+                partner_id=order.partner_id,
+            )
+            if payload.message_type
+            in {
+                MessageType.CUSTOMER_SCHEDULE_CONFIRMED,
+                MessageType.CUSTOMER_DAY_BEFORE,
+            }
+            else None
+        )
 
         recipient_type, recipient_name, recipient_phone = self._resolve_recipient(order, payload)
         partner = self.partners.get(order.partner_id) if order.partner_id else None
         # 협력사 수신 메시지는 발송 시점의 배정 협력사를 식별자로 박아둔다(전화번호 비의존).
         recipient_partner_id = order.partner_id if recipient_type == RecipientType.PARTNER else None
+        current_message_epoch = self._current_message_epoch(order, payload)
+        pending_before = datetime.now(UTC) - timedelta(
+            minutes=settings.message_pending_retry_after_minutes
+        )
+        marked_unknown_count = self.messages.mark_stale_solapi_pending_unknown(
+            order_id=order.id,
+            message_type=payload.message_type,
+            pending_before=pending_before,
+            recipient_partner_id=recipient_partner_id,
+        )
+        if marked_unknown_count:
+            self.timeline.record(
+                order_id=order.id,
+                actor_user_id=actor_user_id,
+                event_type=TimelineEventType.MESSAGE_SENT,
+                title="SOLAPI 발송 결과 확인 필요",
+                description="중단된 발송의 수락 여부를 SOLAPI 콘솔에서 확인해야 합니다.",
+                metadata={
+                    "message_type": payload.message_type,
+                    "unknown_pending_count": marked_unknown_count,
+                    "pending_before": pending_before.isoformat(),
+                },
+            )
+        if self.messages.has_unknown_delivery_outcome(
+            order_id=order.id,
+            message_type=payload.message_type,
+            attempted_since=current_message_epoch,
+            recipient_partner_id=recipient_partner_id,
+        ):
+            self.db.commit()
+            raise ValueError("message_outcome_unknown")
+        expired_pending_count = self.messages.expire_stale_pending_attempts(
+            order_id=order.id,
+            message_type=payload.message_type,
+            pending_before=pending_before,
+            recipient_partner_id=recipient_partner_id,
+        )
+        if expired_pending_count:
+            self.timeline.record(
+                order_id=order.id,
+                actor_user_id=actor_user_id,
+                event_type=TimelineEventType.MESSAGE_SENT,
+                title="멈춘 메시지 발송 만료",
+                metadata={
+                    "message_type": payload.message_type,
+                    "expired_pending_count": expired_pending_count,
+                },
+            )
+        if self.messages.has_pending_delivery_attempt(
+            order_id=order.id,
+            message_type=payload.message_type,
+            attempted_since=current_message_epoch,
+            recipient_partner_id=recipient_partner_id,
+        ):
+            raise ValueError("message_send_in_progress")
 
         # FIX 1: 수신자 전화번호가 비어 있으면 IntegrityError(500) 대신
         # FAILED 로그 + timeline 을 남기고 깨끗한 실패 결과를 반환한다.
@@ -888,31 +1593,33 @@ class MessageService:
             customer_link=customer_link,
         )
         kakao_template_id, kakao_variables = self._build_kakao_template(payload, context)
+        message_log_id = str(uuid4())
         provider_input = MessageProviderSendInput(
             content=content,
             recipient_phone=recipient_phone,
-            channel=payload.channel,
+            channel=channel,
             message_type=payload.message_type,
             kakao_template_id=kakao_template_id,
             kakao_variables=kakao_variables,
             fallback_sms_content=(
                 content
-                if payload.channel == MessageChannel.ALIMTALK and settings.solapi_alimtalk_fallback_sms
+                if channel == MessageChannel.ALIMTALK and settings.solapi_alimtalk_fallback_sms
                 else None
             ),
+            message_log_id=message_log_id,
         )
         requested_at = datetime.now(UTC)
         provider_name = getattr(self.provider, "provider_name", "unknown")
 
         log = MessageLog(
-            id=str(uuid4()),
+            id=message_log_id,
             order_id=payload.order_id,
             recipient_type=recipient_type,
             recipient_name=recipient_name,
             recipient_phone=recipient_phone,
             recipient_partner_id=recipient_partner_id,
             message_type=payload.message_type,
-            channel=payload.channel,
+            channel=channel,
             content=content,
             status=MessageStatus.PENDING,
             error_message=None,
@@ -934,7 +1641,15 @@ class MessageService:
 
         result = self._send_with_provider(provider_input)
         provider_name = result.provider or provider_name
-        actual_channel = result.channel or payload.channel
+        actual_channel = result.channel or channel
+        current_order, locked_log = self._lock_order_then_message(
+            order_id=payload.order_id,
+            message_id=log.id,
+        )
+        if locked_log is None:
+            raise RuntimeError("message_log_missing_after_provider_send")
+        log = locked_log
+        should_apply_provider_side_effects = log.status == MessageStatus.PENDING
         self._apply_provider_result(
             log,
             result,
@@ -947,20 +1662,41 @@ class MessageService:
             actor_user_id=actor_user_id,
             event_type=TimelineEventType.MESSAGE_SENT,
             title="메시지 발송",
-            description=self._message_sent_description(payload.message_type, result.status),
+            description=self._message_sent_description(
+                payload.message_type,
+                MessageStatus(log.status),
+            ),
             metadata={
                 "message_log_id": log.id,
                 "message_type": payload.message_type,
                 "recipient_type": recipient_type,
-                "status": result.status,
+                "status": log.status,
                 "provider": provider_name,
-                "provider_group_id": result.provider_group_id,
-                "provider_error_code": result.provider_error_code,
-                "provider_status_code": result.provider_status_code,
+                "provider_group_id": log.provider_group_id,
+                "provider_error_code": log.provider_error_code,
+                "provider_status_code": log.provider_status_code,
             },
         )
-        if result.status == MessageStatus.SENT:
-            self._apply_sent_side_effects(order, payload, log, actor_user_id=actor_user_id)
+        if (
+            should_apply_provider_side_effects
+            and log.status in {MessageStatus.SENT, MessageStatus.DELIVERED}
+            and current_order is not None
+        ):
+            can_apply_workflow_transition = self._dispatch_snapshot_is_current(
+                current_order,
+                payload,
+                log,
+                dispatch_scheduled_date=dispatch_scheduled_date,
+                dispatch_requested_time=dispatch_requested_time,
+                dispatch_partner_confirmed_at=dispatch_partner_confirmed_at,
+            )
+            self._apply_sent_side_effects(
+                current_order,
+                payload,
+                log,
+                actor_user_id=actor_user_id,
+                can_apply_workflow_transition=can_apply_workflow_transition,
+            )
 
         self.db.commit()
         self.db.refresh(log)
@@ -969,19 +1705,123 @@ class MessageService:
     def _resolve_message_channel(self, payload: MessageSendRequest) -> MessageSendRequest:
         if payload.channel is not None:
             return payload
-        return payload.model_copy(update={"channel": self._default_message_channel(payload.message_type)})
+        return payload.model_copy(
+            update={"channel": self._default_message_channel(payload.message_type)}
+        )
 
-    def _validate_message_preconditions(self, order: Order, payload: MessageSendRequest) -> None:
-        if payload.message_type == MessageType.CUSTOMER_BALANCE_DUE and not has_customer_balance_due(order):
-            raise ValueError("customer_balance_not_due")
+    def _current_message_epoch(
+        self,
+        order: Order,
+        payload: MessageSendRequest,
+    ) -> datetime | None:
+        if payload.message_type == MessageType.PARTNER_ASSIGNMENT:
+            return self.timeline.latest_created_at(
+                order_id=order.id,
+                event_type=TimelineEventType.PARTNER_ASSIGNED,
+            )
+        if payload.message_type in {
+            MessageType.CUSTOMER_SCHEDULE_CONFIRMED,
+            MessageType.CUSTOMER_DAY_BEFORE,
+        }:
+            return self.timeline.latest_current_partner_confirmation(
+                order_id=order.id,
+                partner_id=order.partner_id,
+            )
+        if payload.message_type in {
+            MessageType.PARTNER_AS_REQUEST,
+            MessageType.CUSTOMER_AS_NOTICE,
+        }:
+            as_requested_at = self.timeline.latest_created_at(
+                order_id=order.id,
+                event_type=TimelineEventType.AS_REQUESTED,
+            )
+            if payload.message_type == MessageType.PARTNER_AS_REQUEST:
+                partner_assigned_at = self.timeline.latest_created_at(
+                    order_id=order.id,
+                    event_type=TimelineEventType.PARTNER_ASSIGNED,
+                )
+                return max(
+                    (
+                        timestamp
+                        for timestamp in (as_requested_at, partner_assigned_at)
+                        if timestamp
+                    ),
+                    default=None,
+                )
+            return as_requested_at
+        if payload.message_type in {
+            MessageType.CUSTOMER_BALANCE_DUE,
+            MessageType.CUSTOMER_PHOTO_READY,
+        }:
+            return to_utc(order.work_completed_at) if order.work_completed_at else None
+        return None
+
+    def _validate_message_preconditions(
+        self,
+        order: Order,
+        payload: MessageSendRequest,
+        *,
+        expected_scheduled_date: date | None = None,
+    ) -> None:
+        if payload.message_type == MessageType.PARTNER_ASSIGNMENT:
+            if (
+                order.status not in PARTNER_ASSIGNMENT_RECOVERY_STATUSES
+                or order.as_requested
+                or order.as_intake_pending
+            ):
+                raise ValueError("partner_assignment_not_allowed")
+        if payload.message_type == MessageType.CUSTOMER_SCHEDULE_CONFIRMED:
+            partner_confirmed_at = self.timeline.latest_current_partner_confirmation(
+                order_id=order.id,
+                partner_id=order.partner_id,
+            )
+            if order.scheduled_date is None or partner_confirmed_at is None:
+                raise ValueError("partner_confirmation_required")
+            if (
+                expected_scheduled_date is not None
+                and order.scheduled_date != expected_scheduled_date
+            ):
+                raise ValueError("schedule_confirmation_target_changed")
+            if order.status not in SCHEDULE_CONFIRMATION_RECOVERY_STATUSES:
+                raise ValueError("schedule_confirmation_not_allowed")
+        if payload.message_type == MessageType.CUSTOMER_DAY_BEFORE:
+            if (
+                order.scheduled_date is None
+                or order.status not in DAY_BEFORE_NOTICE_RECOVERY_STATUSES
+            ):
+                raise ValueError("day_before_notice_not_allowed")
+            target_date = expected_scheduled_date or (business_today() + timedelta(days=1))
+            if order.scheduled_date != target_date:
+                if expected_scheduled_date is None:
+                    raise ValueError("day_before_notice_not_due")
+                raise ValueError("day_before_notice_target_changed")
+            if (
+                self.timeline.latest_current_partner_confirmation(
+                    order_id=order.id,
+                    partner_id=order.partner_id,
+                )
+                is None
+            ):
+                raise ValueError("partner_confirmation_required")
+        if payload.message_type == MessageType.CUSTOMER_BALANCE_DUE:
+            if (
+                order.status not in BALANCE_NOTICE_ALLOWED_STATUSES
+                or order.work_completed_at is None
+                or order.as_intake_pending
+                or order.as_requested
+                or not has_customer_balance_due(order)
+            ):
+                raise ValueError("customer_balance_not_due")
         if payload.message_type == MessageType.CUSTOMER_PHOTO_READY:
             if order.status != OrderStatus.CUSTOMER_DELIVERY_NEEDED:
                 raise ValueError("customer_photo_ready_not_allowed")
             if self.photos.count_visible_for_order(order.id) == 0:
                 raise ValueError("no_customer_visible_photos")
-            evidence_created_after = self.timeline.latest_created_at(
+            evidence_created_after = self.timeline.latest_partner_work_epoch(
                 order_id=order.id,
-                event_type=TimelineEventType.AS_REQUESTED,
+                partner_id=order.partner_id,
+                work_completed_at=order.work_completed_at,
+                work_is_active=False,
             )
             if not self.photos.has_customer_delivery_evidence(
                 order.id,
@@ -995,6 +1835,8 @@ class MessageService:
             raise ValueError("as_request_required")
 
     def _default_message_channel(self, message_type: MessageType) -> MessageChannel:
+        if message_type == MessageType.CUSTOMER_ACCESS_LINK:
+            return MessageChannel.LMS
         if self._can_send_alimtalk_for(message_type):
             return MessageChannel.ALIMTALK
         return MessageChannel.SMS
@@ -1007,7 +1849,7 @@ class MessageService:
             return False
         if not normalize_phone(settings.solapi_sender_number):
             return False
-        if not get_solapi_kakao_channel_id():
+        if not get_solapi_kakao_sender_profile_id():
             return False
         definition = get_kakao_template_definition(message_type)
         if definition is None:
@@ -1067,9 +1909,7 @@ class MessageService:
             actor_user_id=actor_user_id,
             event_type=TimelineEventType.MESSAGE_SENT,
             title="메시지 발송",
-            description=self._message_sent_description(
-                payload.message_type, MessageStatus.FAILED
-            ),
+            description=self._message_sent_description(payload.message_type, MessageStatus.FAILED),
             metadata={
                 "message_log_id": log.id,
                 "message_type": payload.message_type,
@@ -1093,6 +1933,7 @@ class MessageService:
         updated = 0
         ignored = 0
         unknown = 0
+        resolved_events: list[tuple[str, str, dict[str, object]]] = []
 
         for event in events:
             if not is_solapi_single_report_event(event):
@@ -1103,8 +1944,20 @@ class MessageService:
             if log is None:
                 unknown += 1
                 continue
+            resolved_events.append((log.order_id, log.id, event))
 
-            self._apply_solapi_single_report(log, event)
+        for order_id, message_id, event in sorted(
+            resolved_events,
+            key=lambda item: (item[0], item[1]),
+        ):
+            order, log = self._lock_order_then_message(
+                order_id=order_id,
+                message_id=message_id,
+            )
+            if log is None:
+                unknown += 1
+                continue
+            self._apply_solapi_single_report(log, event, locked_order=order)
             updated += 1
 
         self.db.commit()
@@ -1117,17 +1970,27 @@ class MessageService:
 
     def _send_with_provider(self, provider_input: MessageProviderSendInput) -> MessageSendResult:
         try:
-            send_with_context = getattr(self.provider, "send_with_context", None)
+            send_with_context: object = getattr(self.provider, "send_with_context", None)
             if callable(send_with_context):
-                return send_with_context(provider_input)
+                result = send_with_context(provider_input)
+                if isinstance(result, MessageSendResult):
+                    return result
+                raise TypeError("provider_result_invalid")
             return self.provider.send(provider_input.content, provider_input.recipient_phone)
         except Exception as exc:
             logger.exception("Message provider raised an exception")
+            provider_name = getattr(self.provider, "provider_name", "unknown")
+            if provider_name == "solapi":
+                return solapi_unknown_outcome(
+                    channel=provider_input.channel,
+                    error_message="solapi_outcome_unknown",
+                    error_code="solapi_outcome_unknown",
+                )
             return MessageSendResult(
                 status=MessageStatus.FAILED,
                 error_message=f"provider_exception: {exc}",
                 channel=provider_input.channel,
-                provider=getattr(self.provider, "provider_name", "unknown"),
+                provider=provider_name,
                 provider_error_code="provider_exception",
             )
 
@@ -1140,6 +2003,14 @@ class MessageService:
         actual_channel: MessageChannel,
         requested_at: datetime,
     ) -> None:
+        if log.status != MessageStatus.PENDING:
+            # SOLAPI가 API 응답보다 빠르게 웹훅을 보낼 수 있다. 그 사이 웹훅이
+            # 상태를 확정했다면 늦은 요청 응답으로 배송 수명주기를 후퇴시키지 않는다.
+            log.channel = actual_channel
+            log.provider = provider_name
+            log.provider_message_id = log.provider_message_id or result.provider_message_id
+            log.provider_group_id = log.provider_group_id or result.provider_group_id
+            return
         log.channel = actual_channel
         log.status = result.status
         log.error_message = result.error_message
@@ -1155,9 +2026,15 @@ class MessageService:
         log.delivered_at = result.delivered_at
 
     def _find_solapi_log_for_event(self, event: dict[str, object]) -> MessageLog | None:
+        message_log_id = extract_solapi_message_log_id(event)
+        if message_log_id:
+            log = self.messages.get(message_log_id)
+            if log is not None and log.provider == "solapi":
+                return log
+
         message_id = string_value(event.get("messageId"))
         if message_id:
-            log = self.messages.get_by_provider_message_id("solapi", message_id)
+            log = self.messages.find_by_provider_message_id("solapi", message_id)
             if log is not None:
                 return log
 
@@ -1165,7 +2042,7 @@ class MessageService:
         if not group_id:
             return None
 
-        logs = self.messages.list_by_provider_group_id("solapi", group_id)
+        logs = self.messages.find_by_provider_group_id("solapi", group_id)
         if len(logs) == 1:
             return logs[0]
         return None
@@ -1174,6 +2051,8 @@ class MessageService:
         self,
         log: MessageLog,
         event: dict[str, object],
+        *,
+        locked_order: Order | None,
     ) -> None:
         old_status = log.status
         status_code = string_value(event.get("statusCode"))
@@ -1185,15 +2064,12 @@ class MessageService:
             or datetime.now(UTC)
         )
         received_at = parse_solapi_datetime(event.get("dateReceived"))
+        if log.provider_reported_at is not None and reported_at <= to_utc(log.provider_reported_at):
+            return
 
         # 상태 전이가 수명주기를 전진시킬 때만 status 를 갱신한다.
         # 순서가 뒤바뀐 리포트(DELIVERED → SENT)나 동일 상태 재수신은 무시하여
         # 상태 후퇴와 timeline 이벤트 중복 발행을 막는다.
-        apply_status = (
-            next_status is not None
-            and is_monotonic_delivery_transition(old_status, next_status)
-        )
-
         # provider 메타데이터는 최신 리포트로 갱신하되, status 후퇴는 막는다.
         log.provider = "solapi"
         log.provider_message_id = string_value(event.get("messageId")) or log.provider_message_id
@@ -1203,7 +2079,10 @@ class MessageService:
         log.provider_reported_at = reported_at
         log.provider_response = event
 
-        if not apply_status:
+        if next_status is None or not is_monotonic_delivery_transition(
+            old_status,
+            next_status,
+        ):
             return
 
         log.status = next_status
@@ -1212,9 +2091,24 @@ class MessageService:
             log.delivered_at = received_at or reported_at
             log.error_message = None
             log.provider_error_code = None
+        elif next_status == MessageStatus.SENT:
+            log.error_message = None
+            log.provider_error_code = None
         elif next_status == MessageStatus.DELIVERY_FAILED:
             log.error_message = status_message or f"solapi_delivery_failed: {status_code}"
             log.provider_error_code = status_code or "solapi_delivery_failed"
+
+        if next_status in {MessageStatus.SENT, MessageStatus.DELIVERED} and old_status not in {
+            MessageStatus.SENT,
+            MessageStatus.DELIVERED,
+        }:
+            log.sent_at = log.sent_at or log.requested_at or reported_at
+            if locked_order is not None:
+                self._apply_confirmed_sent_log_side_effects(
+                    locked_order,
+                    log,
+                    actor_user_id=None,
+                )
 
         if old_status != next_status:
             self._record_delivery_status_event(
@@ -1224,7 +2118,9 @@ class MessageService:
                 status_message=status_message,
             )
 
-    def _resolve_recipient(self, order: Order, payload: MessageSendRequest) -> tuple[RecipientType, str, str]:
+    def _resolve_recipient(
+        self, order: Order, payload: MessageSendRequest
+    ) -> tuple[RecipientType, str, str]:
         if payload.message_type in {
             MessageType.PARTNER_ASSIGNMENT,
             MessageType.PARTNER_CUSTOMER_INFO,
@@ -1232,15 +2128,120 @@ class MessageService:
         }:
             if not order.partner_id:
                 raise ValueError("partner_not_assigned")
-            partner = self.partners.get(order.partner_id)
+            partner = self.db.execute(
+                select(Partner)
+                .where(
+                    Partner.id == order.partner_id,
+                    Partner.is_active.is_(True),
+                )
+                .execution_options(populate_existing=True)
+            ).scalar_one_or_none()
             if partner is None:
                 raise ValueError("partner_not_found")
             recipient_phone = partner.manager_phone or partner.phone
-            return RecipientType.PARTNER, partner.manager_name or partner.name, recipient_phone
+            return (
+                RecipientType.PARTNER,
+                partner.manager_name or partner.name or "",
+                recipient_phone or "",
+            )
 
         if payload.recipient_type != RecipientType.CUSTOMER:
             raise ValueError("invalid_recipient_type")
-        return RecipientType.CUSTOMER, order.customer_name, order.customer_phone
+        return RecipientType.CUSTOMER, order.customer_name or "", order.customer_phone or ""
+
+    def _dispatch_snapshot_is_current(
+        self,
+        order: Order,
+        payload: MessageSendRequest,
+        log: MessageLog,
+        *,
+        dispatch_scheduled_date: date | None,
+        dispatch_requested_time: str | None,
+        dispatch_partner_confirmed_at: datetime | None,
+    ) -> bool:
+        if order.deleted_at is not None:
+            return False
+        if (
+            log.recipient_type == RecipientType.PARTNER
+            and log.recipient_partner_id != order.partner_id
+        ):
+            return False
+        expected_scheduled_date = (
+            dispatch_scheduled_date
+            if payload.message_type
+            in {
+                MessageType.CUSTOMER_SCHEDULE_CONFIRMED,
+                MessageType.CUSTOMER_DAY_BEFORE,
+            }
+            else None
+        )
+        if expected_scheduled_date is not None and order.requested_time != dispatch_requested_time:
+            return False
+        try:
+            self._validate_message_preconditions(
+                order,
+                payload,
+                expected_scheduled_date=expected_scheduled_date,
+            )
+        except ValueError:
+            return False
+        if payload.message_type not in {
+            MessageType.CUSTOMER_SCHEDULE_CONFIRMED,
+            MessageType.CUSTOMER_DAY_BEFORE,
+        }:
+            return True
+        current_partner_confirmed_at = self.timeline.latest_current_partner_confirmation(
+            order_id=order.id,
+            partner_id=order.partner_id,
+        )
+        if dispatch_partner_confirmed_at is None or current_partner_confirmed_at is None:
+            return dispatch_partner_confirmed_at is current_partner_confirmed_at
+        return to_utc(dispatch_partner_confirmed_at) == to_utc(current_partner_confirmed_at)
+
+    def _apply_confirmed_sent_log_side_effects(
+        self,
+        order: Order,
+        log: MessageLog,
+        *,
+        actor_user_id: str | None,
+    ) -> None:
+        payload = MessageSendRequest(
+            order_id=log.order_id,
+            message_type=log.message_type,
+            recipient_type=log.recipient_type,
+            channel=log.channel,
+        )
+        attempted_at = to_utc(log.requested_at or log.created_at)
+        current_epoch = self._current_message_epoch(order, payload)
+        is_current_epoch = current_epoch is None or attempted_at >= to_utc(current_epoch)
+        is_current_partner = (
+            log.recipient_type != RecipientType.PARTNER
+            or log.recipient_partner_id == order.partner_id
+        )
+        can_apply_workflow_transition = (
+            order.deleted_at is None and is_current_epoch and is_current_partner
+        )
+        if can_apply_workflow_transition:
+            try:
+                expected_scheduled_date = None
+                if payload.message_type == MessageType.CUSTOMER_DAY_BEFORE:
+                    expected_scheduled_date = to_business_time(
+                        log.requested_at or log.created_at
+                    ).date() + timedelta(days=1)
+                self._validate_message_preconditions(
+                    order,
+                    payload,
+                    expected_scheduled_date=expected_scheduled_date,
+                )
+            except ValueError:
+                can_apply_workflow_transition = False
+        self._apply_sent_side_effects(
+            order,
+            payload,
+            log,
+            actor_user_id=actor_user_id,
+            can_apply_workflow_transition=can_apply_workflow_transition,
+        )
 
     def _apply_sent_side_effects(
         self,
@@ -1249,45 +2250,53 @@ class MessageService:
         log: MessageLog,
         *,
         actor_user_id: str | None,
+        can_apply_workflow_transition: bool,
     ) -> None:
         if payload.message_type == MessageType.CUSTOMER_SCHEDULE_CONFIRMED:
-            self._advance_status(
-                order,
-                OrderStatus.SCHEDULE_CONFIRMED,
-                actor_user_id=actor_user_id,
-                title="일정확정 안내 완료",
-                description="고객에게 일정확정 안내를 발송했습니다.",
-            )
-            self._record_customer_link_sent(order, payload, log, actor_user_id=actor_user_id)
+            if can_apply_workflow_transition:
+                self._advance_status(
+                    order,
+                    OrderStatus.SCHEDULE_CONFIRMED,
+                    actor_user_id=actor_user_id,
+                    title="일정확정 안내 완료",
+                    description="고객에게 일정확정 안내를 발송했습니다.",
+                )
+            self._record_customer_link_sent(order, log, actor_user_id=actor_user_id)
             return
 
         if payload.message_type == MessageType.CUSTOMER_DAY_BEFORE:
-            self._mark_day_before_notice_done(order, actor_user_id=actor_user_id)
-            self._record_customer_link_sent(order, payload, log, actor_user_id=actor_user_id)
+            if can_apply_workflow_transition:
+                self._mark_day_before_notice_done(order, actor_user_id=actor_user_id)
+            self._record_customer_link_sent(order, log, actor_user_id=actor_user_id)
             return
 
         if payload.message_type == MessageType.PARTNER_ASSIGNMENT:
-            self._advance_status(
-                order,
-                OrderStatus.PARTNER_CONFIRMING,
-                actor_user_id=actor_user_id,
-                title="협력사 배정 안내 완료",
-                description="협력사에게 작업 배정 안내를 발송했습니다.",
-            )
+            if can_apply_workflow_transition:
+                self._advance_status(
+                    order,
+                    OrderStatus.PARTNER_CONFIRMING,
+                    actor_user_id=actor_user_id,
+                    title="협력사 배정 안내 완료",
+                    description="협력사에게 작업 배정 안내를 발송했습니다.",
+                )
             return
 
         if payload.message_type == MessageType.CUSTOMER_PHOTO_READY:
             # 정책 변경(2026-05-18): 사진 링크 발송은 메시지/timeline만 남기고
             # 주문 상태는 자동 advance 하지 않는다. 재전송 가능성을 보장하기 위함.
-            self._record_customer_link_sent(order, payload, log, actor_user_id=actor_user_id)
+            self._record_customer_link_sent(order, log, actor_user_id=actor_user_id)
             return
 
         if payload.message_type == MessageType.CUSTOMER_BALANCE_DUE:
-            self._record_customer_link_sent(order, payload, log, actor_user_id=actor_user_id)
+            self._record_customer_link_sent(order, log, actor_user_id=actor_user_id)
             return
 
         if payload.message_type == MessageType.CUSTOMER_AS_NOTICE:
-            self._record_customer_link_sent(order, payload, log, actor_user_id=actor_user_id)
+            self._record_customer_link_sent(order, log, actor_user_id=actor_user_id)
+            return
+
+        if payload.message_type == MessageType.CUSTOMER_ACCESS_LINK:
+            self._record_customer_link_sent(order, log, actor_user_id=actor_user_id)
             return
 
         if payload.message_type == MessageType.CUSTOMER_QUOTE:
@@ -1296,7 +2305,7 @@ class MessageService:
                 actor_user_id=actor_user_id,
                 event_type=TimelineEventType.QUOTE_SENT,
                 title="견적서 발송",
-                metadata={"message_log_id": log.id, "channel": payload.channel},
+                metadata={"message_log_id": log.id, "channel": log.channel},
             )
             return
 
@@ -1306,7 +2315,7 @@ class MessageService:
                 actor_user_id=actor_user_id,
                 event_type=TimelineEventType.PARTNER_UNPAID_NOTICE_SENT,
                 title="협력사 고객정보 전송",
-                metadata={"message_log_id": log.id, "channel": payload.channel},
+                metadata={"message_log_id": log.id, "channel": log.channel},
             )
             return
 
@@ -1358,7 +2367,6 @@ class MessageService:
     def _record_customer_link_sent(
         self,
         order: Order,
-        payload: MessageSendRequest,
         log: MessageLog,
         *,
         actor_user_id: str | None,
@@ -1368,7 +2376,7 @@ class MessageService:
             actor_user_id=actor_user_id,
             event_type=TimelineEventType.CUSTOMER_LINK_SENT,
             title="고객 링크 발송",
-            metadata={"message_log_id": log.id, "channel": payload.channel},
+            metadata={"message_log_id": log.id, "channel": log.channel},
         )
 
     def _record_delivery_status_event(
@@ -1379,7 +2387,9 @@ class MessageService:
         status_code: str | None,
         status_message: str | None,
     ) -> None:
-        title = "메시지 배송 실패" if status == MessageStatus.DELIVERY_FAILED else "메시지 배송 완료"
+        title = (
+            "메시지 배송 실패" if status == MessageStatus.DELIVERY_FAILED else "메시지 배송 완료"
+        )
         self.timeline.record(
             order_id=log.order_id,
             actor_user_id=None,
@@ -1404,6 +2414,18 @@ class MessageService:
         customer_link: str,
     ) -> dict[str, object]:
         partner_login_link = self._build_partner_login_link(order.id)
+        schedule_amount = (
+            format_money(order_consumer_total(order)) if order.customer_visible_payment else "-"
+        )
+        schedule_deposit = (
+            format_money(order.deposit_amount) if order.customer_visible_payment else "-"
+        )
+        schedule_balance = (
+            format_money(customer_balance_due_amount(order))
+            if order.customer_visible_payment
+            else "-"
+        )
+        schedule_total = format_money(order.total_amount) if order.customer_visible_payment else "-"
         return {
             "customer_name": order.customer_name,
             "service_name": format_service_name(order),
@@ -1424,12 +2446,19 @@ class MessageService:
             "total_amount": format_money(order.total_amount),
             "deposit_amount": format_money(order.deposit_amount),
             "balance_amount": format_money(customer_balance_due_amount(order)),
+            "schedule_consumer_price": schedule_amount,
+            "schedule_deposit_amount": schedule_deposit,
+            "schedule_balance_amount": schedule_balance,
+            "schedule_total_amount": schedule_total,
             "vat_label": format_vat_label(order.vat_type),
             "company_name": settings.app_name,
             "masked_customer_phone": mask_phone_last4(order.customer_phone),
-            # SOLAPI 클린잡 템플릿 변수용: #{연락처}(고객 실번호 — 협력사가 연락/고객 본인 확인),
-            # #{대수}는 size_or_quantity가 단일 필드라 별도 값이 없어 "-"로 채운다(#{평수}=size_or_quantity).
+            # SOLAPI 클린잡 템플릿 변수용: #{연락처}(고객 실번호 — 협력사가
+            # 연락/고객 본인 확인), #{대수}는 별도 값이 없어 "-"로 채운다.
             "customer_phone": order.customer_phone or "-",
+            "customer_phone_without_auth_suffix": mask_customer_phone_auth_suffix(
+                order.customer_phone
+            ),
             "unit_count": "-",
             "partner_login_link": partner_login_link,
             "partner_login_link_button": partner_login_link.split("://", 1)[-1],
@@ -1454,7 +2483,7 @@ class MessageService:
         self,
         payload: MessageSendRequest,
         kakao_template_id: str | None,
-    ) -> dict[str, object]:
+    ) -> KakaoPreviewState:
         if payload.channel != MessageChannel.ALIMTALK:
             return {
                 "kakao_channel_id_configured": False,
@@ -1464,7 +2493,7 @@ class MessageService:
                 "warnings": [],
             }
 
-        has_channel_id = bool(get_solapi_kakao_channel_id())
+        has_channel_id = bool(get_solapi_kakao_sender_profile_id())
         has_template_id = bool(kakao_template_id)
         fallback_sms_enabled = settings.solapi_alimtalk_fallback_sms
         warnings: list[str] = []
@@ -1495,17 +2524,24 @@ class MessageService:
         schedule = format_schedule(order)
         if payload.message_type == MessageType.CUSTOMER_PHOTO_READY:
             return (
-                f"[클린잡] {order.customer_name}님, {order.service_name} 작업 사진 확인이 준비되었습니다.\n"
+                f"[클린잡] {order.customer_name}님, {order.service_name} 작업 사진 "
+                "확인이 준비되었습니다.\n"
                 f"아래 링크에서 연락처 뒷자리 인증 후 확인해주세요.\n{customer_link}"
+            )
+        if payload.message_type == MessageType.CUSTOMER_ACCESS_LINK:
+            return (
+                f"[클린잡] {order.customer_name}님, 예약·작업 내역 확인 링크입니다.\n"
+                f"연락처 뒷자리 인증 후 확인해주세요.\n{customer_link}"
             )
         if payload.message_type == MessageType.CUSTOMER_BALANCE_DUE:
             return (
-                f"[클린잡] {order.customer_name}님, {format_service_name(order)} 작업이 완료되었습니다.\n"
+                f"[클린잡] {order.customer_name}님, {format_service_name(order)} "
+                "작업이 완료되었습니다.\n"
                 f"잔금: {format_money(customer_balance_due_amount(order))}\n"
                 f"결제 및 작업 내역 확인: {customer_link}"
             )
         if payload.message_type == MessageType.CUSTOMER_AS_NOTICE:
-            as_memo = (order.as_memo or payload.memo or "").strip()
+            as_memo = truncate_sms_section(order.as_memo or payload.memo or "")
             return (
                 f"[클린잡] {order.customer_name}님, AS 요청이 접수되었습니다.\n"
                 f"서비스: {format_service_name(order)}\n"
@@ -1543,15 +2579,17 @@ class MessageService:
             return (
                 f"[클린잡] {order.customer_name}님 견적 안내드립니다.\n"
                 f"서비스: {format_service_name(order)}\n"
-                f"소비자가(VAT {format_vat_label(order.vat_type)}): {format_money(order_consumer_total(order))}\n"
+                f"소비자가(VAT {format_vat_label(order.vat_type)}): "
+                f"{format_money(order_consumer_total(order))}\n"
                 f"할인가: {format_money(order.discount_amount)}\n"
-                f"계약금: {format_money(order.deposit_amount)} / 잔금: {format_money(order.balance_amount)}\n"
+                f"계약금: {format_money(order.deposit_amount)} / "
+                f"잔금: {format_money(order.balance_amount)}\n"
                 f"방문: {schedule}"
             )
         if payload.message_type == MessageType.PARTNER_CUSTOMER_INFO:
             partner_name = partner.manager_name or partner.name if partner else "협력사"
             # 미입금 고객정보 안내는 협력사가 고객에게 직접 연락(미수금 회수)해야 하므로
-            # 고객 실번호를 그대로 전달한다(알림톡 #{연락처} 변수와 동일 기준). 운영자 결정(2026-07-03).
+            # 고객 실번호를 그대로 전달한다(알림톡 #{연락처} 변수와 동일 기준).
             return (
                 f"[클린잡] {partner_name}님, 미입금 고객 정보를 전달드립니다.\n"
                 f"고객: {order.customer_name} ({order.customer_phone or '-'})\n"
@@ -1561,7 +2599,7 @@ class MessageService:
             )
         if payload.message_type == MessageType.PARTNER_AS_REQUEST:
             partner_name = partner.manager_name or partner.name if partner else "협력사"
-            as_memo = (order.as_memo or payload.memo or "").strip()
+            as_memo = truncate_sms_section(order.as_memo or payload.memo or "")
             # 미입금 고객정보 안내와 동일 기준: 협력사가 고객에게 직접 재방문 일정을 조율해야 하므로
             # 고객 실번호를 그대로 전달한다. 운영자 결정(2026-07-03).
             return (
@@ -1574,7 +2612,8 @@ class MessageService:
         return f"[클린잡] {payload.message_type.value}: {format_service_name(order)}"
 
     def _build_customer_link(self, customer_token: str | None) -> str:
-        return f"{settings.frontend_url.rstrip('/')}/c/{customer_token or ''}"
+        encoded_token = quote(customer_token or "", safe="")
+        return f"{settings.frontend_url.rstrip('/')}/c#token={encoded_token}"
 
     def _build_partner_login_link(self, order_id: str | None = None) -> str:
         base = f"{settings.frontend_url.rstrip('/')}/partner"
@@ -1593,6 +2632,7 @@ class MessageService:
             MessageType.PARTNER_CUSTOMER_INFO: "협력사 고객정보",
             MessageType.PARTNER_AS_REQUEST: "협력사 AS 요청",
             MessageType.CUSTOMER_AS_NOTICE: "고객 AS 안내",
+            MessageType.CUSTOMER_ACCESS_LINK: "고객 접속 링크",
         }.get(message_type, message_type.value)
         return f"{label} 발송 결과: {status.value}"
 
@@ -1634,8 +2674,24 @@ def format_service_name(order: Order) -> str:
     return order.service_name
 
 
-def get_solapi_kakao_channel_id() -> str:
-    return settings.solapi_kakao_channel_id
+def get_solapi_kakao_sender_profile_id() -> str:
+    return settings.solapi_kakao_pf_id.strip() or settings.solapi_kakao_channel_id.strip()
+
+
+def mask_customer_phone_auth_suffix(phone: str | None) -> str:
+    normalized = normalize_phone(phone or "")
+    if len(normalized) < 3:
+        return "-"
+    return f"{normalized[:3]}-****-****"
+
+
+def business_day_start_utc() -> datetime:
+    local_start = datetime.combine(
+        business_today(),
+        time.min,
+        tzinfo=ZoneInfo(settings.business_timezone),
+    )
+    return local_start.astimezone(UTC)
 
 
 def format_schedule(order: Order) -> str:
@@ -1645,15 +2701,26 @@ def format_schedule(order: Order) -> str:
     return date_text
 
 
+def truncate_sms_section(value: str, *, max_bytes: int = 1000) -> str:
+    normalized = value.strip()
+    encoded = normalized.encode("utf-8")
+    if len(encoded) <= max_bytes:
+        return normalized
+    suffix = "…(전체 내용은 시스템에서 확인)"
+    byte_budget = max(max_bytes - len(suffix.encode("utf-8")), 0)
+    prefix = encoded[:byte_budget].decode("utf-8", errors="ignore").rstrip()
+    return f"{prefix}{suffix}"
+
+
 def format_money(value: object) -> str:
-    amount = int(float(value or 0))
+    amount = int(Decimal(str(value or 0)))
     return f"{amount:,}원"
 
 
-def customer_balance_due_amount(order: Order) -> object:
+def customer_balance_due_amount(order: Order) -> Decimal:
     if order.balance_amount is not None:
-        return order.balance_amount
-    total = Decimal(str(order_consumer_total(order) or 0))
+        return Decimal(str(order.balance_amount))
+    total = order_consumer_total(order)
     deposit = Decimal(str(order.deposit_amount or 0))
     return max(total - deposit, Decimal("0"))
 

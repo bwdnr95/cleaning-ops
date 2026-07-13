@@ -9,8 +9,8 @@ import uuid
 from collections.abc import Sequence
 
 import sqlalchemy as sa
-from alembic import context
-from alembic import op
+
+from alembic import context, op
 
 revision: str = "0008_order_groups"
 down_revision: str | None = "0007_auto_publish_legacy_photos"
@@ -27,12 +27,20 @@ def upgrade() -> None:
         sa.Column("customer_phone", sa.String(30), nullable=False),
         sa.Column("customer_address", sa.Text(), nullable=False),
         sa.Column("source_channel", sa.String(120), nullable=True),
-        sa.Column("customer_visible_payment", sa.Boolean(), nullable=False, server_default=sa.false()),
+        sa.Column(
+            "customer_visible_payment", sa.Boolean(), nullable=False, server_default=sa.false()
+        ),
         sa.Column("notes", sa.Text(), nullable=True),
-        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
-        sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
+        sa.Column(
+            "created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()
+        ),
+        sa.Column(
+            "updated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()
+        ),
     )
-    op.create_index("ix_order_groups_customer_token", "order_groups", ["customer_token"], unique=True)
+    op.create_index(
+        "ix_order_groups_customer_token", "order_groups", ["customer_token"], unique=True
+    )
     op.create_index("ix_order_groups_customer_name", "order_groups", ["customer_name"])
     op.create_index("ix_order_groups_customer_phone", "order_groups", ["customer_phone"])
 
@@ -120,8 +128,12 @@ def upgrade() -> None:
         sa.Column("partner_payment_status", sa.String(40)),
         sa.Column("customer_token", sa.String(80)),
         sa.Column("customer_visible_payment", sa.Boolean(), server_default=sa.false()),
-        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
-        sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
+        sa.Column(
+            "created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()
+        ),
+        sa.Column(
+            "updated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()
+        ),
         sa.Index("ix_orders_status", "status"),
         sa.Index("ix_orders_received_date", "received_date"),
         sa.Index("ix_orders_scheduled_date", "scheduled_date"),
@@ -154,7 +166,12 @@ def upgrade() -> None:
 
     dialect = bind.dialect.name
     if dialect == "postgresql":
-        bind.execute(sa.text("ALTER TABLE orders DROP CONSTRAINT IF EXISTS orders_customer_token_key"))
+        bind.execute(
+            sa.text("ALTER TABLE orders DROP CONSTRAINT IF EXISTS orders_customer_token_key")
+        )
+        bind.execute(
+            sa.text("ALTER TABLE orders DROP CONSTRAINT IF EXISTS uq_orders_customer_token")
+        )
 
 
 def downgrade() -> None:

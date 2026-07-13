@@ -1,7 +1,9 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, cast
 
+import pytest
+from sqlalchemy.orm import Session
 from sqlalchemy.sql import Select
 
 from app.core.config import settings
@@ -38,7 +40,9 @@ class _FakeSession:
         self.is_refreshed = True
 
 
-def test_complete_partner_job_locks_order_before_photo_count(monkeypatch) -> None:
+def test_complete_partner_job_locks_order_before_photo_count(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setattr(settings, "automation_send_customer_balance_due", False)
     order = Order(
         id="order-1",
@@ -57,9 +61,18 @@ def test_complete_partner_job_locks_order_before_photo_count(monkeypatch) -> Non
         customer_visible_payment=False,
     )
     session = _FakeSession(order)
-    service = OrderService(session)  # type: ignore[arg-type]
-    service.photos.has_visible_type = lambda _order_id, _photo_type, **_kwargs: True  # type: ignore[method-assign]
-    service.timeline.record = lambda **_kwargs: None  # type: ignore[method-assign]
+    service = OrderService(cast(Session, cast(object, session)))
+    monkeypatch.setattr(
+        service.photos,
+        "has_visible_type",
+        lambda _order_id, _photo_type, **_kwargs: True,
+    )
+    monkeypatch.setattr(service.timeline, "record", lambda **_kwargs: None)
+    monkeypatch.setattr(
+        service.timeline,
+        "latest_partner_work_epoch",
+        lambda **_kwargs: None,
+    )
 
     service.complete_partner_job(
         "order-1",
@@ -76,7 +89,9 @@ def test_complete_partner_job_locks_order_before_photo_count(monkeypatch) -> Non
     assert session.is_committed is True
 
 
-def test_revoke_refreshes_photo_after_order_lock_before_idempotent_return() -> None:
+def test_revoke_refreshes_photo_after_order_lock_before_idempotent_return(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     photo = OrderPhoto(
         id="photo-1",
         order_id="order-1",
@@ -111,14 +126,14 @@ def test_revoke_refreshes_photo_after_order_lock_before_idempotent_return() -> N
         session.is_refreshed = True
         entity.is_customer_visible = False
 
-    session.refresh = refresh_stale_photo  # type: ignore[method-assign]
-    service = PhotoService(session)  # type: ignore[arg-type]
-    service.photos.get = lambda _photo_id: photo  # type: ignore[method-assign]
+    monkeypatch.setattr(session, "refresh", refresh_stale_photo)
+    service = PhotoService(cast(Session, cast(object, session)))
+    monkeypatch.setattr(service.photos, "get", lambda _photo_id: photo)
 
     def fail_if_timeline_records(**_kwargs: Any) -> None:
         raise AssertionError("stale revoke should return without duplicate timeline")
 
-    service.timeline.record = fail_if_timeline_records  # type: ignore[method-assign]
+    monkeypatch.setattr(service.timeline, "record", fail_if_timeline_records)
 
     result = service.revoke_visibility("photo-1", actor_user_id="admin-user-1")
 

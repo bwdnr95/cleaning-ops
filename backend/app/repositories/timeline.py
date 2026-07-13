@@ -36,3 +36,20 @@ class TimelineRepository(Repository[OrderTimeline]):
             .limit(1)
         )
         return self.db.scalar(stmt)
+
+    def latest_event(
+        self,
+        *,
+        order_id: str,
+        event_type: TimelineEventType,
+    ) -> OrderTimeline | None:
+        stmt = (
+            select(OrderTimeline)
+            .where(
+                OrderTimeline.order_id == order_id,
+                OrderTimeline.event_type == event_type,
+            )
+            .order_by(OrderTimeline.created_at.desc(), OrderTimeline.id.desc())
+            .limit(1)
+        )
+        return self.db.scalar(stmt)

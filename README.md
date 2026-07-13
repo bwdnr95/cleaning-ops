@@ -330,7 +330,7 @@
 7. **라우팅**:
    - `/admin/dashboard` `/admin/orders` `/admin/orders/:id` `/admin/calendar` `/admin/photos` ...
    - `/partner/jobs` `/partner/jobs/:id`
-   - `/c/:token` (고객 — 토큰 단일 URL)
+   - `/c#token=<고객토큰>` (고객 — fragment는 서버 access log에 전달되지 않음, 인증 API는 `X-Customer-Token` 헤더 사용)
 8. **반응형**: 관리자 화면은 1280px 이상 데스크톱 우선. 모바일(협력사·고객)은 360~414px 우선.
 9. **다크 모드**: `<html data-theme>` 패턴 그대로 사용 가능. 시스템 prefers-color-scheme 추종 + 사용자 토글.
 

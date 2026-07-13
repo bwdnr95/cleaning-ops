@@ -68,6 +68,7 @@ interface OrderDetailSidebarProps {
     readonly customerBalanceDue: MessageActionDraft;
     readonly customerQuote: MessageActionDraft;
     readonly customerPhotoReady: MessageActionDraft;
+    readonly customerAccessLink: MessageActionDraft;
   };
 }
 

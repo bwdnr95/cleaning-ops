@@ -1,17 +1,23 @@
 import hashlib
-import hmac
 import json
 from collections.abc import Generator
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
+from typing import TypedDict, cast
 
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
+from starlette.requests import Request
+from starlette.types import Scope
 
+import app.services.auth as auth_module
 from app.api.deps import get_session
+from app.api.routes.auth import _client_ip
+from app.api.routes.webhooks import SOLAPI_WEBHOOK_MAX_BYTES
 from app.core.config import settings
 from app.core.security import create_access_token, hash_password
+from app.core.time import business_today
 from app.db.seed import (
     DEV_ADMIN_EMAIL,
     DEV_ADMIN_PASSWORD,
@@ -35,15 +41,43 @@ from app.domain.constants import (
 from app.main import create_app
 from app.models import Base, MessageLog, Order, OrderGroup, OrderPhoto, Partner, User
 from app.repositories.timeline import TimelineRepository
+from app.schemas.auth import LoginResponse
 from app.schemas.message import MessageSendRequest
 from app.services.dashboard import DashboardService
-from app.services.messages import MessageSendResult, MessageService
+from app.services.messages import MessageProvider, MessageSendResult, MessageService
+from app.services.timeline import TimelineService
 
 PNG_BYTES = b"\x89PNG\r\n\x1a\ncleanops-test-image"
 SIGNATURE_DATA_URL = (
     "data:image/png;base64,"
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII="
 )
+CUSTOMER_HEADERS = {"X-Customer-Token": "ct2_seed-customer-token-2450"}
+
+
+def seed_day_before_target(db: Session) -> None:
+    order = db.get(Order, "seed-order-2450")
+    assert order is not None
+    order.status = OrderStatus.SCHEDULED
+    order.scheduled_date = business_today() + timedelta(days=1)
+    _record_current_partner_confirmation(db, order.id)
+
+
+class LoginUserPayload(TypedDict):
+    id: str
+    role: str
+    name: str
+    email: str | None
+    phone: str | None
+    partner_id: str | None
+    partner_name: str | None
+
+
+class LoginPayload(TypedDict):
+    access_token: str
+    refresh_token: str
+    token_type: str
+    user: LoginUserPayload
 
 
 def make_test_client(seed_callback=None) -> TestClient:
@@ -74,10 +108,96 @@ def make_test_client(seed_callback=None) -> TestClient:
     return TestClient(app)
 
 
-def login(client: TestClient, path: str, identifier: str, password: str) -> dict:
+def _record_current_partner_confirmation(
+    db: Session,
+    order_id: str = "seed-order-2450",
+    *,
+    confirmed_at: datetime | None = None,
+) -> None:
+    event = TimelineService(db).record(
+        order_id=order_id,
+        actor_user_id=DEV_PARTNER_USER_ID,
+        event_type=TimelineEventType.PARTNER_CONFIRMED,
+        title="협력사 작업 확인",
+        metadata={"partner_id": DEV_PARTNER_ID},
+    )
+    if confirmed_at is not None:
+        event.created_at = confirmed_at
+    db.flush()
+
+
+def login(client: TestClient, path: str, identifier: str, password: str) -> LoginPayload:
     response = client.post(path, json={"identifier": identifier, "password": password})
     assert response.status_code == 200, response.text
-    return response.json()
+    validated = LoginResponse.model_validate(response.json())
+    return {
+        "access_token": validated.access_token,
+        "refresh_token": validated.refresh_token,
+        "token_type": validated.token_type,
+        "user": {
+            "id": validated.user.id,
+            "role": validated.user.role.value,
+            "name": validated.user.name,
+            "email": validated.user.email,
+            "phone": validated.user.phone,
+            "partner_id": validated.user.partner_id,
+            "partner_name": validated.user.partner_name,
+        },
+    }
+
+
+def test_auth_audit_ip_ignores_untrusted_forwarded_header() -> None:
+    scope = cast(
+        Scope,
+        cast(
+            object,
+            {
+                "type": "http",
+                "method": "POST",
+                "path": "/api/auth/admin/login",
+                "headers": [(b"x-forwarded-for", b"203.0.113.99")],
+                "client": ("127.0.0.1", 43210),
+            },
+        ),
+    )
+
+    assert _client_ip(Request(scope)) == "127.0.0.1"
+
+
+def test_staff_login_lock_does_not_reveal_account_existence(monkeypatch) -> None:
+    monkeypatch.setattr(settings, "login_max_attempts", 2)
+    with auth_module._login_attempts_lock:
+        auth_module._login_attempts.clear()
+    client = make_test_client()
+
+    try:
+        for index in range(2):
+            response = client.post(
+                "/api/auth/admin/login",
+                json={
+                    "identifier": f"unknown-{index}@example.com",
+                    "password": "wrong-password",
+                },
+            )
+            assert response.status_code == 401
+
+        unknown_probe = client.post(
+            "/api/auth/admin/login",
+            json={"identifier": "still-unknown@example.com", "password": "wrong-password"},
+        )
+        known_probe = client.post(
+            "/api/auth/admin/login",
+            json={"identifier": DEV_ADMIN_EMAIL, "password": "wrong-password"},
+        )
+
+        assert (unknown_probe.status_code, unknown_probe.json()) == (
+            known_probe.status_code,
+            known_probe.json(),
+        )
+        assert known_probe.json()["detail"] == "invalid_credentials"
+    finally:
+        with auth_module._login_attempts_lock:
+            auth_module._login_attempts.clear()
 
 
 def add_order_group(
@@ -104,8 +224,8 @@ def add_order_group(
     )
 
 
-def solapi_webhook_signature(secret: str, body: bytes) -> str:
-    return hmac.new(secret.encode("utf-8"), body, hashlib.sha256).hexdigest()
+def solapi_webhook_secret(secret: str) -> str:
+    return hashlib.sha1(secret.encode("utf-8")).hexdigest()
 
 
 def test_seeded_admin_can_login_and_access_admin_route() -> None:
@@ -146,17 +266,24 @@ def test_seeded_partner_can_only_list_own_jobs() -> None:
     assert response.status_code == 200
     jobs = response.json()
     assert [job["id"] for job in jobs] == ["seed-order-2450"]
+    assert jobs[0]["partner_confirmation_required"] is True
     assert "total_amount" not in jobs[0]
     assert "payment_memo" not in jobs[0]
 
 
 def test_partner_can_open_start_and_complete_own_job_with_timeline() -> None:
     client = make_test_client()
-    partner_session = login(client, "/api/auth/partner/login", DEV_PARTNER_PHONE, DEV_PARTNER_PASSWORD)
+    partner_session = login(
+        client, "/api/auth/partner/login", DEV_PARTNER_PHONE, DEV_PARTNER_PASSWORD
+    )
     headers = {"Authorization": f"Bearer {partner_session['access_token']}"}
 
     detail_response = client.get("/api/partner/jobs/seed-order-2450", headers=headers)
-    early_complete_response = client.post("/api/partner/jobs/seed-order-2450/complete", headers=headers)
+    early_complete_response = client.post(
+        "/api/partner/jobs/seed-order-2450/complete", headers=headers
+    )
+    early_start_response = client.post("/api/partner/jobs/seed-order-2450/start", headers=headers)
+    confirm_response = client.post("/api/partner/jobs/seed-order-2450/confirm", headers=headers)
     before_upload_response = client.post(
         "/api/partner/jobs/seed-order-2450/photos",
         headers=headers,
@@ -181,12 +308,17 @@ def test_partner_can_open_start_and_complete_own_job_with_timeline() -> None:
     assert detail_response.status_code == 200
     detail = detail_response.json()
     assert detail["id"] == "seed-order-2450"
+    assert detail["partner_confirmation_required"] is True
     assert "total_amount" not in detail
     assert "source_channel" not in detail
     assert "payment_memo" not in detail
 
     assert early_complete_response.status_code == 409
     assert early_complete_response.json()["detail"] == "invalid_status_transition"
+    assert early_start_response.status_code == 409
+    assert early_start_response.json()["detail"] == "partner_confirmation_required"
+    assert confirm_response.status_code == 200
+    assert confirm_response.json()["partner_confirmation_required"] is False
     assert before_upload_response.status_code == 200
     assert start_response.status_code == 200
     assert start_response.json()["status"] == "작업진행"
@@ -242,12 +374,16 @@ def test_partner_cannot_open_or_mutate_unassigned_job() -> None:
         )
 
     client = make_test_client(seed_unassigned_job)
-    partner_session = login(client, "/api/auth/partner/login", DEV_PARTNER_PHONE, DEV_PARTNER_PASSWORD)
+    partner_session = login(
+        client, "/api/auth/partner/login", DEV_PARTNER_PHONE, DEV_PARTNER_PASSWORD
+    )
     headers = {"Authorization": f"Bearer {partner_session['access_token']}"}
 
     detail_response = client.get("/api/partner/jobs/unassigned-order-01", headers=headers)
     start_response = client.post("/api/partner/jobs/unassigned-order-01/start", headers=headers)
-    complete_response = client.post("/api/partner/jobs/unassigned-order-01/complete", headers=headers)
+    complete_response = client.post(
+        "/api/partner/jobs/unassigned-order-01/complete", headers=headers
+    )
 
     assert detail_response.status_code == 404
     assert start_response.status_code == 404
@@ -421,7 +557,12 @@ def test_admin_order_detail_includes_timeline_photos_and_message_logs() -> None:
 
 
 def test_admin_order_detail_reflects_status_and_partner_timeline_updates() -> None:
-    client = make_test_client()
+    def unassign_seed_order(db: Session) -> None:
+        order = db.get(Order, "seed-order-2450")
+        assert order is not None
+        order.partner_id = None
+
+    client = make_test_client(seed_callback=unassign_seed_order)
     admin_session = login(client, "/api/auth/admin/login", DEV_ADMIN_EMAIL, DEV_ADMIN_PASSWORD)
     headers = {"Authorization": f"Bearer {admin_session['access_token']}"}
 
@@ -568,7 +709,9 @@ def test_admin_calendar_includes_group_address_detail() -> None:
 
 def test_admin_calendar_rejects_partner_access() -> None:
     client = make_test_client()
-    partner_session = login(client, "/api/auth/partner/login", DEV_PARTNER_PHONE, DEV_PARTNER_PASSWORD)
+    partner_session = login(
+        client, "/api/auth/partner/login", DEV_PARTNER_PHONE, DEV_PARTNER_PASSWORD
+    )
 
     response = client.get(
         "/api/admin/calendar?year=2026&month=5",
@@ -741,7 +884,9 @@ def test_admin_service_catalog_crud_and_order_catalog_selection() -> None:
 
     catalog_response = client.get("/api/admin/services", headers=headers)
     assert catalog_response.status_code == 200
-    active_category = next(category for category in catalog_response.json() if category["id"] == item["category_id"])
+    active_category = next(
+        category for category in catalog_response.json() if category["id"] == item["category_id"]
+    )
     assert active_category["items"][0]["name"] == "프리미엄 입주청소"
 
     create_order_response = client.post(
@@ -785,7 +930,9 @@ def test_admin_service_catalog_crud_and_order_catalog_selection() -> None:
     inactive_catalog_response = client.get("/api/admin/services", headers=headers)
     assert inactive_catalog_response.status_code == 200
     active_category_after_toggle = next(
-        category for category in inactive_catalog_response.json() if category["id"] == item["category_id"]
+        category
+        for category in inactive_catalog_response.json()
+        if category["id"] == item["category_id"]
     )
     assert active_category_after_toggle["items"] == []
 
@@ -975,7 +1122,9 @@ def test_admin_partner_detail_counts_assigned_jobs_without_settlement_fields() -
 def test_admin_partner_deactivation_blocks_login_and_existing_partner_token() -> None:
     client = make_test_client()
     admin_session = login(client, "/api/auth/admin/login", DEV_ADMIN_EMAIL, DEV_ADMIN_PASSWORD)
-    partner_session = login(client, "/api/auth/partner/login", DEV_PARTNER_PHONE, DEV_PARTNER_PASSWORD)
+    partner_session = login(
+        client, "/api/auth/partner/login", DEV_PARTNER_PHONE, DEV_PARTNER_PASSWORD
+    )
     admin_headers = {"Authorization": f"Bearer {admin_session['access_token']}"}
     partner_headers = {"Authorization": f"Bearer {partner_session['access_token']}"}
 
@@ -1005,7 +1154,12 @@ def test_admin_partner_deactivation_blocks_login_and_existing_partner_token() ->
 
     assert reactivate_response.status_code == 200
     assert reactivate_response.json()["is_active"] is True
-    assert login(client, "/api/auth/partner/login", DEV_PARTNER_PHONE, DEV_PARTNER_PASSWORD)["user"]["partner_id"] == DEV_PARTNER_ID
+    assert (
+        login(client, "/api/auth/partner/login", DEV_PARTNER_PHONE, DEV_PARTNER_PASSWORD)["user"][
+            "partner_id"
+        ]
+        == DEV_PARTNER_ID
+    )
 
 
 def test_admin_can_reset_partner_password_and_revoke_old_password() -> None:
@@ -1231,7 +1385,9 @@ def test_dashboard_summary_matches_operational_queue_definitions() -> None:
     # 레거시 지표(카드 미표시, DTO 유지): 값은 종전과 동일.
     assert summary.photo_review_pending == 0
     assert summary.customer_delivery_needed == 2
-    assert summary.payment_check_needed == 1  # 과거 미납(payment-pending)만, 미래(payment-future) 제외
+    assert (
+        summary.payment_check_needed == 1
+    )  # 과거 미납(payment-pending)만, 미래(payment-future) 제외
     assert summary.monthly_revenue == 700000
 
 
@@ -1268,23 +1424,54 @@ def test_dashboard_new_cards_260702() -> None:
         db.add_all(
             [
                 # 작업완료 & 미수 → 미정산 확인 + 미수금(소비자가 전액)
-                mk("done-unpaid", status=OrderStatus.CUSTOMER_DELIVERY_DONE, scheduled=date(2026, 5, 4),
-                   payment_status="unpaid", total=300000),
+                mk(
+                    "done-unpaid",
+                    status=OrderStatus.CUSTOMER_DELIVERY_DONE,
+                    scheduled=date(2026, 5, 4),
+                    payment_status="unpaid",
+                    total=300000,
+                ),
                 # 작업완료 & 잔금대기 → 미정산 확인 + 미수금(잔금만)
-                mk("done-balance", status=OrderStatus.COMPLETED, scheduled=date(2026, 5, 5),
-                   payment_status="balance_pending", total=200000, balance=150000),
+                mk(
+                    "done-balance",
+                    status=OrderStatus.COMPLETED,
+                    scheduled=date(2026, 5, 5),
+                    payment_status="balance_pending",
+                    total=200000,
+                    balance=150000,
+                ),
                 # 작업완료 & 완납 → 미정산 확인/미수금 제외(계약금액엔 포함)
-                mk("done-paid", status=OrderStatus.CUSTOMER_DELIVERY_DONE, scheduled=date(2026, 5, 6),
-                   payment_status="paid", total=200000),
+                mk(
+                    "done-paid",
+                    status=OrderStatus.CUSTOMER_DELIVERY_DONE,
+                    scheduled=date(2026, 5, 6),
+                    payment_status="paid",
+                    total=200000,
+                ),
                 # 고객확인필요(미수) → 고객 확인 필요 + 미정산 확인 + 미수금
-                mk("check-unpaid", status=OrderStatus.CUSTOMER_CHECK_NEEDED, scheduled=date(2026, 5, 7),
-                   payment_status="unpaid", total=80000),
+                mk(
+                    "check-unpaid",
+                    status=OrderStatus.CUSTOMER_CHECK_NEEDED,
+                    scheduled=date(2026, 5, 7),
+                    payment_status="unpaid",
+                    total=80000,
+                ),
                 # 고객확인필요(완납) → 고객 확인 필요만
-                mk("check-paid", status=OrderStatus.CUSTOMER_CHECK_NEEDED, scheduled=date(2026, 5, 8),
-                   payment_status="paid", total=80000),
+                mk(
+                    "check-paid",
+                    status=OrderStatus.CUSTOMER_CHECK_NEEDED,
+                    scheduled=date(2026, 5, 8),
+                    payment_status="paid",
+                    total=80000,
+                ),
                 # 취소 → 모든 집계 제외
-                mk("cancelled", status=OrderStatus.CANCELLED, scheduled=date(2026, 5, 9),
-                   payment_status="unpaid", total=99999),
+                mk(
+                    "cancelled",
+                    status=OrderStatus.CANCELLED,
+                    scheduled=date(2026, 5, 9),
+                    payment_status="unpaid",
+                    total=99999,
+                ),
             ]
         )
         db.commit()
@@ -1366,7 +1553,8 @@ def test_customer_link_verify_returns_customer_dto_only() -> None:
     client = make_test_client()
 
     response = client.post(
-        "/api/customer/orders/seed-customer-token-2450/verify",
+        "/api/customer/orders/verify",
+        headers=CUSTOMER_HEADERS,
         json={"phone_suffix": "5432"},
     )
 
@@ -1388,12 +1576,30 @@ def test_customer_link_verify_rejects_wrong_phone_suffix() -> None:
     client = make_test_client()
 
     response = client.post(
-        "/api/customer/orders/seed-customer-token-2450/verify",
+        "/api/customer/orders/verify",
+        headers=CUSTOMER_HEADERS,
         json={"phone_suffix": "0000"},
     )
 
     assert response.status_code == 404
     assert response.json()["detail"] == "order_not_found"
+
+
+def test_customer_api_requires_header_and_has_no_token_path_route() -> None:
+    client = make_test_client()
+
+    missing_header = client.post(
+        "/api/customer/orders/verify",
+        json={"phone_suffix": "5432"},
+    )
+    legacy_token_path = client.post(
+        "/api/customer/orders/ct2_seed-customer-token-2450/verify",
+        json={"phone_suffix": "5432"},
+    )
+
+    assert missing_header.status_code == 404
+    assert missing_header.json()["detail"] == "order_not_found"
+    assert legacy_token_path.status_code == 405
 
 
 def test_customer_link_verify_locks_after_repeated_wrong_suffix(monkeypatch) -> None:
@@ -1424,27 +1630,66 @@ def test_customer_link_verify_locks_after_repeated_wrong_suffix(monkeypatch) -> 
     monkeypatch.setattr(settings, "customer_verify_max_attempts", 2)
     client = make_test_client(seed_rate_limited_order)
 
-    for _ in range(2):
+    for attempt_number in range(2):
         response = client.post(
-            "/api/customer/orders/rate-limit-token/verify",
+            "/api/customer/orders/verify",
             json={"phone_suffix": "0000"},
+            headers={
+                "X-Customer-Token": "rate-limit-token",
+                "X-Forwarded-For": f"203.0.113.{attempt_number + 1}",
+            },
         )
         assert response.status_code == 404
 
     locked_response = client.post(
-        "/api/customer/orders/rate-limit-token/verify",
+        "/api/customer/orders/verify",
         json={"phone_suffix": "2222"},
+        headers={
+            "X-Customer-Token": "rate-limit-token",
+            "X-Forwarded-For": "203.0.113.99",
+        },
     )
 
     assert locked_response.status_code == 429
     assert locked_response.json()["detail"] == "customer_verify_locked"
 
 
+def test_customer_verify_attempt_reservation_is_atomic(monkeypatch) -> None:
+    from concurrent.futures import ThreadPoolExecutor
+
+    from fastapi import HTTPException
+
+    from app.api.routes.customer.orders import (
+        _consume_customer_verify_attempt,
+        _customer_verify_rate_limit_key,
+        _reset_customer_verify_failures,
+    )
+
+    monkeypatch.setattr(settings, "customer_verify_max_attempts", 2)
+    key = _customer_verify_rate_limit_key("atomic-rate-limit-token")
+    _reset_customer_verify_failures(key)
+
+    def consume() -> int:
+        try:
+            _consume_customer_verify_attempt(key)
+        except HTTPException as exc:
+            return exc.status_code
+        return 200
+
+    with ThreadPoolExecutor(max_workers=12) as executor:
+        statuses = list(executor.map(lambda _: consume(), range(20)))
+
+    assert statuses.count(200) == 2
+    assert statuses.count(429) == 18
+    _reset_customer_verify_failures(key)
+
+
 def test_customer_link_verify_rejects_malformed_phone_suffix() -> None:
     client = make_test_client()
 
     response = client.post(
-        "/api/customer/orders/seed-customer-token-2450/verify",
+        "/api/customer/orders/verify",
+        headers=CUSTOMER_HEADERS,
         json={"phone_suffix": "12ab"},
     )
 
@@ -1481,7 +1726,8 @@ def test_customer_link_verify_returns_only_customer_visible_photos() -> None:
     client = make_test_client(seed_photos)
 
     response = client.post(
-        "/api/customer/orders/seed-customer-token-2450/verify",
+        "/api/customer/orders/verify",
+        headers=CUSTOMER_HEADERS,
         json={"phone_suffix": "5432"},
     )
 
@@ -1502,8 +1748,15 @@ def test_customer_link_verify_returns_only_customer_visible_photos() -> None:
 def test_partner_upload_auto_visible_customer_delivery_flow(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(settings, "storage_root", str(tmp_path / "uploads"))
     client = make_test_client()
-    partner_session = login(client, "/api/auth/partner/login", DEV_PARTNER_PHONE, DEV_PARTNER_PASSWORD)
+    partner_session = login(
+        client, "/api/auth/partner/login", DEV_PARTNER_PHONE, DEV_PARTNER_PASSWORD
+    )
     partner_headers = {"Authorization": f"Bearer {partner_session['access_token']}"}
+    confirm_response = client.post(
+        "/api/partner/jobs/seed-order-2450/confirm",
+        headers=partner_headers,
+    )
+    assert confirm_response.status_code == 200
 
     upload_response = client.post(
         "/api/partner/jobs/seed-order-2450/photos",
@@ -1523,7 +1776,8 @@ def test_partner_upload_auto_visible_customer_delivery_flow(tmp_path, monkeypatc
     assert "uploaded_by_user_id" not in uploaded
 
     auto_visible = client.post(
-        "/api/customer/orders/seed-customer-token-2450/verify",
+        "/api/customer/orders/verify",
+        headers=CUSTOMER_HEADERS,
         json={"phone_suffix": "5432"},
     )
     assert auto_visible.status_code == 200
@@ -1620,7 +1874,9 @@ def test_partner_upload_auto_visible_customer_delivery_flow(tmp_path, monkeypatc
 def test_partner_upload_rejects_invalid_photo_content_type(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(settings, "storage_root", str(tmp_path / "uploads"))
     client = make_test_client()
-    partner_session = login(client, "/api/auth/partner/login", DEV_PARTNER_PHONE, DEV_PARTNER_PASSWORD)
+    partner_session = login(
+        client, "/api/auth/partner/login", DEV_PARTNER_PHONE, DEV_PARTNER_PASSWORD
+    )
 
     response = client.post(
         "/api/partner/jobs/seed-order-2450/photos",
@@ -1637,7 +1893,9 @@ def test_partner_upload_rejects_photo_over_size_limit(tmp_path, monkeypatch) -> 
     monkeypatch.setattr(settings, "storage_root", str(tmp_path / "uploads"))
     monkeypatch.setattr(settings, "photo_max_upload_bytes", 4)
     client = make_test_client()
-    partner_session = login(client, "/api/auth/partner/login", DEV_PARTNER_PHONE, DEV_PARTNER_PASSWORD)
+    partner_session = login(
+        client, "/api/auth/partner/login", DEV_PARTNER_PHONE, DEV_PARTNER_PASSWORD
+    )
 
     response = client.post(
         "/api/partner/jobs/seed-order-2450/photos",
@@ -1660,7 +1918,7 @@ def test_admin_e2e_order_to_customer_delivery_flow(tmp_path, monkeypatch) -> Non
         "/api/admin/orders",
         headers=admin_headers,
         json={
-            "status": "일정확정",
+            "status": "협력사확인중",
             "received_date": "2026-05-05",
             "scheduled_date": "2026-05-09",
             "requested_time": "09:30",
@@ -1687,34 +1945,37 @@ def test_admin_e2e_order_to_customer_delivery_flow(tmp_path, monkeypatch) -> Non
     assert order["service_item_id"] == DEV_SERVICE_ITEM_ID
     assert order["total_amount"] == 280000
 
-    assignment_response = client.post(
-        "/api/admin/messages/send",
-        headers=admin_headers,
-        json={
-            "order_id": order_id,
-            "message_type": "partner_assignment",
-            "recipient_type": "partner",
-            "channel": "sms",
-        },
-    )
-    schedule_response = client.post(
-        "/api/admin/messages/send",
-        headers=admin_headers,
-        json={
-            "order_id": order_id,
-            "message_type": "customer_schedule_confirmed",
-            "recipient_type": "customer",
-            "channel": "sms",
-        },
-    )
+    assignment_detail = client.get(f"/api/admin/orders/{order_id}", headers=admin_headers)
+    assert assignment_detail.status_code == 200
+    assignment_logs = [
+        log
+        for log in assignment_detail.json()["message_logs"]
+        if log["message_type"] == "partner_assignment"
+    ]
+    assert len(assignment_logs) == 1
+    assert assignment_logs[0]["recipient_type"] == "partner"
 
-    assert assignment_response.status_code == 200
-    assert assignment_response.json()["recipient_type"] == "partner"
-    assert schedule_response.status_code == 200
-    assert "/c/" in schedule_response.json()["content"]
-
-    partner_session = login(client, "/api/auth/partner/login", DEV_PARTNER_PHONE, DEV_PARTNER_PASSWORD)
+    partner_session = login(
+        client, "/api/auth/partner/login", DEV_PARTNER_PHONE, DEV_PARTNER_PASSWORD
+    )
     partner_headers = {"Authorization": f"Bearer {partner_session['access_token']}"}
+    confirm_response = client.post(
+        f"/api/partner/jobs/{order_id}/confirm",
+        headers=partner_headers,
+    )
+    assert confirm_response.status_code == 200
+    assert confirm_response.json()["status"] == "작업예정"
+
+    confirmation_detail = client.get(f"/api/admin/orders/{order_id}", headers=admin_headers)
+    assert confirmation_detail.status_code == 200
+    schedule_logs = [
+        log
+        for log in confirmation_detail.json()["message_logs"]
+        if log["message_type"] == "customer_schedule_confirmed"
+    ]
+    assert len(schedule_logs) == 1
+    assert "/c#token=" in schedule_logs[0]["content"]
+
     partner_jobs = client.get("/api/partner/jobs", headers=partner_headers)
     assert partner_jobs.status_code == 200
     assert order_id in {job["id"] for job in partner_jobs.json()}
@@ -1746,13 +2007,13 @@ def test_admin_e2e_order_to_customer_delivery_flow(tmp_path, monkeypatch) -> Non
     assert uploaded["is_customer_visible"] is True
 
     auto_visible = client.post(
-        f"/api/customer/orders/{order['customer_token']}/verify",
+        "/api/customer/orders/verify",
+        headers={"X-Customer-Token": order["customer_token"]},
         json={"phone_suffix": "2222"},
     )
     assert auto_visible.status_code == 200
     auto_photos = {
-        photo["photo_type"]: photo
-        for photo in auto_visible.json()["lines"][0]["photos"]
+        photo["photo_type"]: photo for photo in auto_visible.json()["lines"][0]["photos"]
     }
     assert auto_photos == {
         "before": {
@@ -1790,7 +2051,8 @@ def test_admin_e2e_order_to_customer_delivery_flow(tmp_path, monkeypatch) -> Non
     assert send_photo_response.status_code == 200
 
     customer_response = client.post(
-        f"/api/customer/orders/{order['customer_token']}/verify",
+        "/api/customer/orders/verify",
+        headers={"X-Customer-Token": order["customer_token"]},
         json={"phone_suffix": "2222"},
     )
     assert customer_response.status_code == 200
@@ -1800,10 +2062,7 @@ def test_admin_e2e_order_to_customer_delivery_flow(tmp_path, monkeypatch) -> Non
     assert customer["lines"][0]["total_amount"] is None
     assert "payment_memo" not in customer
     assert "partner_payment_amount" not in customer
-    customer_photos = {
-        photo["photo_type"]: photo
-        for photo in customer["lines"][0]["photos"]
-    }
+    customer_photos = {photo["photo_type"]: photo for photo in customer["lines"][0]["photos"]}
     assert customer_photos == auto_photos
 
     admin_detail = client.get(f"/api/admin/orders/{order_id}", headers=admin_headers)
@@ -1868,10 +2127,11 @@ def test_customer_photo_ready_message_includes_customer_link_and_timeline() -> N
             actor_user_id="seed-admin-user",
         )
         order = db.get(Order, "seed-order-2450")
+        assert order is not None
         events = TimelineRepository(db).list_for_order("seed-order-2450")
 
     assert log.status == "sent"
-    assert "http://localhost:5173/c/seed-customer-token-2450" in log.content
+    assert "http://localhost:5173/c#token=ct2_seed-customer-token-2450" in log.content
     assert order.status == OrderStatus.CUSTOMER_DELIVERY_NEEDED
     assert TimelineEventType.MESSAGE_SENT in {event.event_type for event in events}
     assert TimelineEventType.STATUS_CHANGED not in {event.event_type for event in events}
@@ -1890,6 +2150,10 @@ def test_customer_balance_due_message_includes_balance_link_and_timeline() -> No
     with TestingSessionLocal() as db:
         seed_dev_data(db)
         order = db.get(Order, "seed-order-2450")
+        assert order is not None
+        order.status = OrderStatus.CUSTOMER_DELIVERY_NEEDED
+        order.work_completed_at = datetime.now(UTC)
+        db.flush()
         original_status = order.status
         log = MessageService(db).send(
             MessageSendRequest(
@@ -1904,7 +2168,7 @@ def test_customer_balance_due_message_includes_balance_link_and_timeline() -> No
 
     assert log.status == "sent"
     assert "잔금:" in log.content
-    assert "http://localhost:5173/c/seed-customer-token-2450" in log.content
+    assert "http://localhost:5173/c#token=ct2_seed-customer-token-2450" in log.content
     assert order.status == original_status
     assert TimelineEventType.MESSAGE_SENT in {event.event_type for event in events}
     assert TimelineEventType.STATUS_CHANGED not in {event.event_type for event in events}
@@ -1912,7 +2176,7 @@ def test_customer_balance_due_message_includes_balance_link_and_timeline() -> No
 
 
 def test_failed_customer_message_is_logged_without_status_or_link_side_effects() -> None:
-    class FailingProvider:
+    class FailingProvider(MessageProvider):
         def send(self, content: str, recipient_phone: str) -> MessageSendResult:
             return MessageSendResult(status=MessageStatus.FAILED, error_message="provider_down")
 
@@ -1927,6 +2191,8 @@ def test_failed_customer_message_is_logged_without_status_or_link_side_effects()
     with TestingSessionLocal() as db:
         seed_dev_data(db)
         order = db.get(Order, "seed-order-2450")
+        assert order is not None
+        _record_current_partner_confirmation(db)
         original_status = order.status
         log = MessageService(db, provider=FailingProvider()).send(
             MessageSendRequest(
@@ -1960,9 +2226,11 @@ def test_message_send_persists_pending_log_before_provider_call_and_records_exce
     with TestingSessionLocal() as db:
         seed_dev_data(db)
         order = db.get(Order, "seed-order-2450")
+        assert order is not None
+        _record_current_partner_confirmation(db)
         original_status = order.status
 
-        class ExplodingProvider:
+        class ExplodingProvider(MessageProvider):
             provider_name = "exploding"
 
             def send(self, content: str, recipient_phone: str) -> MessageSendResult:
@@ -1995,6 +2263,7 @@ def test_message_send_persists_pending_log_before_provider_call_and_records_exce
         event for event in events if event.event_type == TimelineEventType.MESSAGE_SENT
     ]
     assert message_events
+    assert message_events[-1].event_metadata is not None
     assert message_events[-1].event_metadata["status"] == MessageStatus.FAILED
     assert TimelineEventType.STATUS_CHANGED not in {event.event_type for event in events}
     assert TimelineEventType.CUSTOMER_LINK_SENT not in {event.event_type for event in events}
@@ -2013,7 +2282,7 @@ def test_admin_message_send_route_returns_failed_log_when_provider_fails(monkeyp
             )
 
     monkeypatch.setattr("app.services.messages.build_message_provider", lambda: FailingProvider())
-    client = make_test_client()
+    client = make_test_client(seed_callback=_record_current_partner_confirmation)
     admin_session = login(client, "/api/auth/admin/login", DEV_ADMIN_EMAIL, DEV_ADMIN_PASSWORD)
     headers = {"Authorization": f"Bearer {admin_session['access_token']}"}
 
@@ -2055,12 +2324,16 @@ def test_admin_message_settings_reports_solapi_readiness_without_secret_values(m
     monkeypatch.setattr(settings, "solapi_sender_number", "010-1111-2222")
     monkeypatch.setattr(settings, "solapi_webhook_secret", "webhook-secret")
     monkeypatch.setattr(settings, "solapi_kakao_channel_id", "channel-id")
-    monkeypatch.setattr(settings, "solapi_kakao_template_customer_schedule_confirmed", "KA_SCHEDULE")
+    monkeypatch.setattr(
+        settings, "solapi_kakao_template_customer_schedule_confirmed", "KA_SCHEDULE"
+    )
     monkeypatch.setattr(settings, "solapi_kakao_template_customer_day_before", "KA_DAY_BEFORE")
     monkeypatch.setattr(settings, "solapi_kakao_template_partner_job_assignment", "KA_PARTNER")
     monkeypatch.setattr(settings, "solapi_kakao_template_customer_photo_ready", "KA_PHOTO")
     monkeypatch.setattr(settings, "solapi_kakao_template_customer_quote", "KA_QUOTE")
-    monkeypatch.setattr(settings, "solapi_kakao_template_partner_customer_info", "KA_PARTNER_CUSTOMER")
+    monkeypatch.setattr(
+        settings, "solapi_kakao_template_partner_customer_info", "KA_PARTNER_CUSTOMER"
+    )
     monkeypatch.setattr(settings, "solapi_kakao_template_customer_balance_due", "KA_BALANCE")
     monkeypatch.setattr(settings, "solapi_kakao_template_partner_as_request", "KA_PARTNER_AS")
     monkeypatch.setattr(settings, "solapi_kakao_template_customer_as_notice", "KA_CUSTOMER_AS")
@@ -2231,7 +2504,7 @@ def test_admin_can_send_customer_photo_ready_message() -> None:
     assert body["status"] == "sent"
     assert body["provider"] == "mock"
     assert body["requested_at"] is not None
-    assert "/c/seed-customer-token-2450" in body["content"]
+    assert "/c#token=ct2_seed-customer-token-2450" in body["content"]
 
     detail_response = client.get("/api/admin/orders/seed-order-2450", headers=headers)
     assert detail_response.status_code == 200
@@ -2244,8 +2517,8 @@ def test_admin_can_send_customer_photo_ready_message() -> None:
     assert "customer_link_sent" in {event["event_type"] for event in detail["timeline"]}
 
 
-def test_admin_can_send_day_before_notice_and_update_timeline() -> None:
-    client = make_test_client()
+def test_admin_day_before_notice_preserves_scheduled_status_and_updates_timeline() -> None:
+    client = make_test_client(seed_day_before_target)
     admin_session = login(client, "/api/auth/admin/login", DEV_ADMIN_EMAIL, DEV_ADMIN_PASSWORD)
     headers = {"Authorization": f"Bearer {admin_session['access_token']}"}
 
@@ -2264,15 +2537,15 @@ def test_admin_can_send_day_before_notice_and_update_timeline() -> None:
     body = response.json()
     assert body["status"] == "sent"
     assert body["recipient_type"] == "customer"
-    assert "/c/seed-customer-token-2450" in body["content"]
+    assert "/c#token=ct2_seed-customer-token-2450" in body["content"]
 
     detail_response = client.get("/api/admin/orders/seed-order-2450", headers=headers)
     assert detail_response.status_code == 200
     detail = detail_response.json()
-    assert detail["status"] == OrderStatus.DAY_BEFORE_NOTICE_DONE
+    assert detail["status"] == OrderStatus.SCHEDULED
     event_types = {event["event_type"] for event in detail["timeline"]}
     assert "message_sent" in event_types
-    assert "status_changed" in event_types
+    assert "status_changed" not in event_types
     assert "customer_link_sent" in event_types
 
 
@@ -2317,7 +2590,7 @@ def test_solapi_webhook_marks_message_delivered(monkeypatch) -> None:
         "/api/webhooks/solapi",
         headers={
             "Content-Type": "application/json",
-            "X-Solapi-Signature": solapi_webhook_signature("webhook-secret", body),
+            "X-Solapi-Secret": solapi_webhook_secret("webhook-secret"),
         },
         content=body,
     )
@@ -2336,6 +2609,38 @@ def test_solapi_webhook_marks_message_delivered(monkeypatch) -> None:
     assert message["provider_status_message"] == "수신 완료"
     assert message["delivered_at"] is not None
 
+    stale_failure_body = json.dumps(
+        [
+            {
+                "messageId": "M4V20260505120000TEST",
+                "groupId": "G4V20260505120000TEST",
+                "statusCode": "9999",
+                "statusMessage": "늦게 도착한 실패",
+                "dateReported": "2026-05-05T03:00:03.000Z",
+            }
+        ],
+        separators=(",", ":"),
+    ).encode("utf-8")
+    stale_failure_response = client.post(
+        "/api/webhooks/solapi",
+        headers={
+            "Content-Type": "application/json",
+            "X-Solapi-Secret": solapi_webhook_secret("webhook-secret"),
+        },
+        content=stale_failure_body,
+    )
+    assert stale_failure_response.status_code == 200
+
+    messages_after_stale_failure = client.get(
+        "/api/admin/messages",
+        headers={"Authorization": f"Bearer {admin_session['access_token']}"},
+    ).json()
+    message_after_stale_failure = next(
+        item for item in messages_after_stale_failure if item["id"] == "solapi-webhook-message"
+    )
+    assert message_after_stale_failure["status"] == "delivered"
+    assert message_after_stale_failure["provider_status_code"] == "4000"
+
     detail = client.get(
         "/api/admin/orders/seed-order-2450",
         headers={"Authorization": f"Bearer {admin_session['access_token']}"},
@@ -2347,6 +2652,92 @@ def test_solapi_webhook_marks_message_delivered(monkeypatch) -> None:
         and event["event_metadata"].get("status") == "delivered"
     ]
     assert delivery_events
+    stale_failure_events = [
+        event
+        for event in detail["timeline"]
+        if event["event_type"] == "message_sent"
+        and event["event_metadata"].get("status") == "delivery_failed"
+    ]
+    assert stale_failure_events == []
+
+
+def test_solapi_webhook_resolves_pending_day_before_and_applies_side_effects(
+    monkeypatch,
+) -> None:
+    def seed_pending_day_before(db: Session) -> None:
+        order = db.get(Order, "seed-order-2450")
+        assert order is not None
+        order.status = OrderStatus.SCHEDULE_CONFIRMED
+        order.scheduled_date = date(2026, 7, 13)
+        _record_current_partner_confirmation(
+            db,
+            order.id,
+            confirmed_at=datetime(2026, 7, 12, 0, 59, tzinfo=UTC),
+        )
+        db.add(
+            MessageLog(
+                id="solapi-pending-day-before",
+                order_id=order.id,
+                recipient_type=RecipientType.CUSTOMER,
+                recipient_name="Pending Customer",
+                recipient_phone="01098765432",
+                message_type=MessageType.CUSTOMER_DAY_BEFORE,
+                channel=MessageChannel.ALIMTALK,
+                content="pending day before",
+                status=MessageStatus.PENDING,
+                provider="solapi",
+                provider_message_id="M4V20260712100000PENDING",
+                provider_group_id="G4V20260712100000PENDING",
+                provider_error_code="solapi_outcome_unknown",
+                requested_at=datetime(2026, 7, 12, 1, 0, tzinfo=UTC),
+            )
+        )
+
+    monkeypatch.setattr(settings, "solapi_webhook_secret", "webhook-secret")
+    client = make_test_client(seed_pending_day_before)
+    body = json.dumps(
+        [
+            {
+                "messageId": "M4V20260712100000PENDING",
+                "groupId": "G4V20260712100000PENDING",
+                "statusCode": "4000",
+                "statusMessage": "수신 완료",
+                "dateReported": "2026-07-12T01:00:05.000Z",
+                "dateReceived": "2026-07-12T01:00:04.000Z",
+            }
+        ],
+        separators=(",", ":"),
+    ).encode("utf-8")
+
+    response = client.post(
+        "/api/webhooks/solapi",
+        headers={
+            "Content-Type": "application/json",
+            "X-Solapi-Secret": solapi_webhook_secret("webhook-secret"),
+        },
+        content=body,
+    )
+
+    assert response.status_code == 200
+    admin_session = login(
+        client,
+        "/api/auth/admin/login",
+        DEV_ADMIN_EMAIL,
+        DEV_ADMIN_PASSWORD,
+    )
+    headers = {"Authorization": f"Bearer {admin_session['access_token']}"}
+    messages = client.get("/api/admin/messages", headers=headers).json()
+    message = next(item for item in messages if item["id"] == "solapi-pending-day-before")
+    assert message["status"] == "delivered"
+    assert message["sent_at"] is not None
+    assert message["provider_error_code"] is None
+
+    detail = client.get("/api/admin/orders/seed-order-2450", headers=headers).json()
+    assert detail["status"] == OrderStatus.DAY_BEFORE_NOTICE_DONE.value
+    assert any(
+        event["event_type"] == TimelineEventType.CUSTOMER_LINK_SENT.value
+        for event in detail["timeline"]
+    )
 
 
 def test_solapi_webhook_records_delivery_failure_timeline(monkeypatch) -> None:
@@ -2389,7 +2780,7 @@ def test_solapi_webhook_records_delivery_failure_timeline(monkeypatch) -> None:
         "/api/webhooks/solapi",
         headers={
             "Content-Type": "application/json",
-            "X-Solapi-Signature": solapi_webhook_signature("webhook-secret", body),
+            "X-Solapi-Secret": solapi_webhook_secret("webhook-secret"),
         },
         content=body,
     )
@@ -2426,7 +2817,7 @@ def test_solapi_webhook_rejects_invalid_secret(monkeypatch) -> None:
 
     response = client.post(
         "/api/webhooks/solapi",
-        headers={"Content-Type": "application/json", "X-Solapi-Signature": "wrong"},
+        headers={"Content-Type": "application/json", "X-Solapi-Secret": "wrong"},
         content=body,
     )
 
@@ -2448,10 +2839,90 @@ def test_solapi_webhook_requires_configured_secret(monkeypatch) -> None:
     assert response.json()["detail"] == "solapi_webhook_secret_required"
 
 
+def test_admin_resolves_unknown_solapi_outcome_with_audit_guard() -> None:
+    def seed_unknown(db: Session) -> None:
+        db.add(
+            MessageLog(
+                id="solapi-unknown-resolution-message",
+                order_id="seed-order-2450",
+                recipient_type=RecipientType.CUSTOMER,
+                recipient_name="Resolution Customer",
+                recipient_phone="01098765432",
+                message_type=MessageType.CUSTOMER_QUOTE,
+                channel=MessageChannel.ALIMTALK,
+                content="unknown outcome",
+                status=MessageStatus.PENDING,
+                provider="solapi",
+                provider_error_code="solapi_outcome_unknown",
+                requested_at=datetime.now(UTC),
+            )
+        )
+
+    client = make_test_client(seed_unknown)
+    path = "/api/admin/messages/solapi-unknown-resolution-message/resolve-unknown"
+    payload = {"resolution": "confirmed_not_sent"}
+
+    unauthenticated = client.post(path, json=payload)
+    partner_session = login(
+        client,
+        "/api/auth/partner/login",
+        DEV_PARTNER_PHONE,
+        DEV_PARTNER_PASSWORD,
+    )
+    partner_forbidden = client.post(
+        path,
+        json=payload,
+        headers={"Authorization": f"Bearer {partner_session['access_token']}"},
+    )
+    admin_session = login(
+        client,
+        "/api/auth/admin/login",
+        DEV_ADMIN_EMAIL,
+        DEV_ADMIN_PASSWORD,
+    )
+    admin_headers = {"Authorization": f"Bearer {admin_session['access_token']}"}
+    resolved = client.post(path, json=payload, headers=admin_headers)
+    repeated = client.post(path, json=payload, headers=admin_headers)
+
+    assert unauthenticated.status_code == 401
+    assert partner_forbidden.status_code == 403
+    assert resolved.status_code == 200
+    assert resolved.json()["status"] == "failed"
+    assert resolved.json()["provider_error_code"] == "manually_confirmed_not_sent"
+    assert repeated.status_code == 409
+    assert repeated.json()["detail"] == "message_not_unknown_pending"
+
+    detail = client.get(
+        "/api/admin/orders/seed-order-2450",
+        headers=admin_headers,
+    ).json()
+    resolution_events = [
+        event for event in detail["timeline"] if event["title"] == "SOLAPI 불명 결과 수동 확정"
+    ]
+    assert len(resolution_events) == 1
+
+
+def test_solapi_webhook_rejects_oversized_body_before_json_parsing(monkeypatch) -> None:
+    monkeypatch.setattr(settings, "solapi_webhook_secret", "webhook-secret")
+    client = make_test_client()
+
+    response = client.post(
+        "/api/webhooks/solapi",
+        headers={
+            "Content-Type": "application/json",
+            "X-Solapi-Secret": solapi_webhook_secret("webhook-secret"),
+        },
+        content=b" " * (SOLAPI_WEBHOOK_MAX_BYTES + 1),
+    )
+
+    assert response.status_code == 413
+    assert response.json()["detail"] == "solapi_webhook_payload_too_large"
+
+
 def test_admin_can_preview_alimtalk_template_variables(monkeypatch) -> None:
     monkeypatch.setattr(settings, "solapi_kakao_channel_id", "")
     monkeypatch.setattr(settings, "solapi_kakao_template_customer_day_before", "KA_DAY_BEFORE")
-    client = make_test_client()
+    client = make_test_client(seed_day_before_target)
     admin_session = login(client, "/api/auth/admin/login", DEV_ADMIN_EMAIL, DEV_ADMIN_PASSWORD)
     headers = {"Authorization": f"Bearer {admin_session['access_token']}"}
 
@@ -2477,14 +2948,16 @@ def test_admin_can_preview_alimtalk_template_variables(monkeypatch) -> None:
     assert "solapi_missing_kakao_channel_id" in body["warnings"]
     assert "alimtalk_fallback_sms_enabled" in body["warnings"]
     assert body["kakao_variables"]["#{고객명}"] == "박고객"
-    assert "http://localhost:5173/c/seed-customer-token-2450" in body["fallback_sms_content"]
+    assert (
+        "http://localhost:5173/c#token=ct2_seed-customer-token-2450" in body["fallback_sms_content"]
+    )
 
 
 def test_admin_alimtalk_preview_blocks_when_template_missing_without_fallback(monkeypatch) -> None:
     monkeypatch.setattr(settings, "solapi_kakao_channel_id", "channel-id")
     monkeypatch.setattr(settings, "solapi_kakao_template_customer_day_before", "")
     monkeypatch.setattr(settings, "solapi_alimtalk_fallback_sms", False)
-    client = make_test_client()
+    client = make_test_client(seed_day_before_target)
     admin_session = login(client, "/api/auth/admin/login", DEV_ADMIN_EMAIL, DEV_ADMIN_PASSWORD)
     headers = {"Authorization": f"Bearer {admin_session['access_token']}"}
 
@@ -2507,6 +2980,73 @@ def test_admin_alimtalk_preview_blocks_when_template_missing_without_fallback(mo
     assert body["can_send"] is False
     assert body["fallback_sms_content"] is None
     assert body["warnings"] == ["solapi_missing_kakao_template_id"]
+
+
+def test_admin_day_before_preview_and_send_reject_cancelled_order() -> None:
+    def seed_cancelled(db: Session) -> None:
+        order = db.get(Order, "seed-order-2450")
+        assert order is not None
+        order.status = OrderStatus.CANCELLED
+
+    client = make_test_client(seed_cancelled)
+    admin_session = login(client, "/api/auth/admin/login", DEV_ADMIN_EMAIL, DEV_ADMIN_PASSWORD)
+    headers = {"Authorization": f"Bearer {admin_session['access_token']}"}
+    payload = {
+        "order_id": "seed-order-2450",
+        "message_type": "customer_day_before",
+        "recipient_type": "customer",
+        "channel": "sms",
+    }
+
+    preview = client.post("/api/admin/messages/preview", headers=headers, json=payload)
+    send = client.post("/api/admin/messages/send", headers=headers, json=payload)
+
+    assert preview.status_code == 409
+    assert preview.json()["detail"] == "day_before_notice_not_allowed"
+    assert send.status_code == 409
+    assert send.json()["detail"] == "day_before_notice_not_allowed"
+
+
+def test_admin_day_before_preview_and_send_reject_non_tomorrow_order() -> None:
+    def seed_future_order(db: Session) -> None:
+        order = db.get(Order, "seed-order-2450")
+        assert order is not None
+        order.status = OrderStatus.SCHEDULED
+        order.scheduled_date = business_today() + timedelta(days=10)
+
+    client = make_test_client(seed_future_order)
+    admin_session = login(client, "/api/auth/admin/login", DEV_ADMIN_EMAIL, DEV_ADMIN_PASSWORD)
+    headers = {"Authorization": f"Bearer {admin_session['access_token']}"}
+    payload = {
+        "order_id": "seed-order-2450",
+        "message_type": "customer_day_before",
+        "recipient_type": "customer",
+        "channel": "sms",
+    }
+
+    preview = client.post("/api/admin/messages/preview", headers=headers, json=payload)
+    send = client.post("/api/admin/messages/send", headers=headers, json=payload)
+
+    assert preview.status_code == 409
+    assert preview.json()["detail"] == "day_before_notice_not_due"
+    assert send.status_code == 409
+    assert send.json()["detail"] == "day_before_notice_not_due"
+
+
+def test_admin_day_before_batch_endpoint_rejects_non_tomorrow_target() -> None:
+    client = make_test_client(seed_day_before_target)
+    admin_session = login(client, "/api/auth/admin/login", DEV_ADMIN_EMAIL, DEV_ADMIN_PASSWORD)
+    headers = {"Authorization": f"Bearer {admin_session['access_token']}"}
+    future_date = business_today() + timedelta(days=10)
+
+    response = client.post(
+        "/api/admin/messages/day-before/run",
+        params={"target_date": future_date.isoformat()},
+        headers=headers,
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "day_before_notice_not_due"
 
 
 def test_admin_can_send_partner_assignment_to_partner_only() -> None:

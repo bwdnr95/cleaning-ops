@@ -4,7 +4,13 @@ from sqlalchemy.orm import Session
 from app.api.deps import CurrentUser, get_session, require_admin, require_partner
 from app.domain.constants import UserRole
 from app.repositories.users import UserRepository
-from app.schemas.auth import ChangePasswordRequest, LoginRequest, LoginResponse, LogoutRequest, RefreshRequest
+from app.schemas.auth import (
+    ChangePasswordRequest,
+    LoginRequest,
+    LoginResponse,
+    LogoutRequest,
+    RefreshRequest,
+)
 from app.services.auth import AuthError, AuthService
 
 router = APIRouter()
@@ -79,11 +85,11 @@ def _login(
         )
     except AuthError as exc:
         detail = str(exc)
+        if detail == "login_locked":
+            detail = "invalid_credentials"
         status_code = (
             status.HTTP_403_FORBIDDEN
             if detail == "partner_scope_required"
-            else status.HTTP_429_TOO_MANY_REQUESTS
-            if detail == "login_locked"
             else status.HTTP_401_UNAUTHORIZED
         )
         raise HTTPException(status_code=status_code, detail=detail) from exc
@@ -111,7 +117,4 @@ def _change_password(
 
 
 def _client_ip(request: Request) -> str | None:
-    forwarded = request.headers.get("x-forwarded-for")
-    if forwarded:
-        return forwarded.split(",", 1)[0].strip()
     return request.client.host if request.client else None

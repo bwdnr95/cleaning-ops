@@ -83,6 +83,7 @@ export interface AdminOrder extends AdminOrderLineInput {
   recurring_contract_id?: string | null;
   // AS(사후관리) 요청 상태. 저장 페이로드가 아니라 AS 전송 액션으로만 세팅되는 읽기 필드.
   as_requested?: boolean;
+  as_intake_pending?: boolean;
   as_memo?: string | null;
   work_started_at?: string | null;
   work_completed_at?: string | null;

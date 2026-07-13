@@ -15,7 +15,7 @@ const ADMIN_PASSWORD = 'AdminPass123!';
 const PARTNER_PHONE = '01012345678';
 const PARTNER_PASSWORD = 'PartnerPass123!';
 const SEED_ORDER_ID = 'seed-order-2450';
-const SEED_CUSTOMER_TOKEN = 'seed-customer-token-2450';
+const SEED_CUSTOMER_TOKEN = 'ct2_seed-customer-token-2450';
 const SEED_PHONE_SUFFIX = '5432';
 
 // Playwright runs from frontend/, so go up one to repo root and into .master/
@@ -115,7 +115,7 @@ test('capture all demo screens', async ({ page }) => {
   await captureFrame(page, 'phone', '06-partner-job-detail.png');
 
   // ───────────────────────── CUSTOMER ─────────────────────────
-  await page.goto(`/c/${SEED_CUSTOMER_TOKEN}`);
+  await page.goto(`/c#token=${encodeURIComponent(SEED_CUSTOMER_TOKEN)}`);
   await expect(page.getByTestId('customer-verify-form')).toBeVisible();
   await page.waitForTimeout(300);
 

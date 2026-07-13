@@ -1,5 +1,7 @@
-from collections import defaultdict
+from collections import OrderedDict
 from datetime import UTC, datetime, timedelta
+from threading import Lock
+from typing import TypedDict
 from uuid import uuid4
 
 from sqlalchemy.orm import Session
@@ -29,7 +31,17 @@ class AuthError(ValueError):
     pass
 
 
-_login_attempts: dict[str, dict] = defaultdict(lambda: {"count": 0, "locked_until": None})
+LOGIN_ATTEMPT_CACHE_MAX_ENTRIES = 10_000
+
+
+class LoginAttempt(TypedDict):
+    count: int
+    locked_until: datetime | None
+
+
+_login_attempts: OrderedDict[str, LoginAttempt] = OrderedDict()
+_login_attempts_lock = Lock()
+_dummy_password_hash = hash_password("not-a-real-cleaning-ops-password")
 
 
 class AuthService:
@@ -49,16 +61,25 @@ class AuthService:
         ip_address: str | None = None,
         user_agent: str | None = None,
     ) -> LoginResponse:
-        login_key = f"{expected_role.value}:{identifier.strip().lower()}"
-        self._check_lockout(login_key)
         user = self.users.get_by_identifier(identifier)
+        login_key = (
+            f"{expected_role.value}:user:{user.id}"
+            if user is not None
+            else f"{expected_role.value}:unknown"
+        )
+        password_hash = user.password_hash if user is not None else _dummy_password_hash
+        try:
+            self._consume_login_attempt(login_key)
+        except AuthError:
+            verify_password(password, password_hash)
+            raise
+        is_password_valid = verify_password(password, password_hash)
         if (
             user is None
             or not user.is_active
             or self._role(user) != expected_role
-            or not verify_password(password, user.password_hash)
+            or not is_password_valid
         ):
-            self._record_failure(login_key)
             self.audit.record(
                 event_type=AuditEventType.LOGIN_FAILURE,
                 severity=AuditSeverity.WARNING,
@@ -71,10 +92,8 @@ class AuthService:
             raise AuthError("invalid_credentials")
 
         if expected_role == UserRole.PARTNER and user.partner_id is None:
-            self._record_failure(login_key)
             raise AuthError("partner_scope_required")
         if expected_role == UserRole.PARTNER and not self._partner_is_active(user.partner_id):
-            self._record_failure(login_key)
             raise AuthError("invalid_credentials")
 
         self._reset_failures(login_key)
@@ -191,7 +210,7 @@ class AuthService:
         partner = PartnerRepository(self.db).get(user.partner_id)
         return partner.name if partner else None
 
-    def _decode_refresh_payload(self, token: str) -> dict:
+    def _decode_refresh_payload(self, token: str) -> dict[str, object]:
         try:
             payload = decode_token(token, expected_type="refresh")
         except TokenError as exc:
@@ -200,22 +219,48 @@ class AuthService:
             raise AuthError("invalid_refresh_token")
         return payload
 
-    def _check_lockout(self, login_key: str) -> None:
-        attempt = _login_attempts.get(login_key)
-        if not attempt or not attempt["locked_until"]:
-            return
-        if utc_now() < attempt["locked_until"]:
-            raise AuthError("login_locked")
-        _login_attempts[login_key] = {"count": 0, "locked_until": None}
+    def _consume_login_attempt(self, login_key: str) -> None:
+        now = utc_now()
+        max_attempts = max(settings.login_max_attempts, 1)
+        with _login_attempts_lock:
+            attempt = _login_attempts.get(login_key)
+            if attempt is not None and attempt["locked_until"] is not None:
+                if now < attempt["locked_until"]:
+                    _login_attempts.move_to_end(login_key)
+                    raise AuthError("login_locked")
+                del _login_attempts[login_key]
+                attempt = None
 
-    def _record_failure(self, login_key: str) -> None:
-        attempt = _login_attempts[login_key]
-        attempt["count"] += 1
-        if attempt["count"] >= settings.login_max_attempts:
-            attempt["locked_until"] = utc_now() + timedelta(minutes=settings.login_lockout_minutes)
+            if attempt is None:
+                self._make_room_for_login_attempt(now)
+                attempt = LoginAttempt(count=0, locked_until=None)
+                _login_attempts[login_key] = attempt
+
+            if attempt["count"] >= max_attempts:
+                attempt["locked_until"] = now + timedelta(minutes=settings.login_lockout_minutes)
+                _login_attempts.move_to_end(login_key)
+                raise AuthError("login_locked")
+
+            attempt["count"] += 1
+            if attempt["count"] >= max_attempts:
+                attempt["locked_until"] = now + timedelta(minutes=settings.login_lockout_minutes)
+            _login_attempts.move_to_end(login_key)
+
+    def _make_room_for_login_attempt(self, now: datetime) -> None:
+        if len(_login_attempts) < LOGIN_ATTEMPT_CACHE_MAX_ENTRIES:
+            return
+        for key, attempt in _login_attempts.items():
+            locked_until = attempt["locked_until"]
+            if locked_until is None or locked_until <= now:
+                del _login_attempts[key]
+                return
+        # Preserve every active lockout. Saturation fails closed instead of
+        # silently releasing a protected account for another password guess.
+        raise AuthError("login_locked")
 
     def _reset_failures(self, login_key: str) -> None:
-        _login_attempts.pop(login_key, None)
+        with _login_attempts_lock:
+            _login_attempts.pop(login_key, None)
 
     def _role(self, user: User) -> UserRole:
         return user.role if isinstance(user.role, UserRole) else UserRole(str(user.role))

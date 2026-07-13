@@ -125,7 +125,7 @@ export function Dashboard({ onOpenOrder, onNav, onCreateOrder, userName = undefi
                   border: '1px solid var(--border)',
                   background: 'var(--surface)',
                   display: 'flex', flexDirection: 'column', gap: 8,
-                  transition: 'all 100ms',
+                  transition: 'border-color 100ms, box-shadow 100ms',
                 }}
                 onMouseEnter={(e) => { e.currentTarget.style.borderColor = 'var(--brand)'; e.currentTarget.style.boxShadow = 'var(--shadow-sm)'; }}
                 onMouseLeave={(e) => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.boxShadow = 'none'; }}>
@@ -143,10 +143,10 @@ export function Dashboard({ onOpenOrder, onNav, onCreateOrder, userName = undefi
                   <div style={{ fontSize: 11.5, color: 'var(--text-tertiary)', fontWeight: 500 }}>{q.title}</div>
                   <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, marginTop: 2 }}>
                     <span style={{ fontSize: 22, fontWeight: 600, letterSpacing: '-0.03em' }}>{q.count}</span>
-                    <span style={{ fontSize: 11, color: 'var(--text-quaternary)' }}>건</span>
+                    <span style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>건</span>
                   </div>
                 </div>
-                <div style={{ fontSize: 10.5, color: 'var(--text-quaternary)' }}>{q.desc}</div>
+                <div style={{ fontSize: 10.5, color: 'var(--text-secondary)' }}>{q.desc}</div>
               </button>
             ))}
           </div>

@@ -26,6 +26,10 @@ test('partner uploads job photos and customer sees auto-published photos except 
   await expect(partnerPage.getByText('Internal payment memo')).toHaveCount(0);
   await expect(partnerPage.getByText('010-8899-7766')).toBeVisible();
 
+  await partnerPage.getByTestId('partner-confirm-job').click();
+  await expect(partnerPage.getByTestId('partner-confirm-job')).toHaveCount(0);
+  await expect(partnerPage.getByTestId('partner-before-photo-input')).toBeEnabled();
+
   await partnerPage.getByTestId('partner-before-photo-input').setInputFiles([
     {
       name: 'before-partner-r2.png',
@@ -148,7 +152,7 @@ async function loginAsAdmin(page) {
 async function customerVerifyInNewContext(browser, customerToken, phoneSuffix) {
   const context = await browser.newContext();
   const page = await context.newPage();
-  await page.goto(`/c/${customerToken}`);
+  await page.goto(`/c#token=${encodeURIComponent(customerToken)}`);
   await expect(page.getByTestId('customer-verify-form')).toBeVisible();
   await page.getByTestId('customer-phone-suffix').fill(phoneSuffix);
   await page.getByTestId('customer-verify-submit').click();

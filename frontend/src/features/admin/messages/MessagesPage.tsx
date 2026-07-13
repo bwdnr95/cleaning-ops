@@ -1,6 +1,6 @@
 import React from 'react';
 
-import { getAdminMessageSettings, listAdminMessages, sendAdminMessage } from '../../../api/messages';
+import { getAdminMessageSettings, listAdminMessages, resolveUnknownMessageOutcome, sendAdminMessage } from '../../../api/messages';
 import { DatePicker } from '../../../components/common/DatePicker';
 import { PaginationBar, paginateItems } from '../../../components/common/Pagination';
 import { Badge, Icon } from '../../../components/common/ui';
@@ -19,10 +19,12 @@ const MESSAGE_TYPE_OPTIONS = [
   { value: 'partner_customer_info', label: '협력사 고객정보' },
   { value: 'partner_as_request', label: '협력사 AS' },
   { value: 'customer_as_notice', label: '고객 AS' },
+  { value: 'customer_access_link', label: '접속링크' },
 ];
 
 const STATUS_OPTIONS = [
   { value: 'all', label: '전체' },
+  { value: 'pending', label: '결과 확인 중' },
   { value: 'sent', label: '요청성공' },
   { value: 'delivered', label: '배송완료' },
   { value: 'failed', label: '요청실패' },
@@ -73,7 +75,31 @@ export function MessagesPage({ onOpenOrder }) {
         message.channel || 'sms',
       );
       const reason = isMessageFailure(resent.status) ? ` (${providerErrorText(resent)})` : '';
-      setNotice(`${shortOrderId(message.order_id)} ${messageTypeLabel(message.message_type)} 재발송 결과: ${messageStatusLabel(resent.status)}${reason}`);
+      if (isMessagePending(resent.status)) {
+        setError('SOL API 수락 여부를 확인 중입니다. SOLAPI 콘솔 확인 전에는 다시 발송하지 마세요.');
+      } else {
+        setNotice(`${shortOrderId(message.order_id)} ${messageTypeLabel(message.message_type)} 재발송 결과: ${messageStatusLabel(resent.status)}${reason}`);
+      }
+      messagesResource.reload();
+    } catch (requestError) {
+      setError(toActionErrorMessage(requestError));
+    } finally {
+      setIsResending(false);
+    }
+  };
+
+  const handleResolveUnknown = async (message, resolution) => {
+    const isConfirmedSent = resolution === 'confirmed_sent';
+    const prompt = isConfirmedSent
+      ? 'SOLAPI 콘솔에서 실제 발송됨을 확인했나요? 확인 시 이 발송을 성공 처리합니다.'
+      : 'SOLAPI 콘솔에서 실제 미발송을 확인했나요? 확인 시 실패 처리되어 재발송할 수 있습니다.';
+    if (!window.confirm(prompt)) return;
+    setNotice(null);
+    setError(null);
+    setIsResending(true);
+    try {
+      await resolveUnknownMessageOutcome(message.id, resolution);
+      setNotice(isConfirmedSent ? 'SOLAPI 발송 성공으로 수동 확정했습니다.' : 'SOLAPI 미발송으로 수동 확정했습니다. 이제 재발송할 수 있습니다.');
       messagesResource.reload();
     } catch (requestError) {
       setError(toActionErrorMessage(requestError));
@@ -177,12 +203,20 @@ export function MessagesPage({ onOpenOrder }) {
           {!messagesResource.isLoading && messagesResource.error && <StateLine text="발송 이력을 불러오지 못했습니다." tone="danger" />}
           {!messagesResource.isLoading && !messagesResource.error && filtered.length === 0 && <StateLine text="표시할 발송 이력이 없습니다." />}
           {!messagesResource.isLoading && !messagesResource.error && filtered.length > 0 && (
-            <div style={{ display: 'grid', gridTemplateColumns: '126px 104px 124px 128px minmax(220px, 1fr) 70px 120px 108px 112px', fontSize: 12 }}>
-              {['발송시각', '고객', '유형', '수신자', '내용', '채널', 'Provider', '상태', '관리'].map((header) => (
-                <HeaderCell key={header}>{header}</HeaderCell>
-              ))}
+            <div
+              role="region"
+              aria-label="발송 이력 표"
+              tabIndex={0}
+              style={{ width: '100%', overflowX: 'auto' }}
+            >
+            <div role="table" aria-rowcount={pagedMessages.length + 1} style={{ minWidth: 1112, display: 'grid', gridTemplateColumns: '126px 104px 124px 128px minmax(220px, 1fr) 70px 120px 108px 112px', fontSize: 12 }}>
+              <div role="row" style={{ display: 'contents' }}>
+                {['발송시각', '고객', '유형', '수신자', '내용', '채널', 'Provider', '상태', '관리'].map((header) => (
+                  <HeaderCell key={header}>{header}</HeaderCell>
+                ))}
+              </div>
               {pagedMessages.map((message) => (
-                <React.Fragment key={message.id}>
+                <div role="row" style={{ display: 'contents' }} key={message.id}>
                   <BodyCell mono>{formatDateTime(message.sent_at || message.created_at)}</BodyCell>
                   <BodyCell>
                     <button
@@ -219,28 +253,58 @@ export function MessagesPage({ onOpenOrder }) {
                   <BodyCell>
                     <div style={{ minWidth: 0, display: 'flex', flexDirection: 'column', gap: 4 }}>
                       <Badge tone={messageStatusTone(message.status)} dot>{messageStatusLabel(message.status)}</Badge>
-                      {isMessageFailure(message.status) && (
-                        <span title={message.error_message || message.provider_error_code || ''} style={{ color: 'var(--danger-fg)', fontSize: 10.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                          {providerErrorText(message)}
+                      {(isMessageFailure(message.status) || isMessagePending(message.status)) && (
+                        <span title={message.error_message || message.provider_error_code || ''} style={{ color: isMessagePending(message.status) ? 'var(--warn-fg)' : 'var(--danger-fg)', fontSize: 10.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {isMessagePending(message.status) && !isResolvableUnknown(message)
+                            ? 'Provider 처리 결과 대기 중'
+                            : providerErrorText(message)}
                         </span>
                       )}
                     </div>
                   </BodyCell>
                   <BodyCell>
                     <div style={{ display: 'inline-flex', gap: 5 }}>
-                      <button
-                        type="button"
-                        data-testid={`message-resend-${message.id}`}
-                        className="btn btn--secondary btn--sm"
-                        disabled={isResending}
-                        onClick={() => void handleResend(message)}
-                      >
-                        재발송
-                      </button>
+                      {isResolvableUnknown(message) ? (
+                        <>
+                          <button
+                            type="button"
+                            data-testid={`message-resolve-sent-${message.id}`}
+                            className="btn btn--secondary btn--sm"
+                            disabled={isResending}
+                            onClick={() => void handleResolveUnknown(message, 'confirmed_sent')}
+                          >
+                            발송 확인
+                          </button>
+                          <button
+                            type="button"
+                            data-testid={`message-resolve-not-sent-${message.id}`}
+                            className="btn btn--secondary btn--sm"
+                            disabled={isResending}
+                            onClick={() => void handleResolveUnknown(message, 'confirmed_not_sent')}
+                          >
+                            미발송 확인
+                          </button>
+                        </>
+                      ) : isMessagePending(message.status) ? (
+                        <span style={{ color: 'var(--text-tertiary)', fontSize: 11 }}>
+                          처리 결과 대기
+                        </span>
+                      ) : (
+                        <button
+                          type="button"
+                          data-testid={`message-resend-${message.id}`}
+                          className="btn btn--secondary btn--sm"
+                          disabled={isResending}
+                          onClick={() => void handleResend(message)}
+                        >
+                          재발송
+                        </button>
+                      )}
                     </div>
                   </BodyCell>
-                </React.Fragment>
+                </div>
               ))}
+            </div>
             </div>
           )}
           {!messagesResource.isLoading && !messagesResource.error && filtered.length > 0 && (
@@ -312,7 +376,7 @@ function Segmented({ testPrefix, value, options, onChange }) {
             border: 'none',
             borderRadius: 6,
             background: value === option.value ? 'var(--surface)' : 'transparent',
-            color: value === option.value ? 'var(--text)' : 'var(--text-tertiary)',
+            color: value === option.value ? 'var(--text)' : 'var(--text-secondary)',
             boxShadow: value === option.value ? 'var(--shadow-xs)' : 'none',
             fontSize: 11.5,
             fontWeight: 600,
@@ -406,10 +470,10 @@ function StatCard({ label, value, icon, tone = 'neutral' }) {
 
 function HeaderCell({ children }) {
   return (
-    <div style={{
+    <div role="columnheader" style={{
       padding: '9px 12px',
       borderBottom: '1px solid var(--border)',
-      color: 'var(--text-tertiary)',
+      color: 'var(--text-secondary)',
       fontSize: 11,
       fontWeight: 600,
       background: 'var(--bg-subtle)',
@@ -421,7 +485,7 @@ function HeaderCell({ children }) {
 
 function BodyCell({ children, mono = false }) {
   return (
-    <div style={{
+    <div role="cell" style={{
       minWidth: 0,
       minHeight: 46,
       padding: '9px 12px',
@@ -457,7 +521,7 @@ function toStats(messages) {
   return {
     sent: messages.filter((message) => ['sent', 'delivered'].includes(message.status)).length,
     failed: messages.filter((message) => ['failed', 'delivery_failed'].includes(message.status)).length,
-    customerLinks: messages.filter((message) => ['customer_schedule_confirmed', 'customer_day_before', 'customer_photo_ready', 'customer_balance_due', 'customer_as_notice'].includes(message.message_type)).length,
+    customerLinks: messages.filter((message) => ['customer_schedule_confirmed', 'customer_day_before', 'customer_photo_ready', 'customer_balance_due', 'customer_as_notice', 'customer_access_link'].includes(message.message_type)).length,
   };
 }
 
@@ -530,10 +594,12 @@ function messageTypeLabel(type) {
   if (type === 'partner_customer_info') return '협력사 고객정보';
   if (type === 'partner_as_request') return '협력사 AS 요청';
   if (type === 'customer_as_notice') return '고객 AS 안내';
+  if (type === 'customer_access_link') return '고객 접속 링크';
   return type;
 }
 
 function messageStatusLabel(status) {
+  if (status === 'pending') return '결과 확인 중';
   if (status === 'sent') return '요청성공';
   if (status === 'failed') return '요청실패';
   if (status === 'delivered') return '배송완료';
@@ -544,12 +610,23 @@ function messageStatusLabel(status) {
 function messageStatusTone(status) {
   if (status === 'delivered') return 'success';
   if (status === 'sent') return 'info';
+  if (isMessagePending(status)) return 'warn';
   if (isMessageFailure(status)) return 'danger';
   return 'neutral';
 }
 
 function isMessageFailure(status) {
   return status === 'failed' || status === 'delivery_failed';
+}
+
+function isMessagePending(status) {
+  return status === 'pending';
+}
+
+function isResolvableUnknown(message) {
+  return message.provider === 'solapi'
+    && isMessagePending(message.status)
+    && ['solapi_outcome_unknown', 'solapi_invalid_response'].includes(message.provider_error_code || '');
 }
 
 function channelLabel(channel) {
@@ -577,10 +654,12 @@ function providerErrorText(message) {
     solapi_missing_credentials: 'SOL API 인증 설정 누락',
     solapi_missing_sender_number: 'SOL API 발신번호 누락',
     solapi_missing_kakao_channel_id: 'SOL API 카카오 채널 ID 누락',
+    solapi_missing_kakao_pf_id: 'SOL API 카카오 발신 프로필 ID 누락',
     solapi_missing_kakao_template_id: '알림톡 승인 템플릿 ID 누락',
     solapi_http_error: 'SOL API HTTP 오류',
     solapi_request_failed: 'SOL API 요청 실패',
     solapi_invalid_response: 'SOL API 응답 오류',
+    solapi_outcome_unknown: 'SOL API 수락 여부 확인 필요',
     solapi_provider_failed: 'SOL API 발송 실패',
     unsupported_message_provider: 'Provider 설정 오류',
   };
@@ -625,6 +704,10 @@ function toActionErrorMessage(error) {
     no_customer_visible_photos: '고객에게 공개된 사진이 있어야 재발송할 수 있습니다.',
     customer_balance_not_due: '미수금이 있는 주문에만 잔금 안내를 재발송할 수 있습니다.',
     as_request_required: 'AS 요청 처리 후에만 AS 안내를 재발송할 수 있습니다.',
+    message_outcome_unknown: 'SOL API 수락 여부를 확인 중입니다. 콘솔 확인 후 발송 또는 미발송으로 확정해주세요.',
+    message_send_in_progress: '같은 안내의 발송 결과를 처리 중입니다. 잠시 후 다시 확인해주세요.',
+    message_not_unknown_pending: '이미 처리됐거나 수동 확정 대상이 아닌 발송입니다. 이력을 새로고침해주세요.',
+    invalid_unknown_outcome_resolution: '수동 확정 값이 올바르지 않습니다.',
     invalid_recipient_type: '수신자 유형이 올바르지 않습니다.',
   };
   return map[detail] || '재발송을 처리하지 못했습니다.';

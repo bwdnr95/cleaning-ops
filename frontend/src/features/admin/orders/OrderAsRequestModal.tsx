@@ -46,6 +46,13 @@ export function OrderAsRequestModal({
   const [memo, setMemo] = React.useState(defaultMemo);
   const [error, setError] = React.useState('');
   const [activeTemplateKey, setActiveTemplateKey] = React.useState<AsTemplateKey | null>(findTemplateKey(defaultMemo));
+  const formRef = React.useRef<HTMLFormElement | null>(null);
+  const memoRef = React.useRef<HTMLTextAreaElement | null>(null);
+  const isSavingRef = React.useRef(isSaving);
+  const onCloseRef = React.useRef(onClose);
+
+  isSavingRef.current = isSaving;
+  onCloseRef.current = onClose;
 
   React.useEffect(() => {
     if (open) {
@@ -54,6 +61,49 @@ export function OrderAsRequestModal({
       setActiveTemplateKey(findTemplateKey(defaultMemo));
     }
   }, [defaultMemo, open]);
+
+  React.useEffect(() => {
+    if (!open) {
+      return undefined;
+    }
+    const previousFocus = document.activeElement instanceof HTMLElement
+      ? document.activeElement
+      : null;
+    const frameId = window.requestAnimationFrame(() => memoRef.current?.focus());
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && !isSavingRef.current) {
+        event.preventDefault();
+        onCloseRef.current();
+        return;
+      }
+      if (event.key !== 'Tab' || !formRef.current) {
+        return;
+      }
+      const focusable = Array.from(formRef.current.querySelectorAll<HTMLElement>(
+        'button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])',
+      ));
+      if (focusable.length === 0) {
+        event.preventDefault();
+        formRef.current.focus();
+        return;
+      }
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      window.cancelAnimationFrame(frameId);
+      document.removeEventListener('keydown', handleKeyDown);
+      previousFocus?.focus();
+    };
+  }, [open]);
 
   if (!open) {
     return null;
@@ -82,7 +132,7 @@ export function OrderAsRequestModal({
         position: 'fixed',
         inset: 0,
         zIndex: 55,
-        background: 'rgba(15, 23, 42, 0.38)',
+        background: 'var(--overlay-scrim)',
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
@@ -90,6 +140,8 @@ export function OrderAsRequestModal({
       }}
     >
       <form
+        ref={formRef}
+        tabIndex={-1}
         className="card"
         onSubmit={(event) => void handleSubmit(event)}
         style={{
@@ -120,7 +172,7 @@ export function OrderAsRequestModal({
 
           <div style={{ padding: 10, borderRadius: 8, border: '1px solid var(--warn-bg)', background: 'var(--warn-bg)', color: 'var(--warn-fg)', fontSize: 11.5, lineHeight: 1.55, wordBreak: 'keep-all' }}>
             <div>전송하면 주문 상태가 고객확인필요로 바뀝니다.</div>
-            <div>협력사와 고객에게 AS 안내가 발송되고, 요청 내용은 협력사 링크에 표시됩니다.</div>
+            <div>협력사와 고객에게 AS 안내 발송을 시도하고, 요청 내용은 협력사 링크에 표시합니다. 최종 발송 결과는 이력에서 확인합니다.</div>
           </div>
 
           <div>
@@ -152,6 +204,7 @@ export function OrderAsRequestModal({
           <label style={{ display: 'grid', gap: 8 }}>
             <span style={{ fontSize: 11, color: 'var(--text-tertiary)', fontWeight: 700 }}>AS 요청 내용</span>
             <textarea
+              ref={memoRef}
               data-testid="as-request-memo"
               className="input"
               rows={5}

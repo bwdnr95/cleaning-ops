@@ -50,6 +50,26 @@ def test_paid_does_not_resurrect_cancelled(db_session):
     assert o.status == OrderStatus.CANCELLED
 
 
+def test_paid_does_not_complete_order_while_as_intake_is_pending(db_session):
+    o = _order(
+        db_session,
+        status=OrderStatus.CUSTOMER_DELIVERY_DONE,
+        payment_status=PaymentStatus.UNPAID,
+    )
+    o.as_intake_pending = True
+    db_session.commit()
+
+    OrderService(db_session).update(
+        o.id,
+        OrderUpdate(payment_status=PaymentStatus.PAID),
+        actor_user_id="admin",
+    )
+
+    db_session.refresh(o)
+    assert o.status == OrderStatus.CUSTOMER_DELIVERY_DONE
+    assert o.payment_status == PaymentStatus.PAID
+
+
 def test_completed_auto_marks_paid(db_session):
     o = _order(db_session, status=OrderStatus.CUSTOMER_DELIVERY_DONE, payment_status=PaymentStatus.UNPAID)
     OrderService(db_session).update(o.id, OrderUpdate(status=OrderStatus.COMPLETED), actor_user_id="admin")

@@ -24,7 +24,20 @@ def _upload(client: TestClient, partner_token: str, order_id: str, photo_type: s
     return response.json()["id"]
 
 
-def _setup_delivery_needed(client: TestClient, partner_token: str, order_id: str) -> tuple[str, str]:
+def _confirm_partner_job(client: TestClient, partner_token: str, order_id: str) -> None:
+    response = client.post(
+        f"/api/partner/jobs/{order_id}/confirm",
+        headers={"Authorization": f"Bearer {partner_token}"},
+    )
+    assert response.status_code == 200, response.text
+
+
+def _setup_delivery_needed(
+    client: TestClient,
+    partner_token: str,
+    order_id: str,
+) -> tuple[str, str]:
+    _confirm_partner_job(client, partner_token, order_id)
     before_photo_id = _upload(client, partner_token, order_id, "before")
     start = client.post(
         f"/api/partner/jobs/{order_id}/start",
@@ -71,6 +84,7 @@ def test_revoke_returns_to_in_progress_even_when_other_visible_photos_exist(
     seed_admin_token: str,
     seed_order_id: str,
 ) -> None:
+    _confirm_partner_job(client, seed_partner_token, seed_order_id)
     before_photo_id = _upload(client, seed_partner_token, seed_order_id, "before")
     start = client.post(
         f"/api/partner/jobs/{seed_order_id}/start",

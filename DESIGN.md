@@ -27,6 +27,7 @@ Cleaning Ops Control Center is a quiet operations command center. It should feel
 | Success | `--success-fg` / `--success-bg` | `#047857` / `#ecfdf5` | Complete, visible, sent |
 | Danger | `--danger-fg` / `--danger-bg` | `#b91c1c` / `#fef2f2` | Error, missed, blocked |
 | Purple | `--purple-fg` / `--purple-bg` | `#6d28d9` / `#f5f3ff` | Customer confirmation, 상담 |
+| Overlay | `--overlay-scrim` | `rgba(15, 23, 42, 0.38)` | Modal backdrop |
 
 ### Rules
 
@@ -72,6 +73,7 @@ All spacing follows a 4px base.
 ### Grid
 
 - Admin content uses `.page-shell` and auto-fit grids.
+- Customer reservation content uses a centered 768px maximum shell on larger screens.
 - Dashboard KPI cards use `minmax(150px, 1fr)`.
 - Work queue cards use `minmax(170px, 1fr)`.
 - Split dashboard panels use `minmax(420px, 1fr)`.
@@ -117,6 +119,15 @@ Dense admin layouts should remain scannable. Avoid nested cards and avoid page s
 - Usage: admin, customer, and partner entry points should all show the same logo treatment so external links read as official Cleanjob surfaces.
 - Accessibility: image alt is `클린잡`; captions describe the surface such as `운영 시스템`, `예약 확인센터`, or `협력사 작업센터`.
 - Motion: none.
+
+### Customer Aftercare Action
+
+- Structure: customer-safe status copy, one primary action, and an inline memo form inside the reservation line card.
+- States: available, form open, submitting, validation error, pending admin review, and accepted/in progress.
+- Spacing: 16px outer padding, 8px control gap, 12px between copy and action.
+- Colors: available uses neutral surface tokens, pending uses warning tokens, and accepted uses info tokens.
+- Accessibility: textarea has a visible label, errors are inline with `role="alert"`, and submission status uses `aria-live="polite"`.
+- Motion: no automatic motion; only the existing 100ms button feedback is allowed.
 
 ## 6. Motion & Interaction
 

@@ -97,7 +97,7 @@ def test_recurring_orders_generated_for_current_month(client, seed_admin_token):
     assert first.status_code == 200, first.text
     mine = [o for o in first.json() if o["recurring_contract_id"] == cid]
     assert len(mine) == 1
-    assert mine[0]["status"] == "일정확정"
+    assert mine[0]["status"] == "협력사확인중"
     assert mine[0]["partner_id"] == DEV_PARTNER_ID
 
     again = client.get(f"/api/admin/recurring/orders?month={month}", headers=_auth(seed_admin_token))

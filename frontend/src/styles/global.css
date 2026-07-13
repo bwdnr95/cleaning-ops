@@ -74,6 +74,7 @@
   --shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.06), 0 1px 3px rgba(15, 23, 42, 0.04);
   --shadow-md: 0 4px 12px rgba(15, 23, 42, 0.06), 0 1px 3px rgba(15, 23, 42, 0.04);
   --shadow-lg: 0 12px 32px rgba(15, 23, 42, 0.08), 0 2px 6px rgba(15, 23, 42, 0.04);
+  --overlay-scrim: rgba(15, 23, 42, 0.38);
 
   /* Type */
   --font: 'Pretendard', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
@@ -123,6 +124,7 @@
   --purple-bg: #1f1a3a;
   --purple-fg: #c4b5fd;
   --purple-border: #4c1d95;
+  --overlay-scrim: rgba(2, 6, 23, 0.72);
 }
 
 * { box-sizing: border-box; }
@@ -139,6 +141,11 @@ body {
 
 button { font-family: inherit; }
 input, select, textarea { font-family: inherit; }
+
+.customer-auth-input:focus-visible {
+  outline: 3px solid var(--brand);
+  outline-offset: 2px;
+}
 
 /* ─── Status badge ─── */
 .badge {
@@ -404,7 +411,12 @@ body.orders-column-resizing {
 .muted { color: var(--text-tertiary); }
 .tnum { font-variant-numeric: tabular-nums; }
 .mono { font-family: var(--font-mono); }
-.multiline-text { white-space: pre-wrap; word-break: break-word; }
+.multiline-text,
+.ko-copy {
+  word-break: keep-all;
+  overflow-wrap: anywhere;
+}
+.multiline-text { white-space: pre-wrap; }
 .kbd {
   display: inline-flex;
   align-items: center;

@@ -1,10 +1,12 @@
+from datetime import UTC, datetime
 from uuid import uuid4
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.domain.constants import OrderStatus, TimelineEventType
+from app.domain.constants import OrderStatus, PhotoType, TimelineEventType
+from app.models.order import Order
 from app.models.photo import OrderPhoto
-from app.repositories.orders import OrderRepository
 from app.repositories.photos import PhotoRepository
 from app.schemas.photo import PhotoCreate
 from app.services.storage import StoredFile
@@ -22,27 +24,35 @@ class PhotoService:
     def __init__(self, db: Session) -> None:
         self.db = db
         self.photos = PhotoRepository(db)
-        self.orders = OrderRepository(db)
         self.timeline = TimelineService(db)
 
     def upload_for_partner(self, payload: PhotoCreate, *, user_id: str, partner_id: str) -> OrderPhoto:
-        order = self.orders.get(payload.order_id)
-        if order is None or order.partner_id != partner_id:
+        order = self.db.execute(
+            select(Order)
+            .where(
+                Order.id == payload.order_id,
+                Order.partner_id == partner_id,
+                Order.deleted_at.is_(None),
+            )
+            .with_for_update()
+        ).scalar_one_or_none()
+        if order is None:
             raise ValueError("order_not_found")
 
         # 활성 작업 구간(작업예정~작업진행)에서만 업로드 허용.
         # 협력사 업로드 사진은 즉시 자동 공개되므로, 종료/봉인 상태(고객전달완료·서비스완료·취소)나
         # 사전/검수 단계에 사진이 새로 끼어들어 고객에게 노출되는 것을 막는다.
         # complete_partner_job 과 동일하게 invalid_status_transition 으로 거절한다.
-        from app.services.orders import PARTNER_PHOTO_UPLOADABLE_STATUSES
+        from app.services.orders import is_partner_photo_uploadable
 
-        if order.status not in PARTNER_PHOTO_UPLOADABLE_STATUSES:
+        if not is_partner_photo_uploadable(order):
             raise ValueError("invalid_status_for_upload")
 
         photo = OrderPhoto(
             id=str(uuid4()),
             uploaded_by_user_id=user_id,
             is_customer_visible=True,
+            created_at=datetime.now(UTC),
             **payload.model_dump(),
         )
         self.photos.add(photo)
@@ -69,7 +79,7 @@ class PhotoService:
         self,
         *,
         order_id: str,
-        photo_type: str,
+        photo_type: PhotoType,
         stored_file: StoredFile,
         user_id: str,
         partner_id: str,
@@ -135,10 +145,14 @@ class PhotoService:
         )
 
         if order is not None:
+            from app.services.orders import is_partner_photo_uploadable
+
             old_status = order.status
-            evidence_created_after = self.timeline.latest_created_at(
+            evidence_created_after = self.timeline.latest_partner_work_epoch(
                 order_id=order.id,
-                event_type=TimelineEventType.AS_REQUESTED,
+                partner_id=order.partner_id,
+                work_completed_at=order.work_completed_at,
+                work_is_active=is_partner_photo_uploadable(order),
             )
             has_required_visible_photos = self.photos.has_customer_delivery_evidence(
                 order.id,

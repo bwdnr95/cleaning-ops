@@ -49,15 +49,27 @@ export const MESSAGE_ACTIONS = {
     title: '고객 AS 안내',
     successText: '고객 AS 안내를 발송했습니다.',
   },
+  customerAccessLink: {
+    messageType: 'customer_access_link',
+    recipientType: 'customer',
+    title: '고객 접속 링크',
+    successText: '고객 접속 링크를 LMS로 발송했습니다.',
+    initialChannel: 'lms',
+  },
 } satisfies Record<string, MessageActionDraft>;
 
 export const WORK_DONE_STATUS = '고객전달필요';
 
 const BALANCE_NOTICE_ALLOWED_STATUSES = ['고객전달필요', '고객전달완료', '서비스완료'];
+const DAY_BEFORE_NOTICE_ALLOWED_STATUSES = ['일정확정', '전날안내필요', '작업예정'];
 const AS_REQUEST_ALLOWED_STATUSES = ['고객전달필요', '고객전달완료', '고객확인필요', '서비스완료'];
 
 export function isBalanceNoticeAllowedStatus(status: string | null | undefined): boolean {
   return BALANCE_NOTICE_ALLOWED_STATUSES.includes(status || '');
+}
+
+export function isDayBeforeNoticeAllowedStatus(status: string | null | undefined): boolean {
+  return DAY_BEFORE_NOTICE_ALLOWED_STATUSES.includes(status || '');
 }
 
 export function isAsRequestAllowedStatus(status: string | null | undefined): boolean {

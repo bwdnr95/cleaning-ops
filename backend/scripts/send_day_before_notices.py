@@ -9,7 +9,8 @@ def main() -> None:
         "day_before_notices "
         f"target_date={result.target_date.isoformat()} "
         f"scanned={result.scanned} sent={result.sent} "
-        f"skipped_already_sent={result.skipped_already_sent} failed={result.failed}"
+        f"skipped_already_sent={result.skipped_already_sent} "
+        f"skipped_unconfirmed={result.skipped_unconfirmed} failed={result.failed}"
     )
 
 

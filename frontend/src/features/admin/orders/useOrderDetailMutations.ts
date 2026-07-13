@@ -141,7 +141,7 @@ export function useOrderDetailMutations({
     await runAction(async () => {
       await sendOrderAsRequest(order.id, memo);
       setIsAsRequestModalOpen(false);
-      setNotice('AS 요청 상태로 전환하고 협력사/고객 안내를 발송했습니다.');
+      setNotice('AS 처리를 등록했고 협력사·고객 안내 발송을 시도했습니다. 최종 결과는 발송이력에서 확인해주세요.');
       reloadOrder();
     });
   };

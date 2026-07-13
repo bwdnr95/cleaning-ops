@@ -9,8 +9,8 @@ venv/
 # Backend local data
 backend/cleaning_ops.db
 backend/cleaning_ops.sqlite.backup.db
-backend/e2e_cleaning_ops.db
-backend/e2e_storage/
+backend/e2e_cleaning_ops*.db
+backend/e2e_storage*/
 backend/local_storage/
 *.sqlite3
 

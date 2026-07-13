@@ -35,6 +35,7 @@ export function OrderFormPage({ mode = 'create', orderId = null, duplicateFromOr
   const [asOpen, setAsOpen] = React.useState(false);
   const [asMemo, setAsMemo] = React.useState('');
   const [asRequested, setAsRequested] = React.useState(false);
+  const [asIntakePending, setAsIntakePending] = React.useState(false);
   const [asBusy, setAsBusy] = React.useState(false);
   const draft = useOrderFormDraft(form, { enabled: mode === 'create' && !isDuplicate });
   const activeServiceCategories = React.useMemo(
@@ -61,8 +62,9 @@ export function OrderFormPage({ mode = 'create', orderId = null, duplicateFromOr
           setForm(isDuplicate ? toDuplicateForm(order) : toForm(order));
           if (!isDuplicate) {
             setAsRequested(Boolean(order.as_requested));
+            setAsIntakePending(Boolean(order.as_intake_pending));
             setAsMemo(order.as_memo || '');
-            setAsOpen(Boolean(order.as_requested));
+            setAsOpen(Boolean(order.as_requested || order.as_intake_pending));
           }
         }
       })
@@ -244,8 +246,9 @@ export function OrderFormPage({ mode = 'create', orderId = null, duplicateFromOr
     try {
       const updated = await sendOrderAsRequest(orderId, memo);
       setAsRequested(Boolean(updated.as_requested));
+      setAsIntakePending(Boolean(updated.as_intake_pending));
       setAsMemo(updated.as_memo || memo);
-      setNotice('AS 요청을 협력사와 고객에게 전송했습니다. 협력사 링크에도 표시됩니다.');
+      setNotice('AS 처리를 등록했고 협력사·고객 안내 발송을 시도했습니다. 최종 결과는 발송이력에서 확인해주세요.');
     } catch (requestError) {
       setError(requestError?.message || 'AS 요청 전송에 실패했습니다.');
     } finally {
@@ -347,6 +350,7 @@ export function OrderFormPage({ mode = 'create', orderId = null, duplicateFromOr
                     asOpen={asOpen}
                     asMemo={asMemo}
                     asRequested={asRequested}
+                    asIntakePending={asIntakePending}
                     asBusy={asBusy}
                     onAsToggle={setAsOpen}
                     onAsMemoChange={setAsMemo}
@@ -389,7 +393,7 @@ export function OrderFormPage({ mode = 'create', orderId = null, duplicateFromOr
 
             <div className="card" style={{ padding: 14 }}>
               <div style={{ fontSize: 11, color: 'var(--text-tertiary)', fontWeight: 600, letterSpacing: 0, marginBottom: 8 }}>저장 시 처리</div>
-              <div style={{ fontSize: 12, lineHeight: 1.55, color: 'var(--text-secondary)' }}>
+              <div className="ko-copy" style={{ fontSize: 12, lineHeight: 1.55, color: 'var(--text-secondary)' }}>
                 신규 주문 저장 시 고객 확인 링크가 생성됩니다. 상태와 협력사 변경은 타임라인에 함께 기록됩니다.
                 견적 안내는 저장 후 주문 상세의 [견적 안내] 버튼에서 미리보기 후 발송합니다.
                 (견적서에는 소비자가와 계약금/잔금만 포함되고 도급가는 포함되지 않습니다.)
@@ -419,6 +423,7 @@ function LineEditor({
   asOpen = false,
   asMemo = '',
   asRequested = false,
+  asIntakePending = false,
   asBusy = false,
   onAsToggle,
   onAsMemoChange,
@@ -533,6 +538,11 @@ function LineEditor({
                   요청됨
                 </span>
               )}
+              {asIntakePending && (
+                <span style={{ fontSize: 10.5, fontWeight: 700, color: 'var(--warn-fg)', background: 'var(--warn-bg)', borderRadius: 999, padding: '2px 8px' }}>
+                  고객 접수 확인 필요
+                </span>
+              )}
             </label>
             {asOpen && (
               <>
@@ -542,6 +552,7 @@ function LineEditor({
                   rows={3}
                   placeholder="재작업이 필요한 위치·증상 등 협력사에 전달할 AS 내용을 입력하세요."
                   value={asMemo}
+                  disabled={asRequested}
                   onChange={(event) => onAsMemoChange?.(event.target.value)}
                   style={{ resize: 'vertical', fontSize: 13 }}
                 />
@@ -550,10 +561,10 @@ function LineEditor({
                     type="button"
                     data-testid="order-as-send"
                     className="btn btn--primary btn--sm"
-                    disabled={asBusy || !asMemo.trim()}
+                    disabled={asRequested || asBusy || !asMemo.trim()}
                     onClick={() => onSendAs?.()}
                   >
-                    <Icon name="send" size={12} /> {asBusy ? '전송 중' : (asRequested ? 'AS 재전송' : 'AS 전송')}
+                    <Icon name="send" size={12} /> {asBusy ? '처리 중' : (asRequested ? 'AS 처리 중' : (asIntakePending ? 'AS 요청 처리' : 'AS 전송'))}
                   </button>
                   <span style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>
                     배정된 협력사와 고객에게 알림을 보내고, 협력사 링크에도 AS 요청이 표시됩니다.

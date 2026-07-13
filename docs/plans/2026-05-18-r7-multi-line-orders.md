@@ -1244,7 +1244,7 @@ def test_customer_verify_returns_group_with_lines(client, seed_admin_token, seed
     """customer_token으로 verify하면 그룹 + line 리스트가 반환된다."""
     # seed 데이터의 customer_token으로 검증.
     response = client.post(
-        f"/api/customer/orders/seed-customer-token-2450/verify",
+        f"/api/customer/orders/ct2_seed-customer-token-2450/verify",
         json={"phone_suffix": "5432"},
     )
     assert response.status_code == 200

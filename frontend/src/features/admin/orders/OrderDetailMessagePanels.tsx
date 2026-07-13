@@ -1,5 +1,7 @@
 import { Icon } from '../../../components/common/ui';
+import { isRelativeAppDateValue } from '../../../domain/time';
 import type { AdminOrderDetail, MessageActionDraft } from './OrderDetailModel';
+import { isDayBeforeNoticeAllowedStatus } from './OrderDetailRules';
 import { CopyLinkButton, PanelTitle } from './OrderDetailPrimitives';
 
 export function MessageActionsPanel({
@@ -27,18 +29,36 @@ export function MessageActionsPanel({
     readonly partnerAssignment: MessageActionDraft;
     readonly customerBalanceDue: MessageActionDraft;
     readonly customerQuote: MessageActionDraft;
+    readonly customerAccessLink: MessageActionDraft;
   };
   readonly onMessagePreview: (draft: MessageActionDraft) => void;
   readonly onAsRequestOpen: () => void;
 }) {
+  const hasDayBeforeStatus = isDayBeforeNoticeAllowedStatus(order.status);
+  const isTomorrowVisit = isRelativeAppDateValue(order.scheduled_date, 1);
+  const canSendDayBefore = hasDayBeforeStatus && isTomorrowVisit;
+  const dayBeforeBlockedText = !order.scheduled_date || !hasDayBeforeStatus
+    ? '방문일과 협력사 작업확인이 확정된 주문에서만 발송할 수 있습니다.'
+    : !isTomorrowVisit
+      ? '방문 하루 전인 주문에서만 전날 안내를 발송할 수 있습니다.'
+      : undefined;
   return (
     <div className="card" style={{ padding: 14 }}>
       <PanelTitle>안내 발송</PanelTitle>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        <button data-testid="send-customer-access-link" className="btn btn--secondary btn--block" disabled={isSaving || isPreviewLoading} onClick={() => onMessagePreview(messageActions.customerAccessLink)}>
+          <Icon name="send" size={13}/> 고객 접속 링크 LMS
+        </button>
         <button data-testid="send-customer-schedule-confirmed" className="btn btn--secondary btn--block" disabled={isSaving || isPreviewLoading} onClick={() => onMessagePreview(messageActions.customerScheduleConfirmed)}>
           <Icon name="send" size={13}/> 일정확정 안내
         </button>
-        <button data-testid="send-customer-day-before" className="btn btn--secondary btn--block" disabled={isSaving || isPreviewLoading} onClick={() => onMessagePreview(messageActions.customerDayBefore)}>
+        <button
+          data-testid="send-customer-day-before"
+          className="btn btn--secondary btn--block"
+          disabled={isSaving || isPreviewLoading || !canSendDayBefore}
+          title={dayBeforeBlockedText}
+          onClick={() => onMessagePreview(messageActions.customerDayBefore)}
+        >
           <Icon name="send" size={13}/> 전날 안내
         </button>
         <button data-testid="send-partner-assignment" className="btn btn--secondary btn--block" disabled={isSaving || isPreviewLoading || !order.partner_id} onClick={() => onMessagePreview(messageActions.partnerAssignment)}>
@@ -125,7 +145,7 @@ export function CustomerDeliveryPanel({
           <CopyLinkButton
             testId="copy-customer-link"
             label="고객 링크 복사"
-            link={`${window.location.origin}/c/${order.customer_token}`}
+            link={`${window.location.origin}/c#token=${encodeURIComponent(order.customer_token)}`}
           />
         </div>
       ) : (

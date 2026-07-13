@@ -84,6 +84,8 @@ export function PhotoReviewPage({ onOpenOrder, onNav }) {
       const log = await sendCustomerPhotoReady(selected.order_id);
       if (log.status === 'sent') {
         setSentMessage('고객 링크를 발송했습니다.');
+      } else if (log.status === 'pending') {
+        setError('SOL API 수락 여부를 확인 중입니다. SOLAPI 콘솔 확인 전에는 다시 발송하지 마세요.');
       } else {
         setError(`고객 링크 발송 실패 기록이 남았습니다. ${providerErrorText(log)}`);
       }
@@ -574,10 +576,12 @@ function providerErrorText(message) {
     solapi_missing_credentials: 'SOL API 인증 설정 누락',
     solapi_missing_sender_number: 'SOL API 발신번호 누락',
     solapi_missing_kakao_channel_id: 'SOL API 카카오 채널 ID 누락',
+    solapi_missing_kakao_pf_id: 'SOL API 카카오 발신 프로필 ID 누락',
     solapi_missing_kakao_template_id: '알림톡 승인 템플릿 ID 누락',
     solapi_http_error: 'SOL API HTTP 오류',
     solapi_request_failed: 'SOL API 요청 실패',
     solapi_invalid_response: 'SOL API 응답 오류',
+    solapi_outcome_unknown: 'SOL API 수락 여부 확인 필요',
     solapi_provider_failed: 'SOL API 발송 실패',
     unsupported_message_provider: 'Provider 설정 오류',
   };

@@ -6,6 +6,9 @@
 
 from datetime import date
 
+from fastapi.testclient import TestClient
+from sqlalchemy.orm import Session
+
 from app.core.security import create_access_token, hash_password
 from app.db.seed import (
     DEV_ADMIN_EMAIL,
@@ -16,16 +19,15 @@ from app.db.seed import (
 from app.domain.constants import OrderStatus, UserRole
 from app.models import Order, Partner, User
 from app.services.orders import to_partner_job_dto
-
 from tests.test_auth_integration import login, make_test_client
 
 
-def _partner_headers(client) -> dict:
+def _partner_headers(client: TestClient) -> dict[str, str]:
     session = login(client, "/api/auth/partner/login", DEV_PARTNER_PHONE, DEV_PARTNER_PASSWORD)
     return {"Authorization": f"Bearer {session['access_token']}"}
 
 
-def _admin_headers(client) -> dict:
+def _admin_headers(client: TestClient) -> dict[str, str]:
     session = login(client, "/api/auth/admin/login", DEV_ADMIN_EMAIL, DEV_ADMIN_PASSWORD)
     return {"Authorization": f"Bearer {session['access_token']}"}
 
@@ -35,7 +37,7 @@ _PARTNER_B_USER_ID = "reassign-user-b"
 _PARTNER_B_PHONE = "01055554444"
 
 
-def _seed_partner_b(db) -> None:
+def _seed_partner_b(db: Session) -> None:
     """재배정 격리 테스트용 협력사 B(+ 로그인 계정)."""
     db.add(
         Partner(
@@ -63,7 +65,7 @@ def _seed_partner_b(db) -> None:
     )
 
 
-def _partner_b_headers() -> dict:
+def _partner_b_headers() -> dict[str, str]:
     token = create_access_token(
         user_id=_PARTNER_B_USER_ID,
         role=UserRole.PARTNER,
@@ -78,8 +80,9 @@ def test_partner_login_includes_partner_company_name() -> None:
     session = login(client, "/api/auth/partner/login", DEV_PARTNER_PHONE, DEV_PARTNER_PASSWORD)
     user = session["user"]
     assert user["role"] == "partner"
-    assert isinstance(user.get("partner_name"), str)
-    assert user["partner_name"].strip()
+    partner_name = user["partner_name"]
+    assert isinstance(partner_name, str)
+    assert partner_name.strip()
 
 
 def test_partner_can_add_memo_and_read_it_back() -> None:
@@ -216,6 +219,14 @@ def test_to_partner_job_dto_marks_recurring_order() -> None:
 def test_partner_messages_endpoint_returns_partner_recipient_only() -> None:
     client = make_test_client()
     admin_headers = _admin_headers(client)
+    partner_headers = _partner_headers(client)
+
+    status_response = client.patch(
+        "/api/admin/orders/seed-order-2450",
+        headers=admin_headers,
+        json={"status": OrderStatus.PARTNER_CONFIRMING},
+    )
+    assert status_response.status_code == 200, status_response.text
 
     assignment_response = client.post(
         "/api/admin/messages/send",
@@ -230,18 +241,11 @@ def test_partner_messages_endpoint_returns_partner_recipient_only() -> None:
     assert assignment_response.status_code == 200, assignment_response.text
 
     customer_response = client.post(
-        "/api/admin/messages/send",
-        headers=admin_headers,
-        json={
-            "order_id": "seed-order-2450",
-            "message_type": "customer_schedule_confirmed",
-            "recipient_type": "customer",
-            "channel": "sms",
-        },
+        "/api/partner/jobs/seed-order-2450/confirm",
+        headers=partner_headers,
     )
     assert customer_response.status_code == 200, customer_response.text
 
-    partner_headers = _partner_headers(client)
     messages_response = client.get(
         "/api/partner/jobs/seed-order-2450/messages",
         headers=partner_headers,
@@ -416,12 +420,12 @@ def test_partner_messages_exclude_previous_partner_after_reassignment() -> None:
     assert reassign.status_code == 200, reassign.text
 
     b_headers = _partner_b_headers()
-    # A에게 갔던 메시지(내용에 A 협력사명 포함)는 B에게 노출되면 안 된다.
     before = client.get("/api/partner/jobs/seed-order-2450/messages", headers=b_headers)
     assert before.status_code == 200
-    assert before.json() == []
+    before_messages = before.json()
+    assert len(before_messages) == 1
+    assert "Reassign Partner B" in before_messages[0]["content"]
 
-    # 재배정 후 B에게 발송하면 그제서야 B 본인 메시지만 보인다(과도필터가 아님을 확인).
     assert (
         client.post(
             "/api/admin/messages/send",
@@ -436,8 +440,9 @@ def test_partner_messages_exclude_previous_partner_after_reassignment() -> None:
         == 200
     )
     after = client.get("/api/partner/jobs/seed-order-2450/messages", headers=b_headers).json()
-    assert len(after) == 1
-    assert after[0]["message_type"] == "partner_assignment"
+    assert len(after) == 2
+    assert all(message["message_type"] == "partner_assignment" for message in after)
+    assert all("Reassign Partner B" in message["content"] for message in after)
 
 
 def test_partner_memos_exclude_previous_partner_after_reassignment() -> None:
@@ -551,7 +556,8 @@ def test_partner_messages_isolated_when_partners_share_phone() -> None:
     )
     b_headers = {"Authorization": f"Bearer {b_token}"}
 
-    # 전화번호가 같아도 A의 메시지(recipient_partner_id=A)는 B에게 보이면 안 된다.
     messages = client.get("/api/partner/jobs/seed-order-2450/messages", headers=b_headers)
     assert messages.status_code == 200
-    assert messages.json() == []
+    own_messages = messages.json()
+    assert len(own_messages) == 1
+    assert "Shared Phone B" in own_messages[0]["content"]

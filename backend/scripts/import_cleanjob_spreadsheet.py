@@ -9,7 +9,6 @@ from dataclasses import dataclass, field
 from datetime import date, datetime, time
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
-from secrets import token_urlsafe
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -23,12 +22,12 @@ sys.path.insert(0, str(BACKEND_ROOT))
 from app.core.config import settings
 from app.db.session import SessionLocal
 from app.domain.constants import OrderStatus, TimelineEventType, UserRole, VatType
+from app.domain.customer_token import generate_customer_token
 from app.domain.partner_category import DEFAULT_PARTNER_CATEGORIES, infer_partner_category_id
-from app.domain.payment_status import PaymentStatus, PartnerPaymentStatus
 from app.domain.partner_vat import gross_up_partner_vat_amount, should_gross_up_partner_vat_amount
+from app.domain.payment_status import PartnerPaymentStatus, PaymentStatus
 from app.domain.phone import normalize_phone
 from app.models import Order, OrderGroup, OrderTimeline, Partner, PartnerCategory, User
-
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 IMPORT_ID = "legacy260526"
@@ -214,11 +213,10 @@ def main() -> None:
 
     print("\nIMPORT COMPLETE")
     print(
-        "groups created={0.groups_created}, updated={0.groups_updated}; "
-        "orders created={0.orders_created}, updated={0.orders_updated}; "
-        "partners created={0.partners_created}; timeline events created={0.timeline_events_created}".format(
-            stats
-        )
+        f"groups created={stats.groups_created}, updated={stats.groups_updated}; "
+        f"orders created={stats.orders_created}, updated={stats.orders_updated}; "
+        f"partners created={stats.partners_created}; "
+        f"timeline events created={stats.timeline_events_created}"
     )
 
 
@@ -252,9 +250,7 @@ def read_rows(path: Path, *, sheet_filter: str | None, start_date: date | None) 
                         values,
                     )
                 except ValueError as exc:
-                    result.issues.append(
-                        ImportIssue(worksheet.title, row_index, "error", str(exc))
-                    )
+                    result.issues.append(ImportIssue(worksheet.title, row_index, "error", str(exc)))
                     continue
 
                 comparison_date = parsed.scheduled_date or parsed.received_date
@@ -289,14 +285,16 @@ def parse_row(
         received_date = scheduled_date or date.today()
         warnings.append(ImportIssue(sheet, row_index, "warning", "received_date_fallback"))
 
-    schedule_note = clean_text(cell(values, spec.scheduled_date)) if scheduled_date is None else None
+    schedule_note = (
+        clean_text(cell(values, spec.scheduled_date)) if scheduled_date is None else None
+    )
     billing_basis = clean_text(cell(values, spec.billing_basis)) if spec.billing_basis else None
 
     customer_name = single_line(clean_text(cell(values, spec.customer_name)))
     if not customer_name:
         customer_name = single_line(clean_text(cell(values, spec.source_channel))) or "고객"
         warnings.append(ImportIssue(sheet, row_index, "warning", "customer_name_fallback"))
-    customer_name = limit_text(customer_name, 80)
+    customer_name = limit_text(customer_name, 80) or "고객"
 
     phone_raw = first_present_text(
         cell(values, spec.customer_phone),
@@ -314,7 +312,7 @@ def parse_row(
         warnings.append(ImportIssue(sheet, row_index, "warning", "customer_address_fallback"))
 
     service_name = single_line(clean_text(cell(values, spec.service_name))) or "청소"
-    service_name = limit_text(service_name, 160)
+    service_name = limit_text(service_name, 160) or "청소"
 
     detail_parts = [
         clean_text(cell(values, spec.service_detail)),
@@ -375,7 +373,9 @@ def parse_row(
             requested_time=limit_text(normalize_time(cell(values, spec.requested_time)), 80),
             team_name=limit_text(single_line(clean_text(cell(values, spec.team_name))), 120),
             service_name=service_name,
-            size_or_quantity=limit_text(single_line(clean_text(cell(values, spec.size_or_quantity))), 80),
+            size_or_quantity=limit_text(
+                single_line(clean_text(cell(values, spec.size_or_quantity))), 80
+            ),
             service_detail=service_detail,
             special_request=service_detail,
             source_channel=limit_text(single_line(source_channel), 120),
@@ -390,7 +390,9 @@ def parse_row(
             vat_type=map_vat_type(clean_text(cell(values, spec.vat_type))),
             payment_status=payment_status,
             payment_memo=payment_memo,
-            evidence_memo=clean_text(cell(values, spec.evidence_memo)) if spec.evidence_memo else None,
+            evidence_memo=clean_text(cell(values, spec.evidence_memo))
+            if spec.evidence_memo
+            else None,
             partner_name=partner_name,
             partner_payment_amount=partner_amount,
             partner_payment_status=partner_status,
@@ -415,13 +417,17 @@ def apply_rows(db: Session, rows: list[ParsedOrder]) -> ApplyStats:
             db.flush()
 
         existing_order = db.get(Order, row.order_id)
-        group_id = existing_order.group_id if existing_order and existing_order.group_id else row.preferred_group_id
+        group_id = (
+            existing_order.group_id
+            if existing_order and existing_order.group_id
+            else row.preferred_group_id
+        )
         group = db.get(OrderGroup, group_id)
         group_created = False
         if group is None:
             group = OrderGroup(
                 id=group_id,
-                customer_token=token_urlsafe(24),
+                customer_token=generate_customer_token(),
                 customer_name=row.customer_name,
                 customer_phone=row.customer_phone,
                 customer_address=row.customer_address,
@@ -746,7 +752,9 @@ def map_customer_payment_status(raw_value: str | None) -> tuple[str | None, str 
     compact = raw_value.replace(" ", "")
     if "환불" in compact:
         return PaymentStatus.REFUNDED.value, None
-    if any(token in compact for token in ("최종결제완료", "총액결제완료", "잔금결제완료", "결제완료")):
+    if any(
+        token in compact for token in ("최종결제완료", "총액결제완료", "잔금결제완료", "결제완료")
+    ):
         return PaymentStatus.PAID.value, None
     if "계약금" in compact:
         return PaymentStatus.DEPOSIT_PAID.value, None
