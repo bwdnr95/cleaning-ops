@@ -150,7 +150,15 @@ class DashboardService:
         )
 
     def _count(self, *conditions) -> int:
-        stmt = select(func.count()).select_from(Order).where(Order.deleted_at.is_(None), *conditions)
+        stmt = (
+            select(func.count())
+            .select_from(Order)
+            .where(
+                Order.deleted_at.is_(None),
+                Order.recurring_contract_id.is_(None),
+                *conditions,
+            )
+        )
         return int(self.db.scalar(stmt) or 0)
 
     def _sum(self, column, *conditions) -> float:

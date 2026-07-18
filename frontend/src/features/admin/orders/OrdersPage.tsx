@@ -2,7 +2,7 @@ import React from 'react';
 import { DatePicker } from '../../../components/common/DatePicker';
 import { PaginationBar } from '../../../components/common/Pagination';
 import { Avatar, Icon } from '../../../components/common/ui';
-import { bulkDeleteAdminOrders, exportAdminOrders, listAdminOrdersPage, listBrokers, listPartners, updateAdminOrder, type AdminOrderPageParams, type AdminOrderSort } from '../../../api/admin';
+import { bulkDeleteAdminOrders, exportAdminOrders, listAdminOrdersPage, listBrokers, listPartners, updateAdminOrder, type AdminOrderPageParams, type AdminOrderScope, type AdminOrderSort } from '../../../api/admin';
 import { sendAdminMessage, type AdminMessageType } from '../../../api/messages';
 import { useApiResource } from '../../../api/useApiResource';
 import { ORDER_STATUS_OPTIONS, orderStatusLabel, orderWorkflowStatusValue } from '../../../domain/orderStatus';
@@ -246,7 +246,16 @@ const ORDER_TABLE_DEFAULT_WIDTHS = ORDER_TABLE_COLUMNS.reduce((widths, column) =
   return widths;
 }, {});
 
-export function OrdersPage({ onOpenOrder, onCreateOrder, onEditOrder, initialTab = 'all', initialDatePreset = undefined }) {
+interface OrdersPageProps {
+  readonly onOpenOrder?: (orderId: string) => void;
+  readonly onCreateOrder?: () => void;
+  readonly onEditOrder?: (orderId: string) => void;
+  readonly initialTab?: string;
+  readonly initialDatePreset?: string;
+  readonly orderScope?: AdminOrderScope;
+}
+
+export function OrdersPage({ onOpenOrder, onCreateOrder, onEditOrder, initialTab = 'all', initialDatePreset = undefined, orderScope = 'regular' }: OrdersPageProps) {
   const tableScrollRef = React.useRef(null);
   const [tab, setTab] = React.useState(initialTab);
   const [selected, setSelected] = React.useState(new Set());
@@ -299,6 +308,7 @@ export function OrdersPage({ onOpenOrder, onCreateOrder, onEditOrder, initialTab
     partner_id: partnerFilter === 'all' ? undefined : partnerFilter,
     broker_id: brokerFilter === 'all' ? undefined : brokerFilter,
     q: debouncedQuery || undefined,
+    scope: orderScope,
   }), [
     page,
     pageSize,
@@ -313,6 +323,7 @@ export function OrdersPage({ onOpenOrder, onCreateOrder, onEditOrder, initialTab
     partnerFilter,
     brokerFilter,
     debouncedQuery,
+    orderScope,
   ]);
   const ordersResourceKey = [
     tab,
@@ -328,6 +339,7 @@ export function OrdersPage({ onOpenOrder, onCreateOrder, onEditOrder, initialTab
     partnerFilter,
     brokerFilter,
     debouncedQuery,
+    orderScope,
   ].join('|');
   const loadOrders = React.useCallback(() => listAdminOrdersPage(orderPageParams), [orderPageParams]);
   const ordersResource = useApiResource(loadOrders, ordersResourceKey);
@@ -366,7 +378,7 @@ export function OrdersPage({ onOpenOrder, onCreateOrder, onEditOrder, initialTab
     setTab(initialTab);
     setDateFilter(createInitialDateFilter(initialTab, initialDatePreset));
     setPage(1);
-  }, [initialDatePreset, initialTab]);
+  }, [initialDatePreset, initialTab, orderScope]);
 
   React.useEffect(() => {
     if (typeof window === 'undefined') {
@@ -670,7 +682,7 @@ export function OrdersPage({ onOpenOrder, onCreateOrder, onEditOrder, initialTab
   };
 
   return (
-    <div data-testid="admin-orders-page" className="page-shell" style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0, background: 'var(--bg)', maxWidth: 'none' }}>
+    <div data-testid={orderScope === 'recurring' ? 'admin-recurring-orders-list' : 'admin-orders-page'} className="page-shell" style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0, background: 'var(--bg)', maxWidth: 'none' }}>
       {/* Insight line — typographic, no card chrome */}
       <div style={{
         padding: '12px 10px 10px',
@@ -700,13 +712,15 @@ export function OrdersPage({ onOpenOrder, onCreateOrder, onEditOrder, initialTab
           >
             <Icon name="fileText" size={12}/> {isExporting ? '내보내는 중' : '내보내기'}
           </button>
-          <button
-            data-testid="admin-orders-import"
-            className="btn btn--secondary btn--sm"
-            onClick={() => setImportOpen(true)}
-          >
-            <Icon name="upload" size={12}/> 일괄 등록
-          </button>
+          {orderScope === 'regular' && (
+            <button
+              data-testid="admin-orders-import"
+              className="btn btn--secondary btn--sm"
+              onClick={() => setImportOpen(true)}
+            >
+              <Icon name="upload" size={12}/> 일괄 등록
+            </button>
+          )}
         </div>
       </div>
 
@@ -742,13 +756,15 @@ export function OrdersPage({ onOpenOrder, onCreateOrder, onEditOrder, initialTab
           />
         </div>
         <div style={{ flex: 1 }}/>
-        <button
-          data-testid="admin-orders-create"
-          className="btn btn--primary btn--lg"
-          onClick={onCreateOrder}
-        >
-          <Icon name="plus" size={14}/> 신규 주문 등록
-        </button>
+        {orderScope === 'regular' && (
+          <button
+            data-testid="admin-orders-create"
+            className="btn btn--primary btn--lg"
+            onClick={onCreateOrder}
+          >
+            <Icon name="plus" size={14}/> 신규 주문 등록
+          </button>
+        )}
       </div>
 
       {/* 협력사 필터 — 수십 개 협력사를 인라인 칩 대신 검색형 드롭다운으로 제공 */}

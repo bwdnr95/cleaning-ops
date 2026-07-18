@@ -36,6 +36,16 @@ test('admin can manage recurring partner monthly payout', async ({ page }) => {
   await expect(page.getByText('250,000원')).toBeVisible();
 
   await page.getByRole('button', { name: '목록' }).click();
+  await page.getByTestId('recurring-tab-orders').click();
+  await expect(page.getByTestId('admin-recurring-orders-list')).toBeVisible();
+  await page.getByRole('textbox', { name: '주문 검색' }).fill('정기 월도급 고객');
+  await expect(page.locator('tbody').getByText('정기 월도급 고객', { exact: true })).toBeVisible();
+
+  await page.getByTestId('admin-nav-orders').click();
+  await page.getByRole('textbox', { name: '주문 검색' }).fill('정기 월도급 고객');
+  await expect(page.locator('tbody').getByText('정기 월도급 고객', { exact: true })).toHaveCount(0);
+
+  await page.getByTestId('admin-nav-recurring').click();
   await page.getByTestId('recurring-tab-monthly').click();
   await page.getByTestId('monthly-month').fill(currentMonth());
   const row = page.locator('tr').filter({ hasText: label });

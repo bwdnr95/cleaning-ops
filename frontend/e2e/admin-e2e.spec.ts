@@ -40,6 +40,29 @@ test('admin can log in, navigate operational pages, and open order creation from
   await expect(page.getByTestId('admin-order-form')).toBeVisible();
 });
 
+test('admin can search partners by company, manager, or phone', async ({ page }) => {
+  await loginAsAdmin(page);
+  await page.getByTestId('admin-nav-partners').click();
+
+  const search = page.getByTestId('partner-search-input');
+  const partnerRow = page.locator('tr').filter({ hasText: '클린파트너 강남' });
+  await expect(search).toBeVisible();
+  await search.fill('클린파트너');
+  await expect(partnerRow).toBeVisible();
+
+  await search.fill('김현장');
+  await expect(partnerRow).toBeVisible();
+
+  await search.fill('0101234');
+  await expect(partnerRow).toBeVisible();
+
+  await search.fill('검색되지않는협력사');
+  await expect(page.getByText('검색 조건에 맞는 협력사가 없습니다.')).toBeVisible();
+
+  await page.getByTestId('partner-search-clear').click();
+  await expect(partnerRow).toBeVisible();
+});
+
 test('admin and partner sessions stay active across role routes', async ({ page }) => {
   await loginAsAdmin(page);
 

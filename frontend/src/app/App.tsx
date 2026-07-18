@@ -46,6 +46,8 @@ export function App() {
   const [adminRoute, setAdminRoute] = React.useState(() => readAdminRouteFromLocation());
   // 주문 상세의 '정기' 배지에서 계약으로 역링크할 때 전달할 계약 id(데모 affordance: 해시 라우트와 별개).
   const [openRecurringContractId, setOpenRecurringContractId] = React.useState<string | null>(null);
+  const [recurringInitialTab, setRecurringInitialTab] = React.useState<'contracts' | 'orders'>('contracts');
+  const [orderReturnPage, setOrderReturnPage] = React.useState<'orders' | 'recurring'>('orders');
   const consumeOpenRecurringContract = React.useCallback(() => setOpenRecurringContractId(null), []);
   const adminSession = auth.getSession('admin');
   const partnerSession = auth.getSession('partner');
@@ -94,6 +96,14 @@ export function App() {
   const detailOrderId = adminRoute.detailOrderId;
   const orderForm = adminRoute.orderForm;
   const ordersView = adminRoute.ordersView;
+  const openOrder = React.useCallback((orderId: string, returnPage: 'orders' | 'recurring' = 'orders') => {
+    setOrderReturnPage(returnPage);
+    navigateAdmin(toOrderDetailRoute(orderId, ordersView));
+  }, [navigateAdmin, ordersView]);
+  const editOrder = React.useCallback((orderId: string, returnPage: 'orders' | 'recurring' = 'orders') => {
+    setOrderReturnPage(returnPage);
+    navigateAdmin(toOrderEditRoute(orderId, ordersView));
+  }, [navigateAdmin, ordersView]);
 
   if (isStandaloneCustomerLink) {
     return (
@@ -115,7 +125,12 @@ export function App() {
             ) : adminSession.user?.role === 'admin' ? (
               <AdminShell
                 page={adminRoute.page}
-                onPageChange={(nextPage) => navigateAdmin(toPageRoute(nextPage))}
+                onPageChange={(nextPage) => {
+                  if (nextPage === 'recurring') {
+                    setRecurringInitialTab('contracts');
+                  }
+                  navigateAdmin(toPageRoute(nextPage));
+                }}
                 onCreateOrder={() => navigateAdmin(toOrderCreateRoute(adminRoute.page))}
                 navBadges={navBadges}
                 user={adminSession.user}
@@ -157,12 +172,20 @@ export function App() {
                         />
                         <OrderDetailPage
                           orderId={detailOrderId}
-                          onBack={() => navigateAdmin(toPageRoute('orders', ordersView))}
+                          onBack={() => {
+                            if (orderReturnPage === 'recurring') {
+                              setRecurringInitialTab('orders');
+                              navigateAdmin(toPageRoute('recurring', ordersView));
+                              return;
+                            }
+                            navigateAdmin(toPageRoute('orders', ordersView));
+                          }}
                           onEdit={() => navigateAdmin(toOrderEditRoute(detailOrderId, ordersView))}
                           onDuplicate={() => navigateAdmin(toOrderDuplicateRoute(detailOrderId, ordersView))}
                           onOpenOrder={(nextOrderId) => navigateAdmin(toOrderDetailRoute(nextOrderId, ordersView))}
                           onOpenRecurringContract={(contractId) => {
                             setOpenRecurringContractId(contractId);
+                            setRecurringInitialTab('contracts');
                             setPage('recurring');
                           }}
                           onNav={(nextPage) => {
@@ -188,27 +211,27 @@ export function App() {
                             }
                             navigateAdmin(toPageRoute(nextPage, nextOrdersView));
                           }}
-                          onOpenOrder={(orderId) => navigateAdmin(toOrderDetailRoute(orderId, ordersView))}
+                          onOpenOrder={(orderId) => openOrder(orderId)}
                         />
                       )}
                       {page === 'orders' && (
                         <OrdersPage
                           initialTab={ordersView.tab}
                           initialDatePreset={ordersView.datePreset}
-                          onOpenOrder={(orderId) => navigateAdmin(toOrderDetailRoute(orderId, ordersView))}
-                          onEditOrder={(orderId) => navigateAdmin(toOrderEditRoute(orderId, ordersView))}
+                          onOpenOrder={(orderId) => openOrder(orderId)}
+                          onEditOrder={(orderId) => editOrder(orderId)}
                           onCreateOrder={() => navigateAdmin(toOrderCreateRoute('orders', ordersView))}
                         />
                       )}
                       {page === 'calendar' && (
                         <CalendarPage
-                          onOpenOrder={(orderId) => navigateAdmin(toOrderDetailRoute(orderId, ordersView))}
+                          onOpenOrder={(orderId) => openOrder(orderId)}
                           onCreateOrder={() => navigateAdmin(toOrderCreateRoute('calendar'))}
                         />
                       )}
                       {page === 'photos' && (
                         <PhotoReviewPage
-                          onOpenOrder={(orderId) => navigateAdmin(toOrderDetailRoute(orderId, ordersView))}
+                          onOpenOrder={(orderId) => openOrder(orderId)}
                           onNav={(nextPage) => {
                             setPage(nextPage);
                           }}
@@ -220,13 +243,16 @@ export function App() {
                       {page === 'recurring' && (
                         <RecurringContractsPage
                           initialContractId={openRecurringContractId}
+                          initialTab={recurringInitialTab}
                           onInitialContractConsumed={consumeOpenRecurringContract}
+                          onEditOrder={(orderId) => editOrder(orderId, 'recurring')}
+                          onOpenOrder={(orderId) => openOrder(orderId, 'recurring')}
                         />
                       )}
                       {page === 'reports' && <ReportsPage />}
                       {page === 'sends' && (
                         <MessagesPage
-                          onOpenOrder={(orderId) => navigateAdmin(toOrderDetailRoute(orderId, ordersView))}
+                          onOpenOrder={(orderId) => openOrder(orderId)}
                         />
                       )}
                       {!['dashboard', 'orders', 'calendar', 'photos', 'products', 'brokers', 'partners', 'recurring', 'reports', 'sends'].includes(page) && (

@@ -221,7 +221,10 @@ export interface AdminOrderPageParams {
   partner_id?: string;
   broker_id?: string;
   q?: string;
+  scope?: AdminOrderScope;
 }
+
+export type AdminOrderScope = 'regular' | 'recurring';
 
 export interface AdminOrderPageSummary {
   count: number;

@@ -12,6 +12,7 @@ from app.repositories.order_groups import OrderGroupRepository
 from app.repositories.orders import OrderRepository
 from app.repositories.photos import PhotoRepository
 from app.repositories.timeline import TimelineRepository
+from app.schemas.message import MessageLogRead, MessageSendRequest
 from app.schemas.order import (
     AdminOrderDetailRead,
     AdminOrderGroupRead,
@@ -26,7 +27,6 @@ from app.schemas.order import (
     OrderLineCreate,
     OrderUpdate,
 )
-from app.schemas.message import MessageLogRead, MessageSendRequest
 from app.schemas.report import OrderImportResult
 from app.services.exporters import to_xlsx_bytes
 from app.services.messages import MessageService
@@ -38,7 +38,7 @@ from app.services.order_export import (
     OrderExportService,
 )
 from app.services.order_import import import_orders_from_xlsx, is_xlsx_upload
-from app.services.order_page import OrderPageService
+from app.services.order_page import OrderPageService, OrderScope
 from app.services.orders import (
     OrderService,
     to_admin_group_dto,
@@ -112,6 +112,7 @@ def list_orders_page(
     partner_id: str | None = Query(default=None),
     broker_id: str | None = Query(default=None),
     q: str | None = Query(default=None),
+    scope: OrderScope = "regular",
     db: Session = Depends(get_session),
     _: CurrentUser = Depends(require_admin),
 ) -> AdminOrderPageRead:
@@ -129,6 +130,7 @@ def list_orders_page(
         partner_id=partner_id or None,
         broker_id=broker_id or None,
         q=q,
+        scope=scope,
     )
     return AdminOrderPageRead(
         items=result.items,

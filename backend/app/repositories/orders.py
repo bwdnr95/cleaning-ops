@@ -31,7 +31,10 @@ class OrderRepository(Repository[Order]):
         include_past_paid: bool = False,
     ) -> list[Order]:
         today = business_today()
-        stmt = select(Order).where(Order.deleted_at.is_(None))
+        stmt = select(Order).where(
+            Order.deleted_at.is_(None),
+            Order.recurring_contract_id.is_(None),
+        )
         if not include_past_paid:
             stmt = stmt.where(
                 or_(

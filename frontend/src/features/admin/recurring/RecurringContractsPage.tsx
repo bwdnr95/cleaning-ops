@@ -24,11 +24,17 @@ const headStyle: React.CSSProperties = {
 
 export function RecurringContractsPage({
   initialContractId = null,
+  initialTab = 'contracts',
   onInitialContractConsumed,
+  onOpenOrder,
+  onEditOrder,
 }: {
   // 주문 상세 '정기' 배지에서 역링크로 진입할 때 전달되는 계약 id.
   initialContractId?: string | null;
+  initialTab?: 'contracts' | 'monthly' | 'orders';
   onInitialContractConsumed?: () => void;
+  onOpenOrder?: (orderId: string) => void;
+  onEditOrder?: (orderId: string) => void;
 } = {}) {
   // 역링크 진입은 마운트 시점에 바로 상세로 들어간다(목록 깜빡임 없이).
   const [view, setView] = React.useState<View>(
@@ -46,7 +52,7 @@ export function RecurringContractsPage({
   const [contracts, setContracts] = React.useState<RecurringContractSummary[] | null>(null);
   const [error, setError] = React.useState<string | null>(null);
   // 정기청소 영역 상단 탭: 계약 관리(기존) / 월 트래커(세금계산서·잔금).
-  const [tab, setTab] = React.useState<'contracts' | 'monthly' | 'orders'>('contracts');
+  const [tab, setTab] = React.useState<'contracts' | 'monthly' | 'orders'>(initialTab);
 
   const load = React.useCallback(async () => {
     setError(null);
@@ -110,7 +116,9 @@ export function RecurringContractsPage({
         </div>
 
         {tab === 'monthly' && <RecurringMonthlyTracker />}
-        {tab === 'orders' && <RecurringOrdersList />}
+        {tab === 'orders' && (
+          <RecurringOrdersList onEditOrder={onEditOrder} onOpenOrder={onOpenOrder} />
+        )}
         {tab === 'contracts' && (
           <>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>

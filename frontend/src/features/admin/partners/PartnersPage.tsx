@@ -36,6 +36,7 @@ export function PartnersPage() {
   const partners = React.useMemo(() => partnersResource.data || [], [partnersResource.data]);
   const categories = React.useMemo(() => categoriesResource.data || [], [categoriesResource.data]);
   const [categoryFilter, setCategoryFilter] = React.useState(ALL_CATEGORY_FILTER);
+  const [partnerQuery, setPartnerQuery] = React.useState('');
   const [partnersPage, setPartnersPage] = React.useState(1);
   const [partnersPageSize, setPartnersPageSize] = React.useState(20);
   const [selectedCategoryId, setSelectedCategoryId] = React.useState('');
@@ -65,8 +66,8 @@ export function PartnersPage() {
   const [error, setError] = React.useState('');
 
   const filteredPartners = React.useMemo(
-    () => filterPartnersByCategory(partners, categoryFilter),
-    [categoryFilter, partners],
+    () => filterPartners(partners, categoryFilter, partnerQuery),
+    [categoryFilter, partnerQuery, partners],
   );
   const pagedPartners = React.useMemo(
     () => paginateItems(filteredPartners, partnersPage, partnersPageSize),
@@ -593,10 +594,42 @@ export function PartnersPage() {
               )}
             />
 
+            <div style={{ padding: '10px 12px', borderBottom: '1px solid var(--divider)', display: 'flex', alignItems: 'center', gap: 8 }}>
+              <label style={{ flex: 1, minWidth: 0, height: 32, display: 'flex', alignItems: 'center', gap: 8, padding: '0 10px', border: '1px solid var(--border)', borderRadius: 8, background: 'var(--surface)', boxShadow: 'var(--shadow-xs)', color: 'var(--text-tertiary)' }}>
+                <Icon name="search" size={13} />
+                <input
+                  data-testid="partner-search-input"
+                  aria-label="협력사 검색"
+                  placeholder="협력사명, 담당자, 전화번호 검색"
+                  value={partnerQuery}
+                  onChange={(event) => {
+                    setPartnerQuery(event.target.value);
+                    setPartnersPage(1);
+                  }}
+                  style={{ flex: 1, minWidth: 0, border: 'none', outline: 'none', background: 'transparent', color: 'var(--text)', fontSize: 12.5 }}
+                />
+              </label>
+              {partnerQuery && (
+                <button
+                  type="button"
+                  className="btn btn--ghost btn--sm"
+                  data-testid="partner-search-clear"
+                  onClick={() => {
+                    setPartnerQuery('');
+                    setPartnersPage(1);
+                  }}
+                >
+                  초기화
+                </button>
+              )}
+            </div>
+
             {partnersResource.isLoading && <StateLine text="협력사 목록을 불러오는 중입니다." />}
             {!partnersResource.isLoading && partnersResource.error && <StateLine text="협력사 목록을 불러오지 못했습니다." tone="danger" />}
             {!partnersResource.isLoading && !partnersResource.error && partners.length === 0 && <StateLine text="등록된 협력사가 없습니다." />}
-            {!partnersResource.isLoading && !partnersResource.error && partners.length > 0 && filteredPartners.length === 0 && <StateLine text="선택한 대분류에 협력사가 없습니다." />}
+            {!partnersResource.isLoading && !partnersResource.error && partners.length > 0 && filteredPartners.length === 0 && (
+              <StateLine text={partnerQuery.trim() ? '검색 조건에 맞는 협력사가 없습니다.' : '선택한 대분류에 협력사가 없습니다.'} />
+            )}
 
             {!partnersResource.isLoading && !partnersResource.error && filteredPartners.length > 0 && (
               <div className="scroll" style={{ flex: 1, minHeight: 0, overflow: 'auto' }}>
@@ -1218,6 +1251,29 @@ function filterPartnersByCategory(partners, categoryFilter) {
     return partners.filter((partner) => !partner.partner_category_id);
   }
   return partners.filter((partner) => partner.partner_category_id === categoryFilter);
+}
+
+function filterPartners(partners, categoryFilter, query) {
+  const categoryPartners = filterPartnersByCategory(partners, categoryFilter);
+  const normalizedQuery = query.trim().toLocaleLowerCase('ko');
+  if (!normalizedQuery) {
+    return categoryPartners;
+  }
+  const digitQuery = normalizedQuery.replace(/\D/g, '');
+  return categoryPartners.filter((partner) => {
+    const fields = [
+      partner.name,
+      partner.manager_name,
+      partner.phone,
+      partner.manager_phone,
+      partner.login_phone,
+    ];
+    return fields.some((value) => {
+      const text = String(value || '').toLocaleLowerCase('ko');
+      return text.includes(normalizedQuery)
+        || (digitQuery.length > 0 && text.replace(/\D/g, '').includes(digitQuery));
+    });
+  });
 }
 
 function countPartnersByCategory(partners, categoryId) {

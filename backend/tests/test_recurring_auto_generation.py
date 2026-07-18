@@ -19,6 +19,9 @@ def _auth(token: str) -> dict[str, str]:
 
 def test_create_contract_auto_generates_current_month_orders(client, seed_admin_token) -> None:
     today = business_today()
+    headers = _auth(seed_admin_token)
+    summary_before = client.get("/api/admin/dashboard/summary", headers=headers)
+    assert summary_before.status_code == 200, summary_before.text
     created = client.post(
         "/api/admin/recurring/contracts",
         json={
@@ -35,14 +38,39 @@ def test_create_contract_auto_generates_current_month_orders(client, seed_admin_
             "service_name": "사무실 정기청소",
             "total_amount": 88000,
         },
-        headers=_auth(seed_admin_token),
+        headers=headers,
     )
     assert created.status_code == 201, created.text
     contract_id = created.json()["id"]
 
-    orders = client.get("/api/admin/orders", headers=_auth(seed_admin_token))
+    regular_orders = client.get("/api/admin/orders", headers=headers)
+    assert regular_orders.status_code == 200, regular_orders.text
+    assert all(order["recurring_contract_id"] is None for order in regular_orders.json())
+    regular_page = client.get(
+        "/api/admin/orders/page?visit_preset=all&page_size=2000",
+        headers=headers,
+    )
+    assert regular_page.status_code == 200, regular_page.text
+    assert all(
+        order["recurring_contract_id"] is None
+        for order in regular_page.json()["items"]
+    )
+    invalid_scope = client.get(
+        "/api/admin/orders/page?scope=all",
+        headers=headers,
+    )
+    assert invalid_scope.status_code == 422, invalid_scope.text
+
+    orders = client.get(
+        "/api/admin/orders/page?scope=recurring&visit_preset=upcoming&page_size=2000",
+        headers=headers,
+    )
     assert orders.status_code == 200, orders.text
-    mine = [order for order in orders.json() if order["recurring_contract_id"] == contract_id]
+    mine = [
+        order
+        for order in orders.json()["items"]
+        if order["recurring_contract_id"] == contract_id
+    ]
     last_day = monthrange(today.year, today.month)[1]
     expected_dates = [
         date(today.year, today.month, day)
@@ -51,6 +79,30 @@ def test_create_contract_auto_generates_current_month_orders(client, seed_admin_
     ]
     assert len(mine) == len(expected_dates)
     assert all(order["status"] == "협력사확인중" for order in mine)
+    summary_after = client.get("/api/admin/dashboard/summary", headers=headers)
+    assert summary_after.status_code == 200, summary_after.text
+    count_fields = {
+        "today_jobs",
+        "tomorrow_notice_targets",
+        "partner_pending",
+        "unpaid_check_needed",
+        "customer_check_needed",
+        "monthly_completed",
+        "photo_review_pending",
+        "customer_delivery_needed",
+        "payment_check_needed",
+    }
+    assert {
+        field: summary_after.json()[field]
+        for field in count_fields
+    } == {
+        field: summary_before.json()[field]
+        for field in count_fields
+    }
+    assert (
+        summary_after.json()["monthly_contract_amount"]
+        > summary_before.json()["monthly_contract_amount"]
+    )
 
 
 def test_create_contract_rejects_invalid_service_item_before_auto_generation(

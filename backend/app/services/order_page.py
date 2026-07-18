@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import date, timedelta
+from typing import Literal, assert_never
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -68,6 +69,9 @@ class OrderPageResult:
     status_counts: dict[str, int]
     summary: OrderPageSummary = field(default_factory=OrderPageSummary)
     insight: OrderPageInsight = field(default_factory=OrderPageInsight)
+
+
+OrderScope = Literal["regular", "recurring"]
 
 
 # 결제확인 상태 집합은 domain/payment_status(단일 출처)를 사용한다.
@@ -131,6 +135,7 @@ class OrderPageService:
         partner_id: str | None = None,
         broker_id: str | None = None,
         q: str | None = None,
+        scope: OrderScope = "regular",
     ) -> OrderPageResult:
         today = business_today()
 
@@ -140,7 +145,7 @@ class OrderPageService:
         # 과거 완납 노출: 검색 중이거나, 과거완납 노출 탭일 때.
         include_archived = has_search or (status in _PAST_PAID_VISIBLE_TABS)
 
-        all_orders = self._load_orders()
+        all_orders = self._load_orders(scope)
         # 그룹을 일괄 조회해 두고 DTO/검색에서 재사용한다.
         groups_by_id = self.group_repo.list_by_ids(order.group_id for order in all_orders)
         # 인사이트는 필터와 무관한 전역 집계라 필터 적용 전 전체 집합으로 계산한다.
@@ -262,9 +267,15 @@ class OrderPageService:
     # 내부 헬퍼
     # ------------------------------------------------------------------
 
-    def _load_orders(self) -> list[Order]:
-        """삭제되지 않은 모든 주문을 가져온다(과거 완납 포함). 필터는 파이썬에서 적용."""
+    def _load_orders(self, scope: OrderScope) -> list[Order]:
         stmt = select(Order).where(Order.deleted_at.is_(None))
+        match scope:
+            case "regular":
+                stmt = stmt.where(Order.recurring_contract_id.is_(None))
+            case "recurring":
+                stmt = stmt.where(Order.recurring_contract_id.is_not(None))
+            case unreachable:
+                assert_never(unreachable)
         return list(self.db.scalars(stmt))
 
     def _matches_visit_filter(
