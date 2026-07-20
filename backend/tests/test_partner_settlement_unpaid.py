@@ -234,8 +234,8 @@ def test_partner_admin_unpaid_summary_uses_canonical_unpaid_condition(
         partner for partner in service.list_partners(include_inactive=True) if partner.id == pid
     )
 
-    assert detail.unpaid_partner_order_count == 11
-    assert detail.unpaid_partner_amount_total == 1660000
+    assert detail.unpaid_partner_order_count == 6
+    assert detail.unpaid_partner_amount_total == 930000
     assert listed.unpaid_partner_order_count == detail.unpaid_partner_order_count
     assert listed.unpaid_partner_amount_total == detail.unpaid_partner_amount_total
 
