@@ -788,6 +788,18 @@ def test_admin_service_catalog_crud_and_order_catalog_selection() -> None:
     assert created["service_name"] == "프리미엄 입주청소"
     assert created["total_amount"] == 390000
 
+    renamed_response = client.patch(
+        f"/api/admin/orders/{created['id']}",
+        headers=headers,
+        json={
+            "service_item_id": item["id"],
+            "service_name": "고객변경상품명",
+        },
+    )
+
+    assert renamed_response.status_code == 200, renamed_response.text
+    assert renamed_response.json()["service_name"] == "고객변경상품명"
+
     delete_used_response = client.delete(
         f"/api/admin/services/items/{item['id']}",
         headers=headers,

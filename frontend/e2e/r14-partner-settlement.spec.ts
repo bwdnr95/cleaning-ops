@@ -14,6 +14,9 @@ test('R14 partner settlement can settle, notify, and revert from partner detail'
   await expect(page.getByTestId(`partner-settlement-row-${flow.orderId}`)).toBeVisible();
   await expect(page.getByText('R6 Photo Review').first()).toBeVisible();
 
+  await page.getByTestId(`partner-settlement-select-${flow.orderId}`).check();
+  await expect(page.getByTestId('partner-settlement-selected-total')).toContainText('210,000');
+
   await page.getByTestId(`partner-settlement-settle-${flow.orderId}`).click();
   await expect(page.getByTestId(`partner-settlement-revert-${flow.orderId}`)).toBeVisible({ timeout: 15_000 });
 

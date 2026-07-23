@@ -326,7 +326,11 @@ class OrderService:
         self.db.refresh(order, with_for_update=True)
 
         changes = payload.model_dump(exclude_unset=True)
-        self._apply_service_catalog(changes)
+        preserve_service_name = (
+            changes.get("service_item_id") is not None
+            and changes.get("service_item_id") == order.service_item_id
+        )
+        self._apply_service_catalog(changes, preserve_service_name=preserve_service_name)
         _normalize_receipt_fields(changes)
         old_status = order.status
         old_partner_id = order.partner_id
@@ -525,12 +529,13 @@ class OrderService:
         self.db.refresh(group)
         return group
 
-    def _apply_service_catalog(self, values: dict) -> None:
+    def _apply_service_catalog(self, values: dict, *, preserve_service_name: bool = False) -> None:
         service_item_id = values.get("service_item_id")
         if service_item_id:
             item, _category = self.service_catalog.get_available_item(service_item_id)
             values["service_category_id"] = item.category_id
-            values["service_name"] = item.name
+            if not preserve_service_name:
+                values["service_name"] = item.name
             if values.get("total_amount") is None:
                 values["total_amount"] = float(item.base_price or 0)
             if values.get("partner_payment_amount") is None:

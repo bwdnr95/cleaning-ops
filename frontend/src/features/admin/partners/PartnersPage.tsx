@@ -166,6 +166,12 @@ export function PartnersPage() {
   }, [selectedId, settlementStatusFilter, settlementDateRange.from, settlementDateRange.to]);
 
   const stats = toPartnerStats(partners);
+  const selectedSettlementAmount = React.useMemo(
+    () => settlements?.items
+      .filter((job) => settlementSelection.has(job.order_id))
+      .reduce((total, job) => total + Number(job.partner_price || 0), 0) || 0,
+    [settlementSelection, settlements],
+  );
 
   const handleCategoryFilter = (nextFilter) => {
     setCategoryFilter(nextFilter);
@@ -920,7 +926,14 @@ export function PartnersPage() {
                   </div>
                 )}
                 {settlementSelection.size > 0 && (
-                  <div style={{ padding: 12, borderTop: '1px solid var(--divider)', display: 'flex', gap: 8, alignItems: 'center' }}>
+                  <div style={{ padding: 12, borderTop: '1px solid var(--divider)', display: 'flex', gap: 12, alignItems: 'center' }}>
+                    <div
+                      data-testid="partner-settlement-selected-total"
+                      style={{ minWidth: 180, padding: '8px 10px', borderRadius: 6, background: 'var(--settlement-unpaid-bg)', color: 'var(--settlement-unpaid-fg)' }}
+                    >
+                      <div style={{ fontSize: 11, fontWeight: 600 }}>선택 미정산 도급가 합계</div>
+                      <div className="mono" style={{ marginTop: 2, fontSize: 15, fontWeight: 800 }}>{formatWon(selectedSettlementAmount)}</div>
+                    </div>
                     <input className="input" placeholder="정산 메모" value={settlementMemo} onChange={(event) => setSettlementMemo(event.target.value)} style={{ flex: 1 }} />
                     <button type="button" className="btn btn--primary btn--sm" onClick={() => void handleSettle(Array.from(settlementSelection))}>
                       선택 {settlementSelection.size}건 정산
