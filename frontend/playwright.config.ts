@@ -3,8 +3,10 @@ import { defineConfig, devices } from '@playwright/test';
 const runSlot = process.pid % 1_000;
 const frontendPort = Number(process.env.E2E_FRONTEND_PORT ?? 21_000 + runSlot);
 const backendPort = Number(process.env.E2E_BACKEND_PORT ?? 31_000 + runSlot);
+const runId = process.env.CLEANING_OPS_E2E_RUN_ID ?? `${backendPort}-${process.pid}-${Date.now()}`;
 process.env.E2E_FRONTEND_PORT = String(frontendPort);
 process.env.E2E_BACKEND_PORT = String(backendPort);
+process.env.CLEANING_OPS_E2E_RUN_ID = runId;
 const frontendUrl = `http://127.0.0.1:${frontendPort}`;
 const backendUrl = `http://127.0.0.1:${backendPort}`;
 
@@ -20,13 +22,14 @@ export default defineConfig({
   // 실패한 테스트만 재시도해 부하성 플레이크를 걸러낸다.
   retries: 2,
   reporter: 'list',
+  globalTeardown: './e2e/global-teardown.ts',
   use: {
     baseURL: frontendUrl,
     trace: 'retain-on-failure',
   },
   webServer: [
     {
-      command: `powershell -NoProfile -ExecutionPolicy Bypass -File .\\scripts\\start_e2e_backend.ps1 -Port ${backendPort} -FrontendUrl ${frontendUrl}`,
+      command: `powershell -NoProfile -ExecutionPolicy Bypass -File .\\scripts\\start_e2e_backend.ps1 -Port ${backendPort} -FrontendUrl ${frontendUrl} -RunId ${runId}`,
       cwd: '../backend',
       url: `${backendUrl}/health`,
       timeout: 120_000,

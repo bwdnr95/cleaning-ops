@@ -26,10 +26,11 @@ const EMPTY: RecurringContractInput = {
 
 // iOS 줌 방지를 위해 입력 폰트는 16px 이상으로 둔다.
 const inputStyle: React.CSSProperties = {
-  fontSize: 16,
-  padding: '8px 10px',
+  fontSize: 'var(--mobile-input-font-size)',
+  minHeight: 'var(--touch-target)',
+  padding: 'var(--space-2) var(--space-2-5)',
   border: '1px solid var(--border)',
-  borderRadius: 6,
+  borderRadius: 'var(--radius)',
   width: '100%',
   background: 'var(--surface)',
   color: 'var(--text)',
@@ -43,6 +44,27 @@ const labelStyle: React.CSSProperties = {
   fontWeight: 600,
   color: 'var(--text-secondary)',
 };
+
+function normalizedPayload(value: RecurringContractInput): RecurringContractInput {
+  return {
+    ...value,
+    day_of_month: value.recurrence_mode === 'monthly' ? value.day_of_month ?? 1 : null,
+    interval_weeks: value.recurrence_mode === 'weekly' ? value.interval_weeks ?? 1 : null,
+    weekdays: value.recurrence_mode === 'weekly' ? value.weekdays ?? [] : null,
+  };
+}
+
+function changedPayload(
+  current: RecurringContractInput,
+  initial: RecurringContractInput,
+): Partial<RecurringContractInput> {
+  return Object.fromEntries(
+    Object.entries(current).filter(([key, value]) => {
+      const initialValue = initial[key as keyof RecurringContractInput];
+      return JSON.stringify(value ?? null) !== JSON.stringify(initialValue ?? null);
+    }),
+  ) as Partial<RecurringContractInput>;
+}
 
 export function RecurringContractForm({
   initial = null,
@@ -68,12 +90,24 @@ export function RecurringContractForm({
   const [partners, setPartners] = React.useState<PartnerOption[]>([]);
   const [error, setError] = React.useState<string | null>(null);
   const [saving, setSaving] = React.useState(false);
+  const errorRef = React.useRef<HTMLDivElement>(null);
+  const currentBillingMonthLabel = new Intl.DateTimeFormat('ko-KR', {
+    timeZone: 'Asia/Seoul',
+    year: 'numeric',
+    month: 'long',
+  }).format(new Date());
 
   React.useEffect(() => {
     void listPartners()
       .then((rows: PartnerOption[]) => setPartners(rows.map((p) => ({ id: p.id, name: p.name }))))
       .catch(() => setPartners([]));
   }, []);
+
+  React.useEffect(() => {
+    if (!error) return;
+    errorRef.current?.focus({ preventScroll: true });
+    errorRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }, [error]);
 
   const set = <K extends keyof RecurringContractInput>(key: K, value: RecurringContractInput[K]) =>
     setForm((prev) => ({ ...prev, [key]: value }));
@@ -95,14 +129,12 @@ export function RecurringContractForm({
     setSaving(true);
     setError(null);
     try {
-      const payload: RecurringContractInput = {
-        ...form,
-        day_of_month: form.recurrence_mode === 'monthly' ? form.day_of_month ?? 1 : null,
-        interval_weeks: form.recurrence_mode === 'weekly' ? form.interval_weeks ?? 1 : null,
-        weekdays: form.recurrence_mode === 'weekly' ? form.weekdays ?? [] : null,
-      };
+      const payload = normalizedPayload(form);
       if (initial) {
-        await updateRecurringContract(initial.id, payload);
+        await updateRecurringContract(
+          initial.id,
+          changedPayload(payload, normalizedPayload(initial)),
+        );
       } else {
         await createRecurringContract(payload);
       }
@@ -115,7 +147,7 @@ export function RecurringContractForm({
   };
 
   return (
-    <div style={{ flex: 1, minHeight: 0, overflow: 'auto', background: 'var(--bg)' }}>
+    <div className="recurring-contract-form" style={{ flex: 1, minHeight: 0, overflow: 'auto', background: 'var(--bg)' }}>
       <div style={{ padding: 20, maxWidth: 640, paddingBottom: 80 }}>
         <h1 style={{ fontSize: 18, fontWeight: 700, margin: '0 0 4px' }}>
           {initial ? '정기계약 수정' : '정기계약 등록'}
@@ -127,13 +159,15 @@ export function RecurringContractForm({
         )}
         {error && (
           <div
+            ref={errorRef}
             role="alert"
+            tabIndex={-1}
             data-testid="rc-form-error"
             style={{
-              padding: 10,
-              borderRadius: 6,
-              background: 'var(--danger-bg, #fdecea)',
-              color: 'var(--danger-fg, #c0392b)',
+              padding: 'var(--space-2-5)',
+              borderRadius: 'var(--radius)',
+              background: 'var(--danger-bg)',
+              color: 'var(--danger-fg)',
               fontSize: 12.5,
               marginBottom: 12,
             }}
@@ -404,6 +438,26 @@ export function RecurringContractForm({
                   : '생성된 정기 주문의 도급가로 내려가 정산 탭에 반영됩니다.'}
               </span>
             </label>
+            {initial && (
+              <div
+                data-testid="rc-partner-billing-effective-note"
+                style={{
+                  padding: 'var(--space-2) var(--space-3)',
+                  border: '1px solid var(--border)',
+                  borderRadius: 'var(--radius)',
+                  background: 'var(--bg-subtle)',
+                  color: 'var(--text-secondary)',
+                  fontSize: 12,
+                  lineHeight: 1.55,
+                  wordBreak: 'keep-all',
+                }}
+              >
+                정산 방식과 도급가 변경은 {currentBillingMonthLabel}부터 적용됩니다. 이전 달 정산 이력과
+                기존 주문·사진은 그대로 유지됩니다. 완료·사진·지급완료·보류 이력이 있는 회차는 기존
+                조건을 보존하고, 변경 가능한 이번 달 이후 회차부터 새 조건을 적용합니다. 적용 월의 월
+                정산 자체가 지급완료된 경우에만 지급완료를 되돌린 뒤 변경해 주세요.
+              </div>
+            )}
             <label style={labelStyle}>
               요청 시간(선택)
               <input
@@ -452,6 +506,12 @@ export function RecurringContractForm({
                 data-testid="rc-default-partner"
               >
                 <option value="">미지정</option>
+                {form.default_partner_id
+                  && !partners.some((partner) => partner.id === form.default_partner_id) && (
+                    <option value={form.default_partner_id} disabled>
+                      보관된 협력사 (기존 배정)
+                    </option>
+                  )}
                 {partners.map((p) => (
                   <option key={p.id} value={p.id}>
                     {p.name}
@@ -502,8 +562,26 @@ function errorMessage(error: unknown): string {
   if (!(error instanceof Error)) {
     return '저장에 실패했습니다.';
   }
-  if (error.message === 'recurring_partner_billing_mode_locked') {
-    return '이미 정기 주문 또는 월정산 기록이 있어 협력사 정산 방식은 변경할 수 없습니다.';
+  if (error.message === 'recurring_partner_billing_change_paid') {
+    return '적용 월의 월 정산이 이미 지급완료되었습니다. 지급완료를 되돌린 뒤 다시 변경하세요.';
+  }
+  if (error.message === 'recurring_partner_billing_change_unscheduled') {
+    return '방문일이 정해지지 않은 기존 회차가 있어 적용 월을 판단할 수 없습니다. 해당 회차의 방문일을 지정한 뒤 다시 변경하세요.';
+  }
+  if (error.message === 'recurring_start_date_locked') {
+    return '이미 생성된 회차 또는 정산 이력이 있어 시작일을 변경할 수 없습니다. 기존 이력을 유지하고 일정만 조정하세요.';
+  }
+  if (error.message === 'recurring_contract_end_date_passed') {
+    return '종료일이 이미 지난 계약은 재개할 수 없습니다. 종료일을 오늘 이후로 변경한 뒤 다시 시도하세요.';
+  }
+  if (error.message === 'recurring_partner_changed_concurrently') {
+    return '다른 작업에서 협력사 또는 정산 조건이 변경되었습니다. 최신 정보를 다시 불러온 뒤 시도하세요.';
+  }
+  if (error.message === 'partner_not_found') {
+    return '선택한 협력사가 삭제되었습니다. 사용 가능한 협력사를 다시 선택하세요.';
+  }
+  if (error.message === 'partner_inactive') {
+    return '선택한 협력사가 비활성 상태입니다. 활성 협력사를 선택하세요.';
   }
   return error.message;
 }

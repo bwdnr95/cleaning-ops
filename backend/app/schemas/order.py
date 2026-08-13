@@ -120,6 +120,11 @@ class OrderUpdate(ApiModel):
     broker_payment_status: str | None = None
 
 
+class AdminOrderEditUpdate(ApiModel):
+    line: OrderUpdate = Field(default_factory=OrderUpdate)
+    group: OrderGroupUpdate = Field(default_factory=OrderGroupUpdate)
+
+
 class AdminOrderRead(OrderLineBase):
     id: str
     group_id: str

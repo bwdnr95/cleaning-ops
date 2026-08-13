@@ -20,6 +20,7 @@ import {
 import { previewAdminMessage } from '../../../api/messages';
 import { PaginationBar, paginateItems } from '../../../components/common/Pagination';
 import { DatePicker } from '../../../components/common/DatePicker';
+import { useIsNarrowViewport } from '../../../components/common/useIsNarrowViewport';
 import { useApiResource } from '../../../api/useApiResource';
 import { Badge, Icon, StatusBadge } from '../../../components/common/ui';
 import { formatPhone } from '../../../domain/phone';
@@ -29,6 +30,7 @@ const ALL_CATEGORY_FILTER = 'all';
 const UNCLASSIFIED_CATEGORY_FILTER = 'unclassified';
 
 export function PartnersPage() {
+  const isNarrowViewport = useIsNarrowViewport();
   const loadPartners = React.useCallback(() => listAdminPartners({ includeInactive: true }), []);
   const loadCategories = React.useCallback(() => listPartnerCategories({ includeInactive: true }), []);
   const partnersResource = useApiResource(loadPartners);
@@ -64,6 +66,8 @@ export function PartnersPage() {
   const [settlementMemo, setSettlementMemo] = React.useState('');
   const [notice, setNotice] = React.useState('');
   const [error, setError] = React.useState('');
+  const [deleteError, setDeleteError] = React.useState('');
+  const deleteFeedbackRef = React.useRef<HTMLDivElement | null>(null);
 
   const filteredPartners = React.useMemo(
     () => filterPartners(partners, categoryFilter, partnerQuery),
@@ -105,6 +109,7 @@ export function PartnersPage() {
     let isCurrent = true;
     setDetailLoading(true);
     setError('');
+    setDeleteError('');
 
     getAdminPartner(selectedId)
       .then((partner) => {
@@ -165,7 +170,16 @@ export function PartnersPage() {
     };
   }, [selectedId, settlementStatusFilter, settlementDateRange.from, settlementDateRange.to]);
 
+  React.useEffect(() => {
+    if (!deleteError) {
+      return;
+    }
+    deleteFeedbackRef.current?.focus({ preventScroll: true });
+    deleteFeedbackRef.current?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  }, [deleteError]);
+
   const stats = toPartnerStats(partners);
+  const deleteBlockReason = detail ? partnerDeleteBlockReason(detail) : '';
   const selectedSettlementAmount = React.useMemo(
     () => settlements?.items
       .filter((job) => settlementSelection.has(job.order_id))
@@ -189,6 +203,7 @@ export function PartnersPage() {
   const handleCreateCategory = async () => {
     setError('');
     setNotice('');
+    setDeleteError('');
     setIsSavingCategory(true);
     try {
       const created = await createPartnerCategory({
@@ -311,6 +326,7 @@ export function PartnersPage() {
 
     setError('');
     setNotice('');
+    setDeleteError('');
     setIsSaving(true);
     try {
       const updated = await updateAdminPartner(detail.id, toPartnerPayload(form));
@@ -352,12 +368,15 @@ export function PartnersPage() {
     if (!detail) {
       return;
     }
-    if (!window.confirm(`'${detail.name}' 협력사를 삭제할까요?`)) {
+    if (!window.confirm(
+      `'${detail.name}' 협력사를 삭제할까요?\n완료 주문·사진·정산 이력은 유지되고 협력사 계정만 목록에서 제거됩니다.`,
+    )) {
       return;
     }
 
     setError('');
     setNotice('');
+    setDeleteError('');
     setIsSaving(true);
     try {
       await deleteAdminPartner(detail.id);
@@ -365,10 +384,12 @@ export function PartnersPage() {
       setDetail(null);
       setForm(defaultPartnerForm());
       setResetLoginPhone('');
-      setNotice('협력사를 삭제했습니다.');
+      setDeleteError('');
+      setNotice('협력사를 삭제했습니다. 완료 주문과 정산 이력은 보존됩니다.');
       partnersResource.reload();
     } catch (requestError) {
-      setError(partnerErrorMessage(requestError, '협력사 삭제에 실패했습니다.'));
+      const message = partnerErrorMessage(requestError, '협력사 삭제에 실패했습니다.');
+      setDeleteError(message);
     } finally {
       setIsSaving(false);
     }
@@ -428,11 +449,13 @@ export function PartnersPage() {
     });
   };
 
-  // 정산(지급완료 처리)은 서비스완료 + 미지급 행만 가능. 전체선택/체크박스는 이 집합으로 제한해
-  // 비정산 가능 행이 일괄정산에 섞여 배치 전체가 거부되는 일을 막는다.
   const settleableSettlementIds = settlements
     ? settlements.items
-        .filter((job) => job.status === '서비스완료' && job.partner_payment_status !== 'paid')
+        .filter((job) => (
+          job.partner_payment_status !== 'paid'
+          && job.status !== '취소'
+          && (job.partner_price ?? 0) > 0
+        ))
         .map((job) => job.order_id)
     : [];
   const allSettlementsSelected = settleableSettlementIds.length > 0
@@ -511,8 +534,8 @@ export function PartnersPage() {
   };
 
   return (
-    <div data-testid="admin-partners-page" style={{ flex: 1, minHeight: 0, overflow: 'auto', background: 'var(--bg)' }}>
-      <div className="page-shell" style={{ padding: 20, display: 'flex', flexDirection: 'column', gap: 12 }}>
+    <div className="partners-page" data-testid="admin-partners-page" style={{ flex: 1, minHeight: 0, overflow: 'auto', background: 'var(--bg)' }}>
+      <div className="page-shell" style={{ padding: isNarrowViewport ? 12 : 20, display: 'flex', flexDirection: 'column', gap: 12 }}>
         <section className="card" style={{ padding: 0, overflow: 'hidden' }}>
           <SectionHeader
             icon="list"
@@ -523,8 +546,8 @@ export function PartnersPage() {
               </button>
             )}
           />
-          <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 430px', gap: 0 }}>
-            <div style={{ padding: 14, borderRight: '1px solid var(--divider)', display: 'flex', flexWrap: 'wrap', gap: 8, alignContent: 'flex-start' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: isNarrowViewport ? 'minmax(0, 1fr)' : 'minmax(0, 1fr) 430px', gap: 0 }}>
+            <div style={{ padding: 14, borderRight: isNarrowViewport ? 'none' : '1px solid var(--divider)', borderBottom: isNarrowViewport ? '1px solid var(--divider)' : 'none', display: 'flex', flexWrap: 'wrap', gap: 8, alignContent: 'flex-start' }}>
               <CategoryFilterButton
                 testId="partner-category-filter-all"
                 label="전체"
@@ -553,7 +576,7 @@ export function PartnersPage() {
               {categoriesResource.isLoading && <span style={{ fontSize: 12, color: 'var(--text-tertiary)', alignSelf: 'center' }}>대분류를 불러오는 중입니다.</span>}
               {!categoriesResource.isLoading && categoriesResource.error && <span style={{ fontSize: 12, color: 'var(--danger-fg)', alignSelf: 'center' }}>대분류를 불러오지 못했습니다.</span>}
             </div>
-            <form onSubmit={handleSaveCategory} style={{ padding: 14, display: 'grid', gridTemplateColumns: '1fr 80px auto', gap: 8, alignItems: 'end' }}>
+            <form onSubmit={handleSaveCategory} style={{ padding: 14, display: 'grid', gridTemplateColumns: isNarrowViewport ? 'minmax(0, 1fr)' : '1fr 80px auto', gap: 8, alignItems: 'end' }}>
               {selectedCategory ? (
                 <>
                   <FormField testId="partner-category-name" label="대분류명" value={categoryForm.name} onChange={(value) => setCategoryForm({ ...categoryForm, name: value })} required />
@@ -561,7 +584,7 @@ export function PartnersPage() {
                   <button data-testid="partner-category-save" className="btn btn--primary btn--sm" disabled={isSavingCategory || !categoryForm.name.trim()}>
                     <Icon name="check" size={12} /> 저장
                   </button>
-                  <div style={{ gridColumn: '1 / -1', display: 'grid', gridTemplateColumns: '1fr auto auto', gap: 8, alignItems: 'end' }}>
+                  <div style={{ gridColumn: '1 / -1', display: 'grid', gridTemplateColumns: isNarrowViewport ? 'minmax(0, 1fr)' : '1fr auto auto', gap: 8, alignItems: 'end' }}>
                     <FormField testId="partner-category-description" label="설명" value={categoryForm.description} onChange={(value) => setCategoryForm({ ...categoryForm, description: value })} />
                     <button type="button" data-testid="partner-category-toggle" className="btn btn--secondary btn--sm" disabled={isSavingCategory} onClick={handleToggleCategory}>
                       <Icon name={selectedCategory.is_active ? 'x' : 'check'} size={12} />
@@ -581,14 +604,14 @@ export function PartnersPage() {
           </div>
         </section>
 
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: 10 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: isNarrowViewport ? 'repeat(2, minmax(0, 1fr))' : 'repeat(4, minmax(0, 1fr))', gap: 10 }}>
           <StatCard label="전체 협력사" value={partners.length} icon="truck" />
           <StatCard label="활성 협력사" value={stats.active} icon="check" tone="success" />
           <StatCard label="운영 중 작업" value={stats.activeJobs} icon="calendar" tone="info" />
           <StatCard label="계정 미연결" value={stats.missingLogin} icon="lock" tone="warn" />
         </div>
 
-        <div style={{ display: 'grid', gridTemplateColumns: 'minmax(360px, 0.95fr) minmax(0, 1.45fr)', gap: 12, alignItems: 'stretch' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: isNarrowViewport ? 'minmax(0, 1fr)' : 'minmax(360px, 0.95fr) minmax(0, 1.45fr)', gap: 12, alignItems: 'stretch' }}>
           <section className="card" style={{ padding: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
             <SectionHeader
               icon="truck"
@@ -601,7 +624,7 @@ export function PartnersPage() {
             />
 
             <div style={{ padding: '10px 12px', borderBottom: '1px solid var(--divider)', display: 'flex', alignItems: 'center', gap: 8 }}>
-              <label style={{ flex: 1, minWidth: 0, height: 32, display: 'flex', alignItems: 'center', gap: 8, padding: '0 10px', border: '1px solid var(--border)', borderRadius: 8, background: 'var(--surface)', boxShadow: 'var(--shadow-xs)', color: 'var(--text-tertiary)' }}>
+              <label className="partner-search-control" style={{ flex: 1, minWidth: 0, height: 32, display: 'flex', alignItems: 'center', gap: 8, padding: '0 10px', border: '1px solid var(--border)', borderRadius: 8, background: 'var(--surface)', boxShadow: 'var(--shadow-xs)', color: 'var(--text-tertiary)' }}>
                 <Icon name="search" size={13} />
                 <input
                   data-testid="partner-search-input"
@@ -745,9 +768,9 @@ export function PartnersPage() {
               {detailLoading && <StateLine text="협력사 상세 정보를 불러오는 중입니다." />}
               {!detailLoading && !detail && <StateLine text="목록에서 협력사를 선택하세요." />}
               {!detailLoading && detail && (
-                <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 300px', gap: 0 }}>
-                  <form onSubmit={handleSave} style={{ padding: 14, borderRight: '1px solid var(--divider)', display: 'flex', flexDirection: 'column', gap: 12 }}>
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 10 }}>
+                <div style={{ display: 'grid', gridTemplateColumns: isNarrowViewport ? 'minmax(0, 1fr)' : 'minmax(0, 1fr) 300px', gap: 0 }}>
+                  <form onSubmit={handleSave} style={{ padding: 14, borderRight: isNarrowViewport ? 'none' : '1px solid var(--divider)', borderBottom: isNarrowViewport ? '1px solid var(--divider)' : 'none', display: 'flex', flexDirection: 'column', gap: 12 }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: isNarrowViewport ? 'minmax(0, 1fr)' : 'repeat(2, minmax(0, 1fr))', gap: 10 }}>
                       <FormField testId="partner-detail-name" label="협력사명" value={form.name} onChange={(value) => setForm({ ...form, name: value })} required />
                       <FormField label="담당자" value={form.manager_name} onChange={(value) => setForm({ ...form, manager_name: value })} />
                       <CategorySelect
@@ -764,24 +787,50 @@ export function PartnersPage() {
                     <TextAreaField label="가능 서비스" value={form.available_services} onChange={(value) => setForm({ ...form, available_services: value })} />
                     <TextAreaField label="운영 메모" value={form.memo} onChange={(value) => setForm({ ...form, memo: value })} />
 
-                    <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-                      <button
-                        type="button"
-                        data-testid="partner-delete"
-                        className="btn btn--danger btn--sm"
-                        disabled={isSaving || Number(detail.scheduled_job_count || 0) > 0}
-                        onClick={handleDelete}
-                        title={Number(detail.scheduled_job_count || 0) > 0 ? '배정 작업이 없는 협력사만 삭제할 수 있습니다.' : '협력사 삭제'}
-                      >
-                        <Icon name="x" size={12} /> 삭제
-                      </button>
-                      <button type="button" data-testid="partner-toggle-active" className="btn btn--secondary btn--sm" disabled={isSaving} onClick={handleToggleActive}>
-                        <Icon name={detail.is_active ? 'x' : 'check'} size={12} />
-                        {detail.is_active ? '비활성화' : '활성화'}
-                      </button>
-                      <button data-testid="partner-save" className="btn btn--primary btn--sm" disabled={isSaving}>
-                        <Icon name="check" size={12} /> 저장
-                      </button>
+                    <div style={{ display: 'flex', gap: 8, alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap' }}>
+                      <div style={{ flex: '1 1 260px' }}>
+                        <span style={{ color: 'var(--text-tertiary)', fontSize: 11.5 }}>
+                          삭제해도 완료 주문·사진·정산 이력은 보존됩니다.
+                        </span>
+                        {(deleteBlockReason || deleteError) && (
+                          <div
+                            ref={deleteFeedbackRef}
+                            tabIndex={-1}
+                            role={deleteError ? 'alert' : 'status'}
+                            id="partner-delete-feedback"
+                            data-testid="partner-delete-feedback"
+                            style={{
+                              marginTop: 6,
+                              color: 'var(--danger-fg)',
+                              fontSize: 12,
+                              fontWeight: 600,
+                              lineHeight: 1.5,
+                              outline: 'none',
+                            }}
+                          >
+                            {deleteError || deleteBlockReason}
+                          </div>
+                        )}
+                      </div>
+                      <div style={{ display: 'flex', gap: 8, marginLeft: 'auto', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                        <button
+                          type="button"
+                          data-testid="partner-delete"
+                          className="btn btn--danger btn--sm"
+                          disabled={isSaving || Boolean(deleteBlockReason)}
+                          onClick={handleDelete}
+                          aria-describedby={(deleteBlockReason || deleteError) ? 'partner-delete-feedback' : undefined}
+                        >
+                          <Icon name="x" size={12} /> 삭제
+                        </button>
+                        <button type="button" data-testid="partner-toggle-active" className="btn btn--secondary btn--sm" disabled={isSaving} onClick={handleToggleActive}>
+                          <Icon name={detail.is_active ? 'x' : 'check'} size={12} />
+                          {detail.is_active ? '비활성화' : '활성화'}
+                        </button>
+                        <button data-testid="partner-save" className="btn btn--primary btn--sm" disabled={isSaving}>
+                          <Icon name="check" size={12} /> 저장
+                        </button>
+                      </div>
                     </div>
                   </form>
 
@@ -838,12 +887,13 @@ export function PartnersPage() {
                 <SectionHeader
                   icon="list"
                   title="배정 작업 / 정산"
+                  responsive
                   right={(
-                    <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-                      <DatePicker compact testId="partner-settlement-from" value={settlementDateRange.from} onChange={(value) => setSettlementDateRange((current) => ({ ...current, from: value }))} />
-                      <span style={{ color: 'var(--text-quaternary)', fontSize: 12 }}>~</span>
-                      <DatePicker compact testId="partner-settlement-to" value={settlementDateRange.to} onChange={(value) => setSettlementDateRange((current) => ({ ...current, to: value }))} />
-                      <select className="input" data-testid="partner-settlement-status" value={settlementStatusFilter} onChange={(event) => setSettlementStatusFilter(event.target.value as SettlementStatusFilter)} style={{ height: 28 }}>
+                    <div className="partner-settlement-filters" style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                      <DatePicker compact style={{ minWidth: 0 }} testId="partner-settlement-from" value={settlementDateRange.from} onChange={(value) => setSettlementDateRange((current) => ({ ...current, from: value }))} />
+                      <span className="partner-settlement-filter-separator" style={{ color: 'var(--text-quaternary)', fontSize: 12 }}>~</span>
+                      <DatePicker compact style={{ minWidth: 0 }} testId="partner-settlement-to" value={settlementDateRange.to} onChange={(value) => setSettlementDateRange((current) => ({ ...current, to: value }))} />
+                      <select className="input" data-testid="partner-settlement-status" value={settlementStatusFilter} onChange={(event) => setSettlementStatusFilter(event.target.value as SettlementStatusFilter)}>
                         <option value="all">전체</option>
                         <option value="unpaid">미정산</option>
                         <option value="paid">정산완료</option>
@@ -1036,10 +1086,10 @@ export function PartnersPage() {
   );
 }
 
-function SectionHeader({ icon, title, right = null }) {
+function SectionHeader({ icon, title, right = null, responsive = false }) {
   return (
-    <div style={{
-      height: 42,
+    <div className={responsive ? 'section-header section-header--responsive' : 'section-header'} style={{
+      minHeight: 42,
       padding: '0 14px',
       display: 'flex',
       alignItems: 'center',
@@ -1048,8 +1098,8 @@ function SectionHeader({ icon, title, right = null }) {
     }}>
       <Icon name={icon} size={14} color="var(--text-tertiary)" />
       <strong style={{ fontSize: 13 }}>{title}</strong>
-      <div style={{ flex: 1 }} />
-      {right}
+      <div className="section-header__spacer" style={{ flex: 1 }} />
+      <div className="section-header__right">{right}</div>
     </div>
   );
 }
@@ -1121,6 +1171,7 @@ function CategoryFilterButton({ label, count, active, onClick, testId, muted = f
   return (
     <button
       type="button"
+      className="partner-category-filter-button"
       data-testid={testId}
       aria-pressed={active}
       onClick={onClick}
@@ -1186,6 +1237,7 @@ function Th({ children }) {
       color: 'var(--text-tertiary)',
       fontSize: 11,
       fontWeight: 600,
+      whiteSpace: 'nowrap',
       background: 'var(--bg-subtle)',
       borderTop: '1px solid var(--divider)',
     }}>
@@ -1405,7 +1457,10 @@ function partnerErrorMessage(error, fallback) {
   const code = error?.detail || error?.message;
   const messages = {
     partner_not_found: '협력사를 찾을 수 없습니다.',
-    partner_in_use: '이미 배정 이력이 있는 협력사는 삭제할 수 없습니다. 비활성화를 사용해주세요.',
+    partner_in_use: '연결된 운영 이력이 있어 삭제할 수 없습니다.',
+    partner_has_active_jobs: '진행 중이거나 확인이 필요한 작업이 있습니다. 작업을 완료 또는 취소한 뒤 삭제하세요.',
+    partner_has_unpaid_settlements: '미정산 도급가가 남아 있습니다. 협력사 정산을 완료한 뒤 삭제하세요.',
+    partner_has_recurring_contracts: '진행 중인 정기계약의 기본 협력사입니다. 기본 협력사를 변경하거나 계약을 종료한 뒤 삭제하세요.',
     partner_category_not_found: '협력사 대분류를 찾을 수 없습니다.',
     login_phone_already_in_use: '이미 다른 계정이 사용 중인 로그인 연락처입니다. 다른 번호를 입력하세요.',
     partner_inactive: '비활성화된 협력사입니다. 먼저 활성화해주세요.',
@@ -1419,6 +1474,20 @@ function partnerErrorMessage(error, fallback) {
     return `${fallback} (${raw})`;
   }
   return fallback;
+}
+
+function partnerDeleteBlockReason(partner) {
+  const unresolvedJobCount = Math.max(
+    Number(partner?.active_job_count || 0),
+    Number(partner?.scheduled_job_count || 0) - Number(partner?.completed_job_count || 0),
+  );
+  if (unresolvedJobCount > 0) {
+    return '진행 중이거나 확인이 필요한 작업을 먼저 완료 또는 취소하세요.';
+  }
+  if (Number(partner?.unpaid_partner_order_count || 0) > 0) {
+    return '미정산 도급가를 먼저 정산 완료하세요.';
+  }
+  return '';
 }
 
 function SettlementPill({ paid, settledAt }) {

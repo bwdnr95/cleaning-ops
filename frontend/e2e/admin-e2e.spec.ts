@@ -47,6 +47,8 @@ test('admin can search partners by company, manager, or phone', async ({ page })
   const search = page.getByTestId('partner-search-input');
   const partnerRow = page.locator('tr').filter({ hasText: '클린파트너 강남' });
   await expect(search).toBeVisible();
+  await search.focus();
+  await expect(search.locator('..')).toHaveCSS('outline-style', 'solid');
   await search.fill('클린파트너');
   await expect(partnerRow).toBeVisible();
 

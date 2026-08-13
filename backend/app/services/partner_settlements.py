@@ -15,12 +15,15 @@ from app.models.order import Order
 from app.models.order_group import OrderGroup
 from app.repositories.order_groups import OrderGroupRepository
 from app.repositories.partners import PartnerRepository
+from app.repositories.recurring import RecurringContractRepository
 from app.schemas.partner import (
     PartnerSettlementActionResult,
     PartnerSettlementItemRead,
     PartnerSettlementListRead,
 )
+from app.services.recurring_partner_billing import RecurringPartnerBillingService
 from app.services.timeline import TimelineService
+
 
 def unpaid_partner_condition():
     """미정산 SQL 조건(전 화면 공통).
@@ -44,6 +47,8 @@ class PartnerSettlementService:
         self.db = db
         self.partners = PartnerRepository(db)
         self.groups = OrderGroupRepository(db)
+        self.recurring_contracts = RecurringContractRepository(db)
+        self.partner_billing = RecurringPartnerBillingService(db)
         self.timeline = TimelineService(db)
 
     def list_settlements(
@@ -96,7 +101,7 @@ class PartnerSettlementService:
         actor_user_id: str,
         memo: str | None = None,
     ) -> PartnerSettlementActionResult:
-        self._require_partner(partner_id)
+        self._require_partner(partner_id, for_update=True)
         orders = self._lock_orders(
             partner_id=partner_id,
             order_ids=order_ids,
@@ -126,7 +131,7 @@ class PartnerSettlementService:
         order_ids: list[str],
         actor_user_id: str,
     ) -> PartnerSettlementActionResult:
-        self._require_partner(partner_id)
+        self._require_partner(partner_id, for_update=True)
         orders = self._lock_orders(
             partner_id=partner_id,
             order_ids=order_ids,
@@ -165,8 +170,12 @@ class PartnerSettlementService:
             totals[group_id] = (float(consumer), float(partner))
         return totals
 
-    def _require_partner(self, partner_id: str) -> None:
-        partner = self.partners.get(partner_id)
+    def _require_partner(self, partner_id: str, *, for_update: bool = False) -> None:
+        partner = (
+            self.partners.get_for_update(partner_id)
+            if for_update
+            else self.partners.get(partner_id)
+        )
         if partner is None:
             raise ValueError("partner_not_found")
         if not partner.is_active:
@@ -205,19 +214,47 @@ class PartnerSettlementService:
             pass
         else:
             raise ValueError("invalid_settlement_status")
-        return list(self.db.scalars(stmt))
+        orders = list(self.db.scalars(stmt))
+        if status in {"unpaid", "paid"}:
+            orders = [
+                order
+                for order in orders
+                if self.partner_billing.allows_order_settlement(order)
+            ]
+        return orders
 
     def _lock_orders(self, *, partner_id: str, order_ids: list[str], action: str) -> list[Order]:
         if not order_ids:
             return []
         requested_ids = list(dict.fromkeys(order_ids))
+        order_contract_rows = self.db.execute(
+            select(Order.id, Order.recurring_contract_id).where(
+                Order.id.in_(requested_ids),
+                Order.deleted_at.is_(None),
+            )
+        ).all()
+        contract_by_order_id = {
+            order_id: recurring_contract_id
+            for order_id, recurring_contract_id in order_contract_rows
+        }
+        if any(order_id not in contract_by_order_id for order_id in requested_ids):
+            raise ValueError("settlement_order_not_found")
+        self.recurring_contracts.lock_ids(
+            [
+                contract_id
+                for contract_id in contract_by_order_id.values()
+                if contract_id is not None
+            ]
+        )
         stmt = (
             select(Order)
             .where(
                 Order.id.in_(requested_ids),
                 Order.deleted_at.is_(None),
             )
+            .order_by(Order.id.asc())
             .with_for_update()
+            .execution_options(populate_existing=True)
         )
         orders = list(self.db.scalars(stmt))
         by_id = {order.id: order for order in orders}
@@ -225,6 +262,11 @@ class PartnerSettlementService:
             raise ValueError("settlement_order_not_found")
         if any(order.partner_id != partner_id for order in orders):
             raise ValueError("settlement_order_partner_mismatch")
+        if action in {"settle", "revert"} and any(
+            not self.partner_billing.allows_order_settlement(order)
+            for order in orders
+        ):
+            raise ValueError("invalid_settlement_order")
         if action == "settle" and any(not is_unpaid_partner_order(order) for order in orders):
             raise ValueError("invalid_settlement_order")
         if action == "revert" and any(not is_revertible_partner_order(order) for order in orders):

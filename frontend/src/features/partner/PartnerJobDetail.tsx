@@ -303,7 +303,25 @@ export function PartnerJobDetail({ onDetailOpenChange = undefined } = {}) {
     <div data-testid="partner-job-detail-page" style={{ height: '100%', display: 'flex', flexDirection: 'column', background: '#f4f6f8', overflow: 'hidden' }}>
       <div style={{ padding: '12px 16px 10px', background: '#fff', borderBottom: '1px solid var(--border)' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-          <button onClick={() => setSelectedJobId(null)} style={{ padding: 0, border: 'none', background: 'transparent', cursor: 'pointer' }}>
+          <button
+            type="button"
+            className="partner-job-back-button"
+            aria-label="작업 목록으로 돌아가기"
+            title="작업 목록으로 돌아가기"
+            onClick={() => setSelectedJobId(null)}
+            style={{
+              width: 'var(--touch-target)',
+              height: 'var(--touch-target)',
+              padding: 0,
+              border: 'none',
+              borderRadius: 'var(--radius-md)',
+              background: 'transparent',
+              cursor: 'pointer',
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}
+          >
             <Icon name="chevronLeft" size={20}/>
           </button>
           <PartnerStatusBadge status={job.status}/>

@@ -7,8 +7,7 @@ import {
   listPartners,
   listServiceCatalog,
   sendOrderAsRequest,
-  updateAdminOrder,
-  updateAdminOrderGroup,
+  updateAdminOrderEdit,
 } from '../../../api/admin';
 import { useApiResource } from '../../../api/useApiResource';
 import { AddressInput } from '../../../components/AddressInput';
@@ -36,6 +35,7 @@ export function OrderFormPage({ mode = 'create', orderId = null, duplicateFromOr
   const [asMemo, setAsMemo] = React.useState('');
   const [asRequested, setAsRequested] = React.useState(false);
   const [asBusy, setAsBusy] = React.useState(false);
+  const initialFormRef = React.useRef<ReturnType<typeof createEmptyGroupForm> | null>(null);
   const draft = useOrderFormDraft(form, { enabled: mode === 'create' && !isDuplicate });
   const activeServiceCategories = React.useMemo(
     () => (serviceCatalog.data || []).filter((category) => category.is_active),
@@ -48,6 +48,7 @@ export function OrderFormPage({ mode = 'create', orderId = null, duplicateFromOr
     const loadId = mode === 'edit' ? orderId : (isDuplicate ? duplicateFromOrderId : null);
     if (!loadId) {
       setForm(createEmptyGroupForm());
+      initialFormRef.current = null;
       setIsLoadingOrder(false);
       return () => {
         isCurrent = false;
@@ -58,7 +59,9 @@ export function OrderFormPage({ mode = 'create', orderId = null, duplicateFromOr
     getAdminOrder(loadId)
       .then((order) => {
         if (isCurrent) {
-          setForm(isDuplicate ? toDuplicateForm(order) : toForm(order));
+          const loadedForm = isDuplicate ? toDuplicateForm(order) : toForm(order);
+          setForm(loadedForm);
+          initialFormRef.current = isDuplicate ? null : loadedForm;
           if (!isDuplicate) {
             setAsRequested(Boolean(order.as_requested));
             setAsMemo(order.as_memo || '');
@@ -206,8 +209,19 @@ export function OrderFormPage({ mode = 'create', orderId = null, duplicateFromOr
     setIsSaving(true);
     try {
       if (mode === 'edit' && orderId) {
-        await updateAdminOrderGroup(form.group_id, toGroupMetadataPayload(form));
-        const saved = await updateAdminOrder(orderId, toLinePayload(form.lines[0]));
+        const initialForm = initialFormRef.current;
+        const groupPayload = changedPayload(
+          toGroupMetadataPayload(form),
+          initialForm ? toGroupMetadataPayload(initialForm) : {},
+        );
+        const linePayload = changedPayload(
+          toLinePayload(form.lines[0]),
+          initialForm ? toLinePayload(initialForm.lines[0]) : {},
+        );
+        const saved = await updateAdminOrderEdit(orderId, {
+          line: linePayload,
+          group: groupPayload,
+        });
         draft.clearDraft();
         return saved;
       } else {
@@ -249,9 +263,13 @@ export function OrderFormPage({ mode = 'create', orderId = null, duplicateFromOr
       const updated = await sendOrderAsRequest(orderId, memo);
       setAsRequested(Boolean(updated.as_requested));
       setAsMemo(updated.as_memo || memo);
-      setNotice('AS 요청을 협력사와 고객에게 전송했습니다. 협력사 링크에도 표시됩니다.');
+      setNotice('AS 요청을 등록했습니다. 수신자별 발송 결과는 메시지 로그에서 확인할 수 있습니다.');
     } catch (requestError) {
-      setError(requestError?.message || 'AS 요청 전송에 실패했습니다.');
+      if (requestError?.message === 'partner_not_found' || requestError?.message === 'partner_inactive') {
+        setError('배정된 협력사가 보관 또는 비활성 상태여서 AS 요청을 전달할 수 없습니다. 활성 협력사를 다시 배정해주세요.');
+      } else {
+        setError(requestError?.message || 'AS 요청 전송에 실패했습니다.');
+      }
     } finally {
       setAsBusy(false);
     }
@@ -269,7 +287,7 @@ export function OrderFormPage({ mode = 'create', orderId = null, duplicateFromOr
   }
 
   return (
-    <form data-testid="admin-order-form" onSubmit={handleSubmit} style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0, background: 'var(--bg)' }}>
+    <form className="order-form" data-testid="admin-order-form" onSubmit={handleSubmit} style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0, background: 'var(--bg)' }}>
       <div style={{
         padding: '10px 20px',
         background: 'var(--surface)',
@@ -292,7 +310,7 @@ export function OrderFormPage({ mode = 'create', orderId = null, duplicateFromOr
       </div>
 
       <div className="scroll" style={{ flex: 1, overflow: 'auto', padding: 20 }}>
-        <div className="page-shell" style={{ display: 'grid', gridTemplateColumns: '1fr 300px', gap: 16 }}>
+        <div className="page-shell order-form-layout" style={{ display: 'grid', gap: 16 }}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
             {isDuplicate && (
               <div data-testid="order-duplicate-banner" style={{ padding: '10px 12px', background: 'var(--brand-bg)', border: '1px solid var(--brand)', borderRadius: 8, fontSize: 12.5, color: 'var(--text)' }}>
@@ -309,7 +327,7 @@ export function OrderFormPage({ mode = 'create', orderId = null, duplicateFromOr
                     onChange={(value) => setGroupField('source_channel', value)}
                   />
                 </Field>
-                <div style={{ gridColumn: 'span 2' }}>
+                <div className="order-form-field--span-2">
                   <AddressInput
                     baseAddress={form.customer_address}
                     detailAddress={form.customer_address_detail}
@@ -429,6 +447,9 @@ function LineEditor({
   onSendAs,
 }) {
   const serviceItems = getServiceItems(activeServiceCategories, line.service_category_id);
+  const hasArchivedPartner = Boolean(
+    line.partner_id && !partners.some((partner) => partner.id === line.partner_id),
+  );
   // AS 블록은 주문 단위 액션이라 편집 모드의 첫 라인에만 노출한다.
   const showAs = asEnabled && lineIndex === 0;
 
@@ -459,6 +480,11 @@ function LineEditor({
           <Field label="협력사">
             <select className="input" data-testid={`order-line-${lineIndex}-partner`} value={line.partner_id} onChange={(event) => onPartnerChange(lineIndex, event.target.value)}>
               <option value="">미배정</option>
+              {hasArchivedPartner && (
+                <option value={line.partner_id} disabled>
+                  {line.team_name || '기존 협력사'} (보관됨 · 이력 전용)
+                </option>
+              )}
               {partners.map((partner) => (
                 <option key={partner.id} value={partner.id}>{partner.name}</option>
               ))}
@@ -647,12 +673,12 @@ function Section({ title, action = null, children }) {
 }
 
 function FieldGrid({ children }) {
-  return <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: '12px 14px' }}>{children}</div>;
+  return <div className="order-form-field-grid" style={{ display: 'grid', gap: '12px 14px' }}>{children}</div>;
 }
 
 function Field({ label, children, span = 1 }) {
   return (
-    <label style={{ gridColumn: span ? `span ${span}` : 'auto', display: 'flex', flexDirection: 'column', gap: 5 }}>
+    <label className={span > 1 ? 'order-form-field--span-2' : undefined} style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
       <span style={{ fontSize: 10.5, color: 'var(--text-tertiary)', fontWeight: 600 }}>{label}</span>
       {children}
     </label>
@@ -848,6 +874,12 @@ function toLinePayload(line) {
     partner_payment_status: emptyToNull(line.partner_payment_status),
     broker_payment_amount: numberOrNull(line.broker_payment_amount),
   };
+}
+
+function changedPayload(nextPayload, previousPayload) {
+  return Object.fromEntries(
+    Object.entries(nextPayload).filter(([key, value]) => previousPayload[key] !== value),
+  );
 }
 
 function getServiceItems(categories, categoryId) {

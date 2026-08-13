@@ -21,7 +21,6 @@ test('partner uploads job photos and customer sees auto-published photos except 
   await loginAsPartner(partnerPage);
   await partnerPage.getByTestId(`partner-job-row-${flow.orderId}`).click();
   await expect(partnerPage.getByTestId('partner-job-detail-page')).toBeVisible();
-
   await expect(partnerPage.getByText('partner_payment_amount')).toHaveCount(0);
   await expect(partnerPage.getByText('Internal payment memo')).toHaveCount(0);
   await expect(partnerPage.getByText('010-8899-7766')).toBeVisible();

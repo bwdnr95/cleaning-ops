@@ -1,12 +1,14 @@
 from calendar import monthrange
-from datetime import date
+from datetime import UTC, date, datetime
 
 import pytest
 from sqlalchemy import select
 
 from app.core.time import business_today
-from app.db.seed import DEV_PARTNER_ID
+from app.db.seed import DEV_PARTNER_ID, DEV_SERVICE_ITEM_ID
+from app.models.order import Order
 from app.models.order_group import OrderGroup
+from app.models.partner import Partner
 from app.models.recurring_contract import RecurringContract
 from app.schemas.recurring import RecurringContractCreate
 from app.services.recurring import RecurringService
@@ -17,7 +19,10 @@ def _auth(token: str) -> dict[str, str]:
     return {"Authorization": f"Bearer {token}"}
 
 
-def test_create_contract_auto_generates_current_month_orders(client, seed_admin_token) -> None:
+def test_create_contract_auto_generates_orders_without_inflating_regular_dashboard_amount(
+    client,
+    seed_admin_token,
+) -> None:
     today = business_today()
     headers = _auth(seed_admin_token)
     summary_before = client.get("/api/admin/dashboard/summary", headers=headers)
@@ -101,7 +106,7 @@ def test_create_contract_auto_generates_current_month_orders(client, seed_admin_
     }
     assert (
         summary_after.json()["monthly_contract_amount"]
-        > summary_before.json()["monthly_contract_amount"]
+        == summary_before.json()["monthly_contract_amount"]
     )
 
 
@@ -134,6 +139,46 @@ def test_create_contract_rejects_invalid_service_item_before_auto_generation(
     contracts = client.get("/api/admin/recurring/contracts", headers=_auth(seed_admin_token))
     assert contracts.status_code == 200, contracts.text
     assert all(item["label"] != "잘못된 서비스 정기청소" for item in contracts.json())
+
+
+def test_monthly_partner_contract_keeps_catalog_price_out_of_generated_orders(
+    client,
+    seed_admin_token,
+) -> None:
+    today = business_today()
+    created = client.post(
+        "/api/admin/recurring/contracts",
+        json={
+            "label": "월정산 카탈로그 계약",
+            "customer_name": "월정산 고객",
+            "customer_phone": "01022223333",
+            "customer_address": "서울시 강남구 테스트로 7",
+            "recurrence_mode": "monthly",
+            "day_of_month": today.day,
+            "start_date": date(today.year, today.month, 1).isoformat(),
+            "default_partner_id": DEV_PARTNER_ID,
+            "service_item_id": DEV_SERVICE_ITEM_ID,
+            "service_name": "사무실 정기청소",
+            "partner_billing_mode": "monthly",
+            "partner_payment_amount": 300000,
+        },
+        headers=_auth(seed_admin_token),
+    )
+
+    assert created.status_code == 201, created.text
+    contract_id = created.json()["id"]
+    generated = client.get(
+        f"/api/admin/recurring/orders?month={today.year:04d}-{today.month:02d}",
+        headers=_auth(seed_admin_token),
+    )
+    order = next(
+        item
+        for item in generated.json()
+        if item["recurring_contract_id"] == contract_id
+    )
+    assert order["service_item_id"] == DEV_SERVICE_ITEM_ID
+    assert order["partner_payment_amount"] is None
+    assert order["partner_payment_status"] is None
 
 
 def test_patch_contract_rejects_invalid_service_item_before_persistence(
@@ -217,3 +262,42 @@ def test_create_contract_discards_group_and_contract_when_auto_generation_fails(
     group = db_session.get(OrderGroup, contract.order_group_id)
     assert group is not None
     assert group.deleted_at is not None
+
+
+def test_generation_rejects_archived_effective_partner(db_session) -> None:
+    today = business_today()
+    partner = db_session.get(Partner, DEV_PARTNER_ID)
+    assert partner is not None
+    partner.deleted_at = datetime.now(UTC)
+    partner.is_active = False
+    group = OrderGroup(
+        id="archived-generation-group",
+        customer_token="archived-generation-token",
+        customer_name="보관 협력사 고객",
+        customer_phone="01033334444",
+        customer_address="서울시 강남구",
+        customer_visible_payment=False,
+    )
+    contract = RecurringContract(
+        id="archived-generation-contract",
+        label="보관 협력사 생성 방지",
+        order_group_id=group.id,
+        recurrence_mode="monthly",
+        day_of_month=today.day,
+        start_date=today.replace(day=1),
+        status="active",
+        default_partner_id=partner.id,
+        service_name="정기청소",
+    )
+    db_session.add_all([group, contract])
+    db_session.flush()
+
+    with pytest.raises(ValueError, match="partner_not_found"):
+        RecurringOrderGenerationService(db_session).generate_current_month_for_contract(
+            contract,
+            actor_user_id=None,
+        )
+
+    assert db_session.scalars(
+        select(Order).where(Order.recurring_contract_id == contract.id)
+    ).all() == []

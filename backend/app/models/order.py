@@ -72,6 +72,12 @@ class Order(TimestampMixin, Base):
     partner_payment_amount: Mapped[Decimal | None] = mapped_column(Numeric(12, 2))
     partner_payment_status: Mapped[str | None] = mapped_column(String(40))
     partner_settled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    recurring_partner_settlement_retained: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+        server_default="false",
+    )
     # 중개사 소개 수수료 정산(협력사 도급가 정산과 동형).
     broker_payment_amount: Mapped[Decimal | None] = mapped_column(Numeric(12, 2))
     broker_payment_status: Mapped[str | None] = mapped_column(String(40))

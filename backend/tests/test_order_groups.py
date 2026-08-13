@@ -1,6 +1,9 @@
 from fastapi.testclient import TestClient
+from sqlalchemy import select
 
+from app.api.deps import get_session
 from app.domain.constants import OrderStatus, TimelineEventType
+from app.models.order import Order
 
 CUSTOMER_HEADERS = {"X-Customer-Token": "ct2_seed-customer-token-2450"}
 
@@ -263,3 +266,124 @@ def test_admin_detail_exposes_group_notes_and_group_updates_record_line_timeline
             "from": None,
             "to": "Unit 1204",
         }
+
+
+def test_admin_order_edit_updates_line_and_group_atomically(
+    client: TestClient,
+    seed_admin_token: str,
+) -> None:
+    headers = {"Authorization": f"Bearer {seed_admin_token}"}
+    response = client.patch(
+        "/api/admin/orders/seed-order-2450/edit",
+        headers=headers,
+        json={
+            "line": {"special_request": "현관 비밀번호 확인"},
+            "group": {"customer_address_detail": "101동 1204호"},
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    detail = client.get("/api/admin/orders/seed-order-2450", headers=headers).json()
+    group = client.get(
+        "/api/admin/orders/groups/seed-order-group-2450",
+        headers=headers,
+    ).json()
+    assert detail["special_request"] == "현관 비밀번호 확인"
+    assert detail["customer_address_detail"] == "101동 1204호"
+    assert group["customer_address_detail"] == "101동 1204호"
+
+
+def test_admin_order_edit_persists_group_fields_on_target_and_sibling_lines(
+    client: TestClient,
+    seed_admin_token: str,
+) -> None:
+    headers = {"Authorization": f"Bearer {seed_admin_token}"}
+    created = client.post(
+        "/api/admin/orders/groups",
+        headers=headers,
+        json={
+            "customer_name": "기존 고객",
+            "customer_phone": "010-1111-2222",
+            "customer_address": "기존 주소",
+            "lines": [
+                {"received_date": "2026-08-12", "service_name": "대상 라인"},
+                {"received_date": "2026-08-12", "service_name": "형제 라인"},
+            ],
+        },
+    )
+    assert created.status_code == 201, created.text
+    group = created.json()
+    target_id, sibling_id = [line["id"] for line in group["lines"]]
+
+    response = client.patch(
+        f"/api/admin/orders/{target_id}/edit",
+        headers=headers,
+        json={
+            "line": {},
+            "group": {
+                "customer_name": "변경 고객",
+                "customer_phone": "010-9999-8888",
+                "customer_address": "변경 주소",
+                "source_channel": "소개",
+                "customer_visible_payment": True,
+            },
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    refreshed_group = client.get(
+        f"/api/admin/orders/groups/{group['id']}", headers=headers
+    ).json()
+    target = client.get(f"/api/admin/orders/{target_id}", headers=headers).json()
+    sibling = client.get(f"/api/admin/orders/{sibling_id}", headers=headers).json()
+    for row in (refreshed_group, target, sibling):
+        assert row["customer_name"] == "변경 고객"
+        assert row["customer_phone"] == "01099998888"
+        assert row["customer_address"] == "변경 주소"
+        assert row["source_channel"] == "소개"
+        assert row["customer_visible_payment"] is True
+
+    session_generator = client.app.dependency_overrides[get_session]()
+    stored_db = next(session_generator)
+    try:
+        stored_lines = stored_db.scalars(
+            select(Order).where(Order.id.in_([target_id, sibling_id]))
+        ).all()
+        assert len(stored_lines) == 2
+        for stored in stored_lines:
+            assert stored.customer_name == "변경 고객"
+            assert stored.customer_phone == "01099998888"
+            assert stored.customer_address == "변경 주소"
+            assert stored.source_channel == "소개"
+            assert stored.customer_visible_payment is True
+    finally:
+        session_generator.close()
+
+
+def test_admin_order_edit_rolls_back_group_when_line_validation_fails(
+    client: TestClient,
+    seed_admin_token: str,
+) -> None:
+    headers = {"Authorization": f"Bearer {seed_admin_token}"}
+    before = client.get(
+        "/api/admin/orders/groups/seed-order-group-2450",
+        headers=headers,
+    ).json()
+
+    response = client.patch(
+        "/api/admin/orders/seed-order-2450/edit",
+        headers=headers,
+        json={
+            "line": {"service_item_id": "missing-service-item"},
+            "group": {"customer_name": "롤백되어야 하는 이름"},
+        },
+    )
+
+    assert response.status_code == 400, response.text
+    assert response.json()["detail"] == "service_item_not_found"
+    after = client.get(
+        "/api/admin/orders/groups/seed-order-group-2450",
+        headers=headers,
+    ).json()
+    assert after["customer_name"] == before["customer_name"]
+    assert after["lines"][0]["service_item_id"] == before["lines"][0]["service_item_id"]

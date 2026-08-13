@@ -9,7 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.time import business_today
-from app.domain.constants import OrderStatus, RecurringBillingMode, RecurringContractStatus
+from app.domain.constants import OrderStatus, RecurringBillingMode
 from app.domain.order_metrics import REVENUE_STATUSES
 from app.domain.order_pricing import order_consumer_total
 from app.domain.payment_status import PARTNER_SETTLEMENT_PENDING_STATUSES
@@ -18,8 +18,6 @@ from app.models.partner import Partner
 from app.models.recurring_contract import RecurringContract
 from app.models.recurring_monthly_status import RecurringMonthlyStatus
 from app.models.service_item import ServiceItem
-from app.services.partner_settlements import unpaid_partner_condition
-from app.services.recurring_monthly import RecurringMonthlyService
 from app.schemas.report import (
     PartnerPerformanceReport,
     PartnerPerformanceRow,
@@ -30,6 +28,12 @@ from app.schemas.report import (
     SettlementBacklogReport,
     SettlementBacklogRow,
 )
+from app.services.partner_settlements import unpaid_partner_condition
+from app.services.recurring_monthly import RecurringMonthlyService
+from app.services.recurring_partner_billing import (
+    RecurringPartnerBillingService,
+    incurred_billing_months,
+)
 
 _GRANULARITIES = {"day", "week", "month"}
 # 매출 대상 상태는 단일 출처(domain/order_metrics)를 사용한다.
@@ -39,6 +43,7 @@ _REVENUE_STATUSES = REVENUE_STATUSES
 @dataclass(frozen=True)
 class PendingRecurringMonthlySettlement:
     contract: RecurringContract
+    partner_id: str | None
     month: str
     month_start: date
     amount: Decimal
@@ -47,6 +52,7 @@ class PendingRecurringMonthlySettlement:
 class ReportService:
     def __init__(self, db: Session) -> None:
         self.db = db
+        self.partner_billing = RecurringPartnerBillingService(db)
 
     def revenue(
         self,
@@ -120,7 +126,7 @@ class ReportService:
             start_date=start_date,
             end_date=end_date,
         ):
-            partner_id = monthly.contract.default_partner_id
+            partner_id = monthly.partner_id
             if partner_id is None:
                 continue
             monthly_by_partner.setdefault(partner_id, []).append(monthly)
@@ -138,6 +144,7 @@ class ReportService:
                 order
                 for order in orders
                 if _is_unpaid_partner_order(order)
+                and self.partner_billing.allows_order_settlement(order)
             ]
             expected_settlement = sum(
                 (Decimal(str(order.partner_payment_amount or 0)) for order in pending_orders),
@@ -213,6 +220,8 @@ class ReportService:
 
         rows: list[SettlementBacklogRow] = []
         for order in self.db.scalars(order_stmt):
+            if not self.partner_billing.allows_order_settlement(order):
+                continue
             partner = partners.get(order.partner_id or "")
             rows.append(
                 SettlementBacklogRow(
@@ -237,13 +246,13 @@ class ReportService:
         rows: list[SettlementBacklogRow] = []
         for pending in self._pending_recurring_monthly_settlements():
             contract = pending.contract
-            partner = partners.get(contract.default_partner_id or "")
+            partner = partners.get(pending.partner_id or "")
             rows.append(
                 SettlementBacklogRow(
                     order_id=f"recurring-monthly:{contract.id}:{pending.month}",
                     scheduled_date=pending.month_start,
                     service_name=f"{contract.label} 월정산 도급가",
-                    partner_id=contract.default_partner_id,
+                    partner_id=pending.partner_id,
                     partner_name=partner.name if partner else None,
                     total_amount=Decimal(str(contract.total_amount or 0)),
                     expected_settlement_amount=pending.amount,
@@ -261,86 +270,65 @@ class ReportService:
     ) -> list[PendingRecurringMonthlySettlement]:
         monthly_service = RecurringMonthlyService(self.db)
         pending: dict[tuple[str, str], PendingRecurringMonthlySettlement] = {}
-        status_stmt = (
-            select(RecurringContract, RecurringMonthlyStatus)
-            .join(
-                RecurringMonthlyStatus,
-                RecurringMonthlyStatus.contract_id == RecurringContract.id,
-            )
-            .where(
-                RecurringContract.deleted_at.is_(None),
-                RecurringContract.partner_billing_mode == RecurringBillingMode.MONTHLY,
-                RecurringContract.partner_payment_amount > 0,
-                RecurringMonthlyStatus.partner_payment_paid.is_(False),
-            )
-        )
-        if start_date is not None:
-            status_stmt = status_stmt.where(
-                RecurringMonthlyStatus.billing_month >= _month_key(start_date)
-            )
-        if end_date is not None:
-            status_stmt = status_stmt.where(
-                RecurringMonthlyStatus.billing_month <= _month_key(end_date)
-            )
-        for contract, monthly_status in self.db.execute(status_stmt).all():
-            month = monthly_status.billing_month
-            month_start = _month_start(month)
-            amount = monthly_service._partner_month_amount(contract, month)
-            if amount is None or Decimal(str(amount)) <= 0:
-                continue
-            pending[(contract.id, month)] = PendingRecurringMonthlySettlement(
-                contract=contract,
-                month=month,
-                month_start=month_start,
-                amount=Decimal(str(amount)),
-            )
-
         today = business_today()
         current_month = _month_key(today)
-        current_month_start = today.replace(day=1)
-        current_month_end = _month_end(current_month_start)
-        if (
-            (start_date is None or current_month_start >= start_date.replace(day=1))
-            and (end_date is None or current_month_start <= end_date.replace(day=1))
-        ):
-            current_stmt = (
-                select(RecurringContract)
-                .where(
-                    RecurringContract.deleted_at.is_(None),
-                    RecurringContract.status == RecurringContractStatus.ACTIVE,
-                    RecurringContract.partner_billing_mode == RecurringBillingMode.MONTHLY,
-                    RecurringContract.partner_payment_amount > 0,
-                    RecurringContract.start_date <= current_month_end,
-                    (
-                        RecurringContract.end_date.is_(None)
-                        | (RecurringContract.end_date >= current_month_start)
-                    ),
-                )
-                .order_by(RecurringContract.label.asc(), RecurringContract.id.asc())
+        start_month = _month_key(start_date) if start_date is not None else None
+        end_month = _month_key(end_date) if end_date is not None else None
+        statuses_by_contract: dict[str, dict[str, RecurringMonthlyStatus]] = {}
+        for monthly_status in self.db.scalars(select(RecurringMonthlyStatus)):
+            statuses_by_contract.setdefault(monthly_status.contract_id, {})[
+                monthly_status.billing_month
+            ] = monthly_status
+
+        for contract in self.db.scalars(
+            select(RecurringContract).order_by(
+                RecurringContract.label.asc(),
+                RecurringContract.id.asc(),
             )
-            for contract in self.db.scalars(current_stmt):
-                key = (contract.id, current_month)
-                if key in pending:
+        ):
+            statuses = statuses_by_contract.get(contract.id, {})
+            months = {month for month in statuses if month <= current_month}
+            months.update(incurred_billing_months(contract, through_date=today))
+            for month in sorted(months):
+                if start_month is not None and month < start_month:
                     continue
-                monthly_status = self.db.scalar(
-                    select(RecurringMonthlyStatus).where(
-                        RecurringMonthlyStatus.contract_id == contract.id,
-                        RecurringMonthlyStatus.billing_month == current_month,
-                    )
-                )
+                if end_month is not None and month > end_month:
+                    continue
+                monthly_status = statuses.get(month)
                 if monthly_status is not None and monthly_status.partner_payment_paid:
                     continue
-                amount = monthly_service._partner_month_amount(contract, current_month)
+                terms = monthly_service.partner_billing.resolve(contract, month)
+                is_retained_monthly = (
+                    monthly_status is not None
+                    and monthly_status.retained_partner_payment_amount is not None
+                )
+                if terms.billing_mode != RecurringBillingMode.MONTHLY and not is_retained_monthly:
+                    continue
+                amount = monthly_service._partner_month_amount(contract, month)
                 if amount is None or Decimal(str(amount)) <= 0:
                     continue
-                pending[key] = PendingRecurringMonthlySettlement(
+                month_start = _month_start(month)
+                pending[(contract.id, month)] = PendingRecurringMonthlySettlement(
                     contract=contract,
-                    month=current_month,
-                    month_start=current_month_start,
+                    partner_id=(
+                        monthly_status.retained_partner_id
+                        if monthly_status is not None
+                        and monthly_status.retained_partner_payment_amount is not None
+                        else terms.partner_id
+                    ),
+                    month=month,
+                    month_start=month_start,
                     amount=Decimal(str(amount)),
                 )
 
-        return sorted(pending.values(), key=lambda item: (item.month_start, item.contract.label, item.contract.id))
+        return sorted(
+            pending.values(),
+            key=lambda item: (
+                item.month_start,
+                item.contract.label,
+                item.contract.id,
+            ),
+        )
 
 
 def _period_key(value: date, granularity: str) -> date:

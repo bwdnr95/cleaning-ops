@@ -132,6 +132,7 @@ export function App() {
                   navigateAdmin(toPageRoute(nextPage));
                 }}
                 onCreateOrder={() => navigateAdmin(toOrderCreateRoute(adminRoute.page))}
+                showCreateOrderFab={!orderForm && adminRoute.page !== 'recurring'}
                 navBadges={navBadges}
                 user={adminSession.user}
                 onLogout={() => void auth.logout('admin')}

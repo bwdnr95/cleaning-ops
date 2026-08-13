@@ -15,6 +15,7 @@ from app.repositories.timeline import TimelineRepository
 from app.schemas.message import MessageLogRead, MessageSendRequest
 from app.schemas.order import (
     AdminOrderDetailRead,
+    AdminOrderEditUpdate,
     AdminOrderGroupRead,
     AdminOrderPageInsight,
     AdminOrderPageRead,
@@ -424,6 +425,25 @@ def update_order(
 ):
     try:
         order = OrderService(db).update(order_id, payload, actor_user_id=user.id)
+        return to_admin_order_dto(order, group=OrderGroupRepository(db).get(order.group_id))
+    except ValueError as exc:
+        raise order_http_error(exc) from exc
+
+
+@router.patch("/{order_id}/edit", response_model=AdminOrderRead)
+def update_order_with_group(
+    order_id: str,
+    payload: AdminOrderEditUpdate,
+    db: Session = Depends(get_session),
+    user: CurrentUser = Depends(require_admin),
+):
+    try:
+        order = OrderService(db).update_with_group(
+            order_id,
+            payload.line,
+            payload.group,
+            actor_user_id=user.id,
+        )
         return to_admin_order_dto(order, group=OrderGroupRepository(db).get(order.group_id))
     except ValueError as exc:
         raise order_http_error(exc) from exc

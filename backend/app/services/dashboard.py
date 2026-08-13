@@ -70,9 +70,10 @@ class DashboardService:
             ),
             # 이번 달 완료 = 당월 방문 + 작업완료 상태.
             monthly_completed=self._count(Order.status.in_(WORK_DONE_STATUSES), *month_filter),
-            # 이번 달 계약금액 = 당월 방문건(취소 제외)의 소비자가(총액=계약금+잔금) 합(결제 여부 무관).
+            # 이번 달 계약금액 = 일반 주문 화면의 당월 방문건(취소 제외) 소비자가 합.
             monthly_contract_amount=self._sum(
                 consumer_total,
+                Order.recurring_contract_id.is_(None),
                 Order.status != OrderStatus.CANCELLED,
                 *month_filter,
             ),
@@ -80,6 +81,7 @@ class DashboardService:
             # 미래 예약·상담 리드는 아직 미수금이 아니므로 작업완료(WORK_DONE) 게이트로 제외한다.
             outstanding_receivable=self._sum(
                 outstanding_amount,
+                Order.recurring_contract_id.is_(None),
                 Order.status.in_(WORK_DONE_STATUSES),
                 Order.payment_status.in_(PAYMENT_CHECK_STATUSES),
             ),

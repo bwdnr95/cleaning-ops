@@ -85,7 +85,7 @@ export function RecurringContractDetail({
       await fn();
       await load();
     } catch (e) {
-      setError(e instanceof Error ? e.message : '처리에 실패했습니다.');
+      setError(recurringActionErrorMessage(e));
     } finally {
       setBusy(false);
     }
@@ -217,11 +217,24 @@ export function RecurringContractDetail({
           </button>
         </div>
         <p style={{ fontSize: 12, color: 'var(--text-tertiary)', marginTop: 8 }}>
-          삭제해도 이미 생성된 주문은 주문관리에 보존됩니다.
+          삭제해도 이미 생성된 주문은 주문관리에 보존됩니다. 미정산 월 도급가가 있으면 먼저 정산해야 합니다.
         </p>
       </div>
     </div>
   );
+}
+
+function recurringActionErrorMessage(error: unknown): string {
+  if (!(error instanceof Error)) {
+    return '처리에 실패했습니다.';
+  }
+  const messages: Record<string, string> = {
+    recurring_contract_has_unpaid_settlements: '미정산 월 도급가가 남아 있습니다. 월 정산을 완료한 뒤 계약을 삭제하세요.',
+    partner_not_found: '기본 협력사가 삭제되어 계약을 재개할 수 없습니다. 다른 협력사를 지정한 뒤 다시 시도하세요.',
+    partner_inactive: '기본 협력사가 비활성 상태입니다. 협력사를 활성화하거나 다른 협력사를 지정하세요.',
+    recurring_partner_changed_concurrently: '협력사 정보가 동시에 변경되었습니다. 최신 정보를 불러온 뒤 다시 시도하세요.',
+  };
+  return messages[error.message] || error.message;
 }
 
 function Term({ label, value, mono = false }: { label: string; value: string; mono?: boolean }) {

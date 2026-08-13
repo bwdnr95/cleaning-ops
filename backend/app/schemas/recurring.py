@@ -45,12 +45,12 @@ class RecurringContractBase(ApiModel):
     # per_visit: total_amount=회당 금액(월 합산=회당×방문횟수). monthly: total_amount=월 고정 금액.
     billing_mode: RecurringBillingMode = RecurringBillingMode.PER_VISIT
     partner_billing_mode: RecurringBillingMode = RecurringBillingMode.PER_VISIT
-    total_amount: float | None = None
-    discount_amount: float = 0
-    deposit_amount: float | None = None
-    balance_amount: float | None = None
+    total_amount: float | None = Field(default=None, ge=0)
+    discount_amount: float = Field(default=0, ge=0)
+    deposit_amount: float | None = Field(default=None, ge=0)
+    balance_amount: float | None = Field(default=None, ge=0)
     vat_type: VatType | None = None
-    partner_payment_amount: float | None = None
+    partner_payment_amount: float | None = Field(default=None, ge=0)
 
 
 class RecurringContractCreate(RecurringContractBase):
@@ -88,12 +88,12 @@ class RecurringContractUpdate(ApiModel):
     requested_time: str | None = None
     billing_mode: RecurringBillingMode | None = None
     partner_billing_mode: RecurringBillingMode | None = None
-    total_amount: float | None = None
-    discount_amount: float | None = None
-    deposit_amount: float | None = None
-    balance_amount: float | None = None
+    total_amount: float | None = Field(default=None, ge=0)
+    discount_amount: float | None = Field(default=None, ge=0)
+    deposit_amount: float | None = Field(default=None, ge=0)
+    balance_amount: float | None = Field(default=None, ge=0)
     vat_type: VatType | None = None
-    partner_payment_amount: float | None = None
+    partner_payment_amount: float | None = Field(default=None, ge=0)
 
 
 class RecurringContractRead(RecurringContractBase):

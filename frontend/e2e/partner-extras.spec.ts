@@ -14,6 +14,12 @@ test('협력사가 작업 메모를 남기면 목록에 보이고 운영팀 안�
     await page.getByTestId(`partner-job-row-${flow.orderId}`).click();
     await expect(page.getByTestId('partner-job-detail-page')).toBeVisible();
 
+    const backButton = page.getByRole('button', { name: '작업 목록으로 돌아가기' });
+    await expect(backButton).toBeVisible();
+    const backButtonBox = await backButton.boundingBox();
+    expect(backButtonBox?.width ?? 0).toBeGreaterThanOrEqual(44);
+    expect(backButtonBox?.height ?? 0).toBeGreaterThanOrEqual(44);
+
     // 단발 주문이므로 정기 배지는 없어야 한다(정기 노출은 boolean is_recurring로만 제어).
     await expect(page.getByTestId('partner-recurring-badge')).toHaveCount(0);
 
@@ -31,7 +37,7 @@ test('협력사가 작업 메모를 남기면 목록에 보이고 운영팀 안�
     // 운영팀 안내 패널이 정상 로드(에러 아님). 안내 발송 전이라 빈 상태 문구를 노출한다.
     const messagesPanel = page.getByTestId('partner-messages-panel');
     await expect(messagesPanel).toBeVisible();
-    await expect(messagesPanel).toContainText('받은 안내가 없습니다.');
+    await expect(messagesPanel).toContainText('작업 배정 안내');
   } finally {
     await context.close();
   }

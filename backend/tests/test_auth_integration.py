@@ -15,6 +15,7 @@ from app.core.security import create_access_token, hash_password
 from app.db.seed import (
     DEV_ADMIN_EMAIL,
     DEV_ADMIN_PASSWORD,
+    DEV_ORDER_ID,
     DEV_PARTNER_ID,
     DEV_PARTNER_PASSWORD,
     DEV_PARTNER_PHONE,
@@ -29,11 +30,23 @@ from app.domain.constants import (
     OrderStatus,
     PhotoType,
     RecipientType,
+    RecurrenceMode,
+    RecurringContractStatus,
     TimelineEventType,
     UserRole,
 )
 from app.main import create_app
-from app.models import Base, MessageLog, Order, OrderGroup, OrderPhoto, Partner, User
+from app.models import (
+    Base,
+    MessageLog,
+    Order,
+    OrderGroup,
+    OrderPhoto,
+    Partner,
+    RecurringContract,
+    RecurringMonthlyStatus,
+    User,
+)
 from app.repositories.timeline import TimelineRepository
 from app.schemas.message import MessageSendRequest
 from app.services.dashboard import DashboardService
@@ -1001,7 +1014,370 @@ def test_admin_partner_detail_counts_assigned_jobs_without_settlement_fields() -
 
     delete_response = client.delete(f"/api/admin/partners/{DEV_PARTNER_ID}", headers=headers)
     assert delete_response.status_code == 400
-    assert delete_response.json()["detail"] == "partner_in_use"
+    assert delete_response.json()["detail"] == "partner_has_active_jobs"
+
+
+def test_admin_can_archive_partner_with_completed_photo_history() -> None:
+    def seed_completed_history(db: Session) -> None:
+        order = db.get(Order, DEV_ORDER_ID)
+        assert order is not None
+        order.status = OrderStatus.COMPLETED
+        order.partner_payment_status = "paid"
+        db.add(
+            OrderPhoto(
+                id="completed-partner-photo",
+                order_id=order.id,
+                uploaded_by_user_id=DEV_PARTNER_USER_ID,
+                photo_type=PhotoType.AFTER,
+                storage_key="tests/completed-partner-photo.png",
+                file_url="/storage/tests/completed-partner-photo.png",
+                file_name="after.png",
+                file_size=len(PNG_BYTES),
+                content_type="image/png",
+                is_customer_visible=True,
+            )
+        )
+
+    client = make_test_client(seed_completed_history)
+    admin_session = login(client, "/api/auth/admin/login", DEV_ADMIN_EMAIL, DEV_ADMIN_PASSWORD)
+    headers = {"Authorization": f"Bearer {admin_session['access_token']}"}
+
+    deleted = client.delete(f"/api/admin/partners/{DEV_PARTNER_ID}", headers=headers)
+    partners = client.get("/api/admin/partners?include_inactive=true", headers=headers)
+    partner_detail = client.get(f"/api/admin/partners/{DEV_PARTNER_ID}", headers=headers)
+    order_detail = client.get(f"/api/admin/orders/{DEV_ORDER_ID}", headers=headers)
+    partner_login = client.post(
+        "/api/auth/partner/login",
+        json={"identifier": DEV_PARTNER_PHONE, "password": DEV_PARTNER_PASSWORD},
+    )
+
+    assert deleted.status_code == 204, deleted.text
+    assert DEV_PARTNER_ID not in {partner["id"] for partner in partners.json()}
+    assert partner_detail.status_code == 404
+    assert order_detail.status_code == 200, order_detail.text
+    assert order_detail.json()["partner_id"] == DEV_PARTNER_ID
+    assert {photo["id"] for photo in order_detail.json()["photos"]} == {
+        "completed-partner-photo"
+    }
+    assert partner_login.status_code == 401
+    reassigned = client.patch(
+        f"/api/admin/orders/{DEV_ORDER_ID}",
+        headers=headers,
+        json={"partner_id": DEV_PARTNER_ID},
+    )
+    forbidden_new_assignment = client.post(
+        "/api/admin/orders",
+        headers=headers,
+        json={
+            "status": OrderStatus.NEW.value,
+            "received_date": "2026-08-12",
+            "partner_id": DEV_PARTNER_ID,
+            "service_name": "보관 협력사 배정 방지",
+            "customer_name": "신규 고객",
+            "customer_phone": "01011112222",
+            "customer_address": "서울시 강남구",
+        },
+    )
+    assert reassigned.status_code == 200, reassigned.text
+    assert forbidden_new_assignment.status_code == 400, forbidden_new_assignment.text
+    assert forbidden_new_assignment.json()["detail"] == "partner_inactive"
+    reopened = client.patch(
+        f"/api/admin/orders/{DEV_ORDER_ID}",
+        headers=headers,
+        json={"partner_payment_status": "unpaid"},
+    )
+    after_reopen = client.get(f"/api/admin/orders/{DEV_ORDER_ID}", headers=headers)
+    assert reopened.status_code == 400, reopened.text
+    assert reopened.json()["detail"] == "partner_not_found"
+    assert after_reopen.json()["partner_payment_status"] == "paid"
+    reactivated = client.patch(
+        f"/api/admin/orders/{DEV_ORDER_ID}",
+        headers=headers,
+        json={"status": OrderStatus.IN_PROGRESS.value},
+    )
+    after_reactivation = client.get(f"/api/admin/orders/{DEV_ORDER_ID}", headers=headers)
+    assert reactivated.status_code == 400, reactivated.text
+    assert reactivated.json()["detail"] == "partner_not_found"
+    assert after_reactivation.json()["status"] == OrderStatus.COMPLETED.value
+    cancelled = client.patch(
+        f"/api/admin/orders/{DEV_ORDER_ID}",
+        headers=headers,
+        json={"status": OrderStatus.CANCELLED.value},
+    )
+    reentered = client.patch(
+        f"/api/admin/orders/{DEV_ORDER_ID}",
+        headers=headers,
+        json={"status": OrderStatus.COMPLETED.value},
+    )
+    after_reentry = client.get(f"/api/admin/orders/{DEV_ORDER_ID}", headers=headers)
+    assert cancelled.status_code == 200, cancelled.text
+    assert reentered.status_code == 400, reentered.text
+    assert reentered.json()["detail"] == "partner_not_found"
+    assert after_reentry.json()["status"] == OrderStatus.CANCELLED.value
+
+
+def test_admin_partner_archive_requires_unpaid_settlement_completion() -> None:
+    def seed_completed_unpaid_history(db: Session) -> None:
+        order = db.get(Order, DEV_ORDER_ID)
+        assert order is not None
+        order.status = OrderStatus.COMPLETED
+        order.partner_payment_status = "unpaid"
+
+    client = make_test_client(seed_completed_unpaid_history)
+    admin_session = login(client, "/api/auth/admin/login", DEV_ADMIN_EMAIL, DEV_ADMIN_PASSWORD)
+    headers = {"Authorization": f"Bearer {admin_session['access_token']}"}
+
+    deleted = client.delete(f"/api/admin/partners/{DEV_PARTNER_ID}", headers=headers)
+
+    assert deleted.status_code == 400, deleted.text
+    assert deleted.json()["detail"] == "partner_has_unpaid_settlements"
+
+
+def test_admin_cannot_reassign_completed_partner_history() -> None:
+    replacement_partner_id = "replacement-history-partner"
+
+    def seed_completed_order(db: Session) -> None:
+        order = db.get(Order, DEV_ORDER_ID)
+        assert order is not None
+        order.status = OrderStatus.COMPLETED
+        order.partner_payment_status = "paid"
+        order.partner_settled_at = datetime.now(UTC)
+        db.add(
+            Partner(
+                id=replacement_partner_id,
+                name="대체 협력사",
+                phone="01055556666",
+                is_active=True,
+            )
+        )
+
+    client = make_test_client(seed_completed_order)
+    admin_session = login(client, "/api/auth/admin/login", DEV_ADMIN_EMAIL, DEV_ADMIN_PASSWORD)
+    headers = {"Authorization": f"Bearer {admin_session['access_token']}"}
+
+    response = client.patch(
+        f"/api/admin/orders/{DEV_ORDER_ID}",
+        headers=headers,
+        json={"partner_id": replacement_partner_id},
+    )
+
+    assert response.status_code == 400, response.text
+    assert response.json()["detail"] == "order_partner_history_locked"
+    detail = client.get(f"/api/admin/orders/{DEV_ORDER_ID}", headers=headers).json()
+    assert detail["partner_id"] == DEV_PARTNER_ID
+
+
+def test_cancelled_archived_order_requires_partner_before_reactivation() -> None:
+    def seed_cancelled_debt(db: Session) -> None:
+        order = db.get(Order, DEV_ORDER_ID)
+        assert order is not None
+        order.status = OrderStatus.CANCELLED
+        order.partner_payment_amount = 70000
+        order.partner_payment_status = "unpaid"
+
+    client = make_test_client(seed_cancelled_debt)
+    admin_session = login(client, "/api/auth/admin/login", DEV_ADMIN_EMAIL, DEV_ADMIN_PASSWORD)
+    headers = {"Authorization": f"Bearer {admin_session['access_token']}"}
+    archived = client.delete(f"/api/admin/partners/{DEV_PARTNER_ID}", headers=headers)
+
+    response = client.patch(
+        f"/api/admin/orders/{DEV_ORDER_ID}",
+        headers=headers,
+        json={"status": OrderStatus.IN_PROGRESS.value, "partner_id": None},
+    )
+
+    assert archived.status_code == 204, archived.text
+    assert response.status_code == 400, response.text
+    assert response.json()["detail"] == "order_partner_required"
+    detail = client.get(f"/api/admin/orders/{DEV_ORDER_ID}", headers=headers).json()
+    assert detail["status"] == OrderStatus.CANCELLED.value
+    assert detail["partner_id"] == DEV_PARTNER_ID
+
+
+def test_admin_partner_archive_requires_held_settlement_resolution() -> None:
+    def seed_completed_held_history(db: Session) -> None:
+        order = db.get(Order, DEV_ORDER_ID)
+        assert order is not None
+        order.status = OrderStatus.COMPLETED
+        order.partner_payment_amount = 70000
+        order.partner_payment_status = "hold"
+
+    client = make_test_client(seed_completed_held_history)
+    admin_session = login(client, "/api/auth/admin/login", DEV_ADMIN_EMAIL, DEV_ADMIN_PASSWORD)
+    headers = {"Authorization": f"Bearer {admin_session['access_token']}"}
+
+    deleted = client.delete(f"/api/admin/partners/{DEV_PARTNER_ID}", headers=headers)
+
+    assert deleted.status_code == 400, deleted.text
+    assert deleted.json()["detail"] == "partner_has_unpaid_settlements"
+
+
+def test_admin_partner_archive_ignores_soft_deleted_active_unpaid_order() -> None:
+    def seed_soft_deleted_order(db: Session) -> None:
+        order = db.get(Order, DEV_ORDER_ID)
+        assert order is not None
+        order.status = OrderStatus.IN_PROGRESS
+        order.partner_payment_amount = 70000
+        order.partner_payment_status = "unpaid"
+        order.deleted_at = datetime.now(UTC)
+
+    client = make_test_client(seed_soft_deleted_order)
+    admin_session = login(client, "/api/auth/admin/login", DEV_ADMIN_EMAIL, DEV_ADMIN_PASSWORD)
+    headers = {"Authorization": f"Bearer {admin_session['access_token']}"}
+
+    archived = client.delete(f"/api/admin/partners/{DEV_PARTNER_ID}", headers=headers)
+
+    assert archived.status_code == 204, archived.text
+
+
+def test_admin_partner_archive_requires_recurring_contract_reassignment() -> None:
+    def seed_completed_history(db: Session) -> None:
+        order = db.get(Order, DEV_ORDER_ID)
+        assert order is not None
+        order.status = OrderStatus.COMPLETED
+        order.partner_payment_status = "paid"
+
+    client = make_test_client(seed_completed_history)
+    admin_session = login(client, "/api/auth/admin/login", DEV_ADMIN_EMAIL, DEV_ADMIN_PASSWORD)
+    headers = {"Authorization": f"Bearer {admin_session['access_token']}"}
+    created = client.post(
+        "/api/admin/recurring/contracts",
+        headers=headers,
+        json={
+            "label": "협력사 삭제 보호 정기계약",
+            "customer_name": "정기계약 고객",
+            "customer_phone": "01011112222",
+            "customer_address": "서울시 강남구 보호로 1",
+            "recurrence_mode": "monthly",
+            "day_of_month": 10,
+            "start_date": "2099-01-10",
+            "default_partner_id": DEV_PARTNER_ID,
+            "service_name": "사무실 정기청소",
+            "partner_payment_amount": 70000,
+        },
+    )
+    assert created.status_code == 201, created.text
+
+    deleted = client.delete(f"/api/admin/partners/{DEV_PARTNER_ID}", headers=headers)
+
+    assert deleted.status_code == 400, deleted.text
+    assert deleted.json()["detail"] == "partner_has_recurring_contracts"
+
+
+def test_admin_partner_archive_allows_paused_recurring_contract() -> None:
+    def seed_paused_contract(db: Session) -> None:
+        order = db.get(Order, DEV_ORDER_ID)
+        assert order is not None
+        order.status = OrderStatus.COMPLETED
+        order.partner_payment_status = "paid"
+        group = OrderGroup(
+            id="paused-contract-group",
+            customer_token="paused-contract-token",
+            customer_name="일시중지 정기 고객",
+            customer_phone="01033335555",
+            customer_address="서울시 강남구 일시중지로 1",
+            customer_visible_payment=False,
+        )
+        db.add(group)
+        db.flush()
+        db.add(
+            RecurringContract(
+                id="paused-partner-contract",
+                label="일시중지 협력사 계약",
+                order_group_id=group.id,
+                recurrence_mode=RecurrenceMode.MONTHLY,
+                day_of_month=10,
+                start_date=date(2026, 7, 1),
+                status=RecurringContractStatus.PAUSED,
+                default_partner_id=DEV_PARTNER_ID,
+                service_name="정기청소",
+                partner_payment_amount=70000,
+            )
+        )
+
+    client = make_test_client(seed_paused_contract)
+    admin_session = login(client, "/api/auth/admin/login", DEV_ADMIN_EMAIL, DEV_ADMIN_PASSWORD)
+    headers = {"Authorization": f"Bearer {admin_session['access_token']}"}
+
+    archived = client.delete(f"/api/admin/partners/{DEV_PARTNER_ID}", headers=headers)
+    renamed = client.patch(
+        "/api/admin/recurring/contracts/paused-partner-contract",
+        headers=headers,
+        json={"label": "일시중지 협력사 계약 수정"},
+    )
+    resumed = client.post(
+        "/api/admin/recurring/contracts/paused-partner-contract/resume",
+        headers=headers,
+    )
+
+    assert archived.status_code == 204, archived.text
+    assert renamed.status_code == 200, renamed.text
+    assert renamed.json()["label"] == "일시중지 협력사 계약 수정"
+    assert resumed.status_code == 404, resumed.text
+    assert resumed.json()["detail"] == "partner_not_found"
+
+
+def test_admin_partner_archive_requires_ended_monthly_settlement_completion() -> None:
+    def seed_ended_monthly_settlement(db: Session) -> None:
+        order = db.get(Order, DEV_ORDER_ID)
+        assert order is not None
+        order.status = OrderStatus.COMPLETED
+        order.partner_payment_status = "paid"
+        group = OrderGroup(
+            id="ended-monthly-group",
+            customer_token="ended-monthly-token",
+            customer_name="종료 정기 고객",
+            customer_phone="01022223333",
+            customer_address="서울시 강남구 종료로 1",
+            customer_visible_payment=False,
+        )
+        db.add(group)
+        db.flush()
+        contract = RecurringContract(
+            id="ended-monthly-contract",
+            label="종료 월정산 계약",
+            order_group_id=group.id,
+            recurrence_mode=RecurrenceMode.MONTHLY,
+            day_of_month=10,
+            start_date=date(2026, 7, 1),
+            end_date=date(2026, 7, 31),
+            status=RecurringContractStatus.ENDED,
+            default_partner_id=DEV_PARTNER_ID,
+            service_name="정기청소",
+            partner_billing_mode="monthly",
+            partner_payment_amount=90000,
+        )
+        db.add(contract)
+        db.flush()
+        db.add(
+            RecurringMonthlyStatus(
+                id="ended-monthly-status",
+                contract_id=contract.id,
+                billing_month="2026-07",
+                partner_payment_paid=False,
+            )
+        )
+
+    client = make_test_client(seed_ended_monthly_settlement)
+    admin_session = login(client, "/api/auth/admin/login", DEV_ADMIN_EMAIL, DEV_ADMIN_PASSWORD)
+    headers = {"Authorization": f"Bearer {admin_session['access_token']}"}
+
+    blocked = client.delete(f"/api/admin/partners/{DEV_PARTNER_ID}", headers=headers)
+    paid = client.post(
+        "/api/admin/recurring/monthly/set",
+        headers=headers,
+        json={
+            "contract_id": "ended-monthly-contract",
+            "month": "2026-07",
+            "partner_payment_paid": True,
+        },
+    )
+    archived = client.delete(f"/api/admin/partners/{DEV_PARTNER_ID}", headers=headers)
+
+    assert blocked.status_code == 400, blocked.text
+    assert blocked.json()["detail"] == "partner_has_unpaid_settlements"
+    assert paid.status_code == 200, paid.text
+    assert archived.status_code == 204, archived.text
 
 
 def test_admin_partner_deactivation_blocks_login_and_existing_partner_token() -> None:
@@ -1277,7 +1653,16 @@ def test_dashboard_new_cards_260702() -> None:
     TestingSessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
     Base.metadata.create_all(bind=engine)
 
-    def mk(order_id, *, status, scheduled, payment_status=None, total=0, balance=0):
+    def mk(
+        order_id,
+        *,
+        status,
+        scheduled,
+        payment_status=None,
+        total=0,
+        balance=0,
+        recurring_contract_id=None,
+    ):
         # 금액 지표는 소비자가(total_amount) 기준. 잔금대기 건만 balance_amount로 미수 잔액을 지정한다.
         return Order(
             id=order_id,
@@ -1294,6 +1679,7 @@ def test_dashboard_new_cards_260702() -> None:
             balance_amount=balance,
             customer_token=f"t-{order_id}",
             customer_visible_payment=False,
+            recurring_contract_id=recurring_contract_id,
         )
 
     with TestingSessionLocal() as db:
@@ -1317,6 +1703,14 @@ def test_dashboard_new_cards_260702() -> None:
                 # 취소 → 모든 집계 제외
                 mk("cancelled", status=OrderStatus.CANCELLED, scheduled=date(2026, 5, 9),
                    payment_status="unpaid", total=99999),
+                mk(
+                    "recurring-done-unpaid",
+                    status=OrderStatus.COMPLETED,
+                    scheduled=date(2026, 5, 9),
+                    payment_status="unpaid",
+                    total=123000,
+                    recurring_contract_id="legacy-recurring-contract",
+                ),
             ]
         )
         db.commit()

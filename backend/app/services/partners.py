@@ -7,17 +7,27 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.core.security import hash_password
-from app.core.time import business_today
-from app.domain.constants import AuditEventType, AuditSeverity, OrderStatus, UserRole
+from app.core.time import business_today, utc_now
+from app.domain.constants import (
+    AuditEventType,
+    AuditSeverity,
+    OrderStatus,
+    RecurringBillingMode,
+    RecurringContractStatus,
+    UserRole,
+)
 from app.domain.order_metrics import (
     ACTIVE_JOB_STATUSES,
     COMPLETED_JOB_STATUSES,
     PARTNER_ADMIN_UNPAID_STATUSES,
 )
 from app.domain.order_pricing import order_consumer_total
+from app.domain.payment_status import PartnerPaymentStatus
 from app.domain.phone import normalize_phone
 from app.models.order import Order
 from app.models.partner import Partner, PartnerCategory
+from app.models.recurring_contract import RecurringContract
+from app.models.recurring_monthly_status import RecurringMonthlyStatus
 from app.models.user import User
 from app.repositories.partners import PartnerCategoryRepository, PartnerRepository
 from app.repositories.refresh_tokens import RefreshTokenRepository
@@ -34,6 +44,11 @@ from app.schemas.partner import (
 )
 from app.services.audit import AuditService
 from app.services.partner_settlements import unpaid_partner_condition
+from app.services.recurring_partner_billing import (
+    RecurringPartnerBillingService,
+    billing_month,
+    incurred_billing_months,
+)
 
 
 @dataclass(frozen=True)
@@ -55,6 +70,7 @@ class PartnerService:
         self.categories = PartnerCategoryRepository(db)
         self.refresh_tokens = RefreshTokenRepository(db)
         self.audit = AuditService(db)
+        self.partner_billing = RecurringPartnerBillingService(db)
 
     def list_categories(self, *, include_inactive: bool = False) -> list[PartnerCategoryRead]:
         categories = self.categories.list_categories(include_inactive=include_inactive)
@@ -157,7 +173,7 @@ class PartnerService:
         return detail
 
     def update(self, partner_id: str, payload: PartnerUpdate) -> PartnerDetailRead:
-        partner = self.partners.get(partner_id)
+        partner = self.partners.get_for_update(partner_id)
         if partner is None:
             raise ValueError("partner_not_found")
 
@@ -208,19 +224,129 @@ class PartnerService:
             )
 
     def delete(self, partner_id: str) -> None:
-        partner = self.partners.get(partner_id)
+        partner = self.partners.get_for_update(partner_id)
         if partner is None:
             raise ValueError("partner_not_found")
-        if scalar_count(self.db, Order.partner_id == partner_id) > 0:
-            raise ValueError("partner_in_use")
 
-        for user in self._list_partner_users(partner_id):
+        historical_statuses = (*COMPLETED_JOB_STATUSES, OrderStatus.CANCELLED)
+        if scalar_count(
+            self.db,
+            Order.partner_id == partner_id,
+            Order.status.not_in(historical_statuses),
+        ) > 0:
+            raise ValueError("partner_has_active_jobs")
+        unresolved_orders = self.db.scalars(
+            select(Order).where(
+                Order.deleted_at.is_(None),
+                Order.partner_id == partner_id,
+                unpaid_partner_condition()
+                | (
+                    (Order.status != OrderStatus.CANCELLED)
+                    & (Order.partner_payment_amount > 0)
+                    & (Order.partner_payment_status == PartnerPaymentStatus.HOLD)
+                ),
+            )
+        )
+        has_unpaid_orders = any(
+            self.partner_billing.allows_order_settlement(order)
+            for order in unresolved_orders
+        )
+        if has_unpaid_orders or self._has_unpaid_recurring_monthly_settlement(partner_id):
+            raise ValueError("partner_has_unpaid_settlements")
+        active_contract = self.db.scalar(
+            select(RecurringContract.id)
+            .where(
+                RecurringContract.deleted_at.is_(None),
+                RecurringContract.default_partner_id == partner_id,
+                RecurringContract.status == RecurringContractStatus.ACTIVE,
+            )
+            .limit(1)
+        )
+        if active_contract is not None:
+            raise ValueError("partner_has_recurring_contracts")
+
+        partner_users = self._list_partner_users(partner_id)
+        for user in partner_users:
             user.is_active = False
-            user.partner_id = None
             self.refresh_tokens.revoke_active_for_user(user.id)
-
-        self.db.delete(partner)
+        self._record_account_status_audit(
+            partner_id,
+            partner_users,
+            AuditEventType.PARTNER_ACCOUNT_DEACTIVATED,
+        )
+        partner.is_active = False
+        partner.deleted_at = utc_now()
         self.db.commit()
+
+    def _has_unpaid_recurring_monthly_settlement(self, partner_id: str) -> bool:
+        summary = self._unpaid_recurring_monthly_summaries({partner_id}).get(partner_id)
+        return summary is not None and int(summary["count"]) > 0
+
+    def _unpaid_recurring_monthly_summaries(
+        self,
+        partner_ids: set[str],
+    ) -> dict[str, dict[str, float | int]]:
+        if not partner_ids:
+            return {}
+
+        summaries: dict[str, dict[str, float | int]] = {}
+        billing = RecurringPartnerBillingService(self.db)
+        today = business_today()
+        current_month = billing_month(today)
+        statuses_by_contract: dict[str, dict[str, RecurringMonthlyStatus]] = {}
+        for monthly_status in self.db.scalars(select(RecurringMonthlyStatus)):
+            statuses_by_contract.setdefault(monthly_status.contract_id, {})[
+                monthly_status.billing_month
+            ] = monthly_status
+        for contract in self.db.scalars(select(RecurringContract)):
+            statuses = statuses_by_contract.get(contract.id, {})
+            months = {month for month in statuses if month <= current_month}
+            months.update(incurred_billing_months(contract, through_date=today))
+            for month in months:
+                monthly_status = statuses.get(month)
+                if monthly_status is not None and monthly_status.partner_payment_paid:
+                    continue
+                terms = billing.resolve(contract, month)
+                retained_partner_id = (
+                    monthly_status.retained_partner_id if monthly_status is not None else None
+                )
+                retained_amount = (
+                    monthly_status.retained_partner_payment_amount
+                    if monthly_status is not None
+                    else None
+                )
+                has_retained_monthly_settlement = retained_amount is not None
+                payable_partner_id = (
+                    retained_partner_id
+                    if has_retained_monthly_settlement
+                    else terms.partner_id
+                )
+                payable_amount = (
+                    retained_amount
+                    if has_retained_monthly_settlement
+                    else terms.partner_payment_amount
+                )
+                if (
+                    payable_partner_id in partner_ids
+                    and (
+                        retained_amount is not None
+                        or terms.billing_mode == RecurringBillingMode.MONTHLY
+                    )
+                    and payable_amount is not None
+                    and payable_amount > 0
+                ):
+                    partner_id = payable_partner_id
+                    if partner_id is None:
+                        continue
+                    summary = summaries.setdefault(
+                        partner_id,
+                        empty_settlement_summary(),
+                    )
+                    summary["amount"] = float(summary["amount"]) + float(
+                        payable_amount
+                    )
+                    summary["count"] = int(summary["count"]) + 1
+        return summaries
 
     def reset_password(
         self,
@@ -229,7 +355,7 @@ class PartnerService:
         login_phone: str | None = None,
         password: str | None = None,
     ) -> PartnerPasswordResetRead:
-        partner = self.partners.get(partner_id)
+        partner = self.partners.get_for_update(partner_id)
         if partner is None:
             raise ValueError("partner_not_found")
 
@@ -321,6 +447,7 @@ class PartnerService:
             partner_count=scalar_count(
                 self.db,
                 Partner.partner_category_id == category.id,
+                Partner.deleted_at.is_(None),
                 model=Partner,
             ),
             created_at=category.created_at,
@@ -382,11 +509,7 @@ class PartnerService:
         }
         today = business_today()
         settlement_stmt = (
-            select(
-                Order.partner_id,
-                func.count(Order.id),
-                func.coalesce(func.sum(Order.partner_payment_amount), 0),
-            )
+            select(Order)
             .where(
                 Order.deleted_at.is_(None),
                 Order.partner_id.in_(partner_ids),
@@ -394,15 +517,28 @@ class PartnerService:
                 Order.status.in_(PARTNER_ADMIN_UNPAID_STATUSES),
                 Order.scheduled_date <= today,
             )
-            .group_by(Order.partner_id)
         )
-        for partner_id, count, amount in self.db.execute(settlement_stmt):
-            if partner_id is None:
+        for order in self.db.scalars(settlement_stmt):
+            partner_id = order.partner_id
+            if (
+                partner_id is None
+                or not self.partner_billing.allows_order_settlement(order)
+            ):
                 continue
-            settlements[partner_id] = {
-                "amount": float(Decimal(str(amount or 0))),
-                "count": int(count or 0),
-            }
+            summary = settlements.setdefault(partner_id, empty_settlement_summary())
+            summary["amount"] = float(summary["amount"]) + float(
+                Decimal(str(order.partner_payment_amount or 0))
+            )
+            summary["count"] = int(summary["count"]) + 1
+
+        for partner_id, monthly_summary in (
+            self._unpaid_recurring_monthly_summaries(set(partner_ids)).items()
+        ):
+            summary = settlements.setdefault(partner_id, empty_settlement_summary())
+            summary["amount"] = float(summary["amount"]) + float(
+                monthly_summary["amount"]
+            )
+            summary["count"] = int(summary["count"]) + int(monthly_summary["count"])
 
         return PartnerAdminContext(
             categories=categories,
@@ -495,21 +631,36 @@ class PartnerService:
 
     def _unpaid_settlement_summary(self, partner_id: str) -> dict[str, float | int]:
         today = business_today()
-        stmt = select(
-            func.count(Order.id),
-            func.coalesce(func.sum(Order.partner_payment_amount), 0),
-        ).where(
+        stmt = select(Order).where(
             Order.partner_id == partner_id,
             Order.deleted_at.is_(None),
             unpaid_partner_condition(),
             Order.status.in_(PARTNER_ADMIN_UNPAID_STATUSES),
             Order.scheduled_date <= today,
         )
-        count, amount = self.db.execute(stmt).one()
-        return {
-            "amount": float(Decimal(str(amount or 0))),
-            "count": int(count or 0),
+        orders = [
+            order
+            for order in self.db.scalars(stmt)
+            if self.partner_billing.allows_order_settlement(order)
+        ]
+        summary = {
+            "amount": float(
+                sum(
+                    (Decimal(str(order.partner_payment_amount or 0)) for order in orders),
+                    Decimal("0"),
+                )
+            ),
+            "count": len(orders),
         }
+        monthly_summary = self._unpaid_recurring_monthly_summaries({partner_id}).get(
+            partner_id
+        )
+        if monthly_summary is not None:
+            summary["amount"] = float(summary["amount"]) + float(
+                monthly_summary["amount"]
+            )
+            summary["count"] = int(summary["count"]) + int(monthly_summary["count"])
+        return summary
 
     def _list_partners_by_category(self, category_id: str) -> list[Partner]:
         stmt = select(Partner).where(Partner.partner_category_id == category_id)

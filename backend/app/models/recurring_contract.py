@@ -24,6 +24,7 @@ class RecurringContract(TimestampMixin, Base):
     # 라이프사이클
     status: Mapped[str] = mapped_column(String(20), default=RecurringContractStatus.ACTIVE, index=True)
     end_date: Mapped[date | None] = mapped_column(Date)
+    active_segment_start_date: Mapped[date | None] = mapped_column(Date)
     max_occurrences: Mapped[int | None] = mapped_column(Integer)
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
     # 회차 템플릿

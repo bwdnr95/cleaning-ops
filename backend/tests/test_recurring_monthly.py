@@ -1,15 +1,22 @@
-from datetime import date
+from datetime import UTC, date, datetime
 from uuid import uuid4
 
 import pytest
 
+from app.core.time import business_today
+from app.db.seed import DEV_PARTNER_ID
 from app.domain.constants import OrderStatus, RecurrenceMode, RecurringContractStatus
 from app.models.order import Order
 from app.models.order_group import OrderGroup
 from app.models.recurring_contract import RecurringContract
 from app.models.recurring_monthly_status import RecurringMonthlyStatus
+from app.models.recurring_partner_billing_period import RecurringPartnerBillingPeriod
 from app.repositories.recurring import RecurringMonthlyStatusRepository
+from app.services.recurring import RecurringService
+from app.services.recurring_generation import RecurringOrderGenerationService
 from app.services.recurring_monthly import RecurringMonthlyService
+from app.services.recurring_partner_billing import billing_month, incurred_billing_months
+from app.services.reports import ReportService
 
 
 def _contract(db):
@@ -59,13 +66,20 @@ def test_list_month_keeps_existing_unpaid_row_after_contract_is_paused(db_sessio
     service = RecurringMonthlyService(db_session)
     initial = next(row for row in service.list_month("2026-06") if row.contract_id == c.id)
     assert initial.partner_payment_paid is False
+    assert RecurringMonthlyStatusRepository(db_session).get_by_contract_and_month(
+        c.id,
+        "2026-06",
+    ) is None
 
-    c.status = RecurringContractStatus.PAUSED
-    db_session.commit()
+    RecurringService(db_session).set_status(c.id, RecurringContractStatus.PAUSED)
 
     paused = next(row for row in service.list_month("2026-06") if row.contract_id == c.id)
     assert paused.partner_amount == 90000
     assert paused.partner_payment_paid is False
+    assert RecurringMonthlyStatusRepository(db_session).get_by_contract_and_month(
+        c.id,
+        "2026-06",
+    ) is not None
 
 
 def test_list_month_does_not_create_future_rows_for_paused_contract(db_session):
@@ -85,6 +99,237 @@ def test_list_month_does_not_create_future_rows_for_paused_contract(db_session):
         RecurringMonthlyService(db_session).set_status(
             c.id,
             "2026-07",
+            partner_payment_paid=True,
+        )
+
+
+def test_resume_does_not_make_paused_gap_billable(db_session, monkeypatch):
+    contract = _contract(db_session)
+    contract.start_date = date(2026, 1, 1)
+    contract.active_segment_start_date = date(2026, 1, 1)
+    contract.partner_payment_amount = 90000
+    contract.partner_billing_mode = "monthly"
+    contract.end_date = date(2026, 9, 30)
+    db_session.commit()
+
+    monkeypatch.setattr("app.services.recurring.business_today", lambda: date(2026, 1, 15))
+    RecurringService(db_session).set_status(contract.id, RecurringContractStatus.PAUSED)
+    monkeypatch.setattr("app.services.recurring.business_today", lambda: date(2026, 5, 2))
+    resumed = RecurringService(db_session).set_status(
+        contract.id,
+        RecurringContractStatus.ACTIVE,
+    )
+
+    service = RecurringMonthlyService(db_session)
+    assert resumed.active_segment_start_date == date(2026, 5, 2)
+    assert resumed.end_date == date(2026, 9, 30)
+    assert all(row.contract_id != contract.id for row in service.list_month("2026-02"))
+    assert any(row.contract_id == contract.id for row in service.list_month("2026-05"))
+    assert incurred_billing_months(
+        resumed,
+        through_date=date(2026, 6, 30),
+    ) == ("2026-05", "2026-06")
+    assert RecurringMonthlyStatusRepository(db_session).get_by_contract_and_month(
+        contract.id,
+        "2026-01",
+    ) is not None
+
+
+def test_deleted_active_contract_does_not_create_future_partner_debt(
+    db_session,
+    monkeypatch,
+):
+    today = business_today()
+    contract = _contract(db_session)
+    contract.start_date = today.replace(day=1)
+    contract.active_segment_start_date = contract.start_date
+    contract.partner_payment_amount = 90000
+    contract.partner_billing_mode = "monthly"
+    RecurringService(db_session).partner_billing.ensure_baseline(contract)
+    db_session.add(
+        RecurringMonthlyStatus(
+            id=str(uuid4()),
+            contract_id=contract.id,
+            billing_month=billing_month(today),
+            partner_payment_paid=True,
+        )
+    )
+    db_session.commit()
+
+    RecurringService(db_session).delete_contract(contract.id, actor_user_id=None)
+    db_session.refresh(contract)
+    future = date(today.year + (today.month == 12), today.month % 12 + 1, 15)
+    monkeypatch.setattr("app.services.reports.business_today", lambda: future)
+    backlog = ReportService(db_session).settlements()
+
+    assert contract.status == RecurringContractStatus.ENDED
+    assert contract.end_date == today
+    assert contract.active_segment_start_date == today.replace(day=1)
+    assert incurred_billing_months(contract, through_date=future) == ()
+    assert all(
+        row.order_id != f"recurring-monthly:{contract.id}:{billing_month(future)}"
+        for row in backlog.rows
+    )
+
+
+def test_generation_and_projection_start_after_same_month_resume(db_session):
+    contract = _contract(db_session)
+    contract.recurrence_mode = "weekly"
+    contract.day_of_month = None
+    contract.interval_weeks = 1
+    contract.weekday = 4
+    contract.start_date = date(2026, 5, 1)
+    contract.active_segment_start_date = date(2026, 5, 2)
+    contract.total_amount = 100000
+    db_session.commit()
+
+    created = RecurringOrderGenerationService(db_session).generate_month(
+        date(2026, 5, 1),
+        date(2026, 5, 31),
+        actor_user_id=None,
+    )
+    orders = list(
+        db_session.query(Order)
+        .filter(Order.recurring_contract_id == contract.id)
+        .order_by(Order.recurring_planned_date)
+    )
+
+    assert created == 4
+    assert [order.recurring_planned_date for order in orders] == [
+        date(2026, 5, 8),
+        date(2026, 5, 15),
+        date(2026, 5, 22),
+        date(2026, 5, 29),
+    ]
+    row = next(
+        item
+        for item in RecurringMonthlyService(db_session).list_month("2026-05")
+        if item.contract_id == contract.id
+    )
+    assert row.amount == 400000
+
+
+def test_list_month_keeps_actual_order_from_before_current_active_segment(db_session):
+    contract = _weekly_contract(db_session, billing_mode="per_visit", amount=50000)
+    contract.start_date = date(2026, 1, 1)
+    contract.active_segment_start_date = date(2026, 5, 1)
+    db_session.add(
+        Order(
+            id=str(uuid4()),
+            group_id=contract.order_group_id,
+            status=OrderStatus.SCHEDULED,
+            received_date=date(2026, 4, 1),
+            scheduled_date=date(2026, 4, 6),
+            service_name="청소",
+            recurring_contract_id=contract.id,
+            recurring_planned_date=date(2026, 4, 6),
+        )
+    )
+    db_session.commit()
+
+    row = next(
+        item
+        for item in RecurringMonthlyService(db_session).list_month("2026-04")
+        if item.contract_id == contract.id
+    )
+
+    assert row.amount == 50000
+
+
+def test_paused_contract_does_not_project_month_before_current_active_segment(db_session):
+    contract = _weekly_contract(db_session, billing_mode="per_visit", amount=50000)
+    contract.start_date = date(2026, 1, 1)
+    contract.active_segment_start_date = date(2026, 5, 1)
+    contract.status = RecurringContractStatus.PAUSED
+    db_session.commit()
+
+    rows = RecurringMonthlyService(db_session).list_month("2026-04")
+
+    assert all(item.contract_id != contract.id for item in rows)
+
+
+def test_resume_rejects_contract_with_expired_end_date(db_session, monkeypatch):
+    contract = _contract(db_session)
+    contract.status = RecurringContractStatus.PAUSED
+    contract.end_date = date(2026, 6, 30)
+    db_session.commit()
+    monkeypatch.setattr("app.services.recurring.business_today", lambda: date(2026, 7, 1))
+
+    with pytest.raises(ValueError, match="recurring_contract_end_date_passed"):
+        RecurringService(db_session).set_status(
+            contract.id,
+            RecurringContractStatus.ACTIVE,
+        )
+
+    db_session.refresh(contract)
+    assert contract.status == RecurringContractStatus.PAUSED
+
+
+def test_monthly_partner_payment_requires_payee(db_session):
+    contract = _contract(db_session)
+    contract.default_partner_id = None
+    contract.partner_billing_mode = "monthly"
+    contract.partner_payment_amount = 90000
+    db_session.commit()
+
+    with pytest.raises(ValueError, match="recurring_partner_required"):
+        RecurringMonthlyService(db_session).set_status(
+            contract.id,
+            "2026-06",
+            partner_payment_paid=True,
+        )
+
+
+def test_retained_monthly_payment_does_not_fall_forward_to_new_payee(db_session):
+    contract = _contract(db_session)
+    contract.default_partner_id = DEV_PARTNER_ID
+    contract.partner_billing_mode = "per_visit"
+    contract.partner_payment_amount = 70000
+    db_session.add(
+        RecurringPartnerBillingPeriod(
+            contract_id=contract.id,
+            effective_month="0001-01",
+            partner_id=DEV_PARTNER_ID,
+            billing_mode="per_visit",
+            partner_payment_amount=70000,
+        )
+    )
+    db_session.add(
+        RecurringMonthlyStatus(
+            id=str(uuid4()),
+            contract_id=contract.id,
+            billing_month="2026-06",
+            partner_payment_paid=False,
+            retained_partner_id=None,
+            retained_partner_payment_amount=90000,
+        )
+    )
+    db_session.commit()
+
+    with pytest.raises(ValueError, match="recurring_partner_required"):
+        RecurringMonthlyService(db_session).set_status(
+            contract.id,
+            "2026-06",
+            partner_payment_paid=True,
+        )
+
+
+def test_list_month_projects_future_active_contract_without_persisting_status(db_session):
+    c = _contract(db_session)
+    future = "2099-07"
+    db_session.commit()
+
+    rows = RecurringMonthlyService(db_session).list_month(future)
+
+    assert any(row.contract_id == c.id for row in rows)
+    assert RecurringMonthlyStatusRepository(db_session).get_by_contract_and_month(
+        c.id,
+        future,
+    ) is None
+    with pytest.raises(ValueError, match="recurring_month_not_editable"):
+        RecurringMonthlyService(db_session).set_status(
+            c.id,
+            future,
             partner_payment_paid=True,
         )
 
@@ -115,6 +360,30 @@ def test_list_month_keeps_existing_unpaid_row_after_contract_has_ended(db_sessio
     assert row.partner_payment_paid is False
 
 
+def test_deleted_contract_existing_status_remains_visible_and_editable(db_session):
+    c = _contract(db_session)
+    c.default_partner_id = DEV_PARTNER_ID
+    c.partner_payment_amount = 90000
+    c.partner_billing_mode = "monthly"
+    c.deleted_at = datetime.now(UTC)
+    db_session.add(
+        RecurringMonthlyStatus(
+            id=str(uuid4()),
+            contract_id=c.id,
+            billing_month="2026-06",
+            partner_payment_paid=False,
+        )
+    )
+    db_session.commit()
+    service = RecurringMonthlyService(db_session)
+
+    row = next(item for item in service.list_month("2026-06") if item.contract_id == c.id)
+    updated = service.set_status(c.id, "2026-06", partner_payment_paid=True)
+
+    assert row.partner_amount == 90000
+    assert updated.partner_payment_paid is True
+
+
 def test_set_status_toggles(db_session):
     c = _contract(db_session)
     db_session.commit()
@@ -123,6 +392,20 @@ def test_set_status_toggles(db_session):
     assert row.tax_invoice_issued is True and row.balance_paid is False
     row2 = svc.set_status(c.id, "2026-06", balance_paid=True)
     assert row2.tax_invoice_issued is True and row2.balance_paid is True
+
+
+def test_set_status_rejects_partner_payment_for_per_visit_terms(db_session):
+    contract = _contract(db_session)
+    contract.partner_billing_mode = "per_visit"
+    contract.partner_payment_amount = 90000
+    db_session.commit()
+
+    with pytest.raises(ValueError, match="recurring_partner_payment_not_monthly"):
+        RecurringMonthlyService(db_session).set_status(
+            contract.id,
+            "2026-06",
+            partner_payment_paid=True,
+        )
 
 
 def test_monthly_api_requires_admin(client):

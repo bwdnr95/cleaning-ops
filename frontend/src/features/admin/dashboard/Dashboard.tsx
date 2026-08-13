@@ -28,14 +28,15 @@ export function Dashboard({ onOpenOrder, onNav, onCreateOrder, userName = undefi
       <div className="page-shell">
 
         {/* Greeting */}
-        <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', marginBottom: 14 }}>
-          <div>
+        <div className="dashboard-greeting">
+          <div className="dashboard-greeting__copy">
             <div style={{ fontSize: 11.5, color: 'var(--text-tertiary)', marginBottom: 2 }}>{formatDashboardDate(getAppNowDate())}</div>
-            <h2 style={{ margin: 0, fontSize: 18, fontWeight: 600, letterSpacing: '-0.02em' }}>
-              안녕하세요 {userName || '관리자'}님 <span style={{ color: 'var(--text-tertiary)', fontWeight: 400 }}>— 지금 처리할 일 {summary.isLoading ? '-' : workCount}건이 있습니다</span>
+            <h2 className="dashboard-greeting__heading">
+              안녕하세요 <span className="dashboard-greeting__name">{userName || '관리자'}님</span>{' '}
+              <span className="dashboard-greeting__summary">— 지금 처리할 일 {summary.isLoading ? '-' : workCount}건이 있습니다</span>
             </h2>
           </div>
-          <div style={{ display: 'flex', gap: 6 }}>
+          <div className="dashboard-greeting__actions">
             <button className="btn btn--secondary btn--sm" onClick={() => {
               summary.reload();
               orders.reload();
@@ -56,13 +57,13 @@ export function Dashboard({ onOpenOrder, onNav, onCreateOrder, userName = undefi
           </div>
         )}
         {summary.isLoading && !summary.data && (
-          <div style={{ padding: '10px 12px', marginBottom: 12, borderRadius: 8, background: 'var(--bg-subtle)', color: 'var(--text-tertiary)', fontSize: 12.5 }}>
+          <div data-testid="dashboard-summary-loading" style={{ padding: '10px 12px', marginBottom: 12, borderRadius: 8, background: 'var(--bg-subtle)', color: 'var(--text-tertiary)', fontSize: 12.5 }}>
             대시보드 지표를 불러오는 중입니다.
           </div>
         )}
 
         {/* KPI grid — 8장. 넓은 화면에선 한 줄, 좁아지면 칸을 줄여 자동 줄바꿈(글자 세로 쪼개짐 방지) */}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: 10, marginBottom: 16 }}>
+        <div className="dashboard-kpi-grid">
           {kpis.map((k, i) => (
             <button
               key={k.key || i}

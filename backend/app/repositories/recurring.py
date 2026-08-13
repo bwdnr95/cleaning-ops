@@ -19,6 +19,38 @@ class RecurringContractRepository(Repository[RecurringContract]):
             return None
         return obj
 
+    def get_for_update(
+        self,
+        contract_id: str,
+        *,
+        include_deleted: bool = False,
+    ) -> RecurringContract | None:
+        stmt = (
+            select(RecurringContract)
+            .where(RecurringContract.id == contract_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+        obj = self.db.scalar(stmt)
+        if obj is None:
+            return None
+        if obj.deleted_at is not None and not include_deleted:
+            return None
+        return obj
+
+    def lock_ids(self, contract_ids: list[str]) -> list[RecurringContract]:
+        ids = sorted(set(contract_ids))
+        if not ids:
+            return []
+        stmt = (
+            select(RecurringContract)
+            .where(RecurringContract.id.in_(ids))
+            .order_by(RecurringContract.id.asc())
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+        return list(self.db.scalars(stmt))
+
     def list_all(self) -> list[RecurringContract]:
         stmt = (
             select(RecurringContract)
@@ -43,6 +75,22 @@ class RecurringMonthlyStatusRepository(Repository[RecurringMonthlyStatus]):
         stmt = select(RecurringMonthlyStatus).where(
             RecurringMonthlyStatus.contract_id == contract_id,
             RecurringMonthlyStatus.billing_month == billing_month,
+        )
+        return self.db.scalar(stmt)
+
+    def get_for_update(
+        self,
+        contract_id: str,
+        billing_month: str,
+    ) -> RecurringMonthlyStatus | None:
+        stmt = (
+            select(RecurringMonthlyStatus)
+            .where(
+                RecurringMonthlyStatus.contract_id == contract_id,
+                RecurringMonthlyStatus.billing_month == billing_month,
+            )
+            .with_for_update()
+            .execution_options(populate_existing=True)
         )
         return self.db.scalar(stmt)
 

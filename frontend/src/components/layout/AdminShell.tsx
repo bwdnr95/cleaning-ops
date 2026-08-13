@@ -25,6 +25,7 @@ export function AdminShell({
   onPageChange = undefined,
   children,
   onCreateOrder = undefined,
+  showCreateOrderFab = true,
   navBadges = {},
   user = undefined,
   onLogout = undefined,
@@ -129,6 +130,7 @@ export function AdminShell({
       {isNarrowViewport && (
         <nav
           data-testid="admin-mobile-nav"
+          className="admin-mobile-nav"
           style={{
             position: 'fixed',
             left: 0,
@@ -194,14 +196,17 @@ export function AdminShell({
           })}
         </nav>
       )}
-      <button
-        type="button"
-        data-testid="admin-mobile-create-order"
-        className="btn btn--primary admin-create-fab"
-        onClick={() => onCreateOrder?.()}
-      >
-        <Icon name="plus" size={16}/>
-      </button>
+      {showCreateOrderFab && (
+        <button
+          type="button"
+          data-testid="admin-mobile-create-order"
+          aria-label="신규 주문 등록"
+          className="btn btn--primary admin-create-fab"
+          onClick={() => onCreateOrder?.()}
+        >
+          <Icon name="plus" size={16}/>
+        </button>
+      )}
     </div>
   );
 }

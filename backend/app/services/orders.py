@@ -8,8 +8,8 @@ from uuid import uuid4
 from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session
 
-from app.core.time import to_utc
 from app.core.config import settings
+from app.core.time import to_utc, utc_now
 from app.domain.constants import (
     MessageType,
     OrderStatus,
@@ -17,11 +17,17 @@ from app.domain.constants import (
     ReceiptStatus,
     ReceiptType,
     RecipientType,
+    RecurringBillingMode,
     TimelineEventType,
 )
 from app.domain.customer_token import generate_customer_token
+from app.domain.order_metrics import COMPLETED_JOB_STATUSES
 from app.domain.order_pricing import order_consumer_total
-from app.domain.payment_status import PAYMENT_TRACKED_FIELDS, PaymentStatus
+from app.domain.payment_status import (
+    PAYMENT_TRACKED_FIELDS,
+    PartnerPaymentStatus,
+    PaymentStatus,
+)
 from app.domain.phone import normalize_phone
 from app.models.order import Order
 from app.models.order_group import OrderGroup
@@ -30,12 +36,14 @@ from app.models.timeline import OrderTimeline
 from app.repositories.messages import MessageRepository
 from app.repositories.order_groups import OrderGroupRepository
 from app.repositories.orders import OrderRepository
+from app.repositories.partners import PartnerRepository
 from app.repositories.photos import PhotoRepository
+from app.repositories.recurring import RecurringContractRepository
 from app.repositories.timeline import TimelineRepository
 from app.schemas.message import MessageLogRead, MessageSendRequest
 from app.schemas.order import (
-    AdminOrderGroupRead,
     AdminOrderDetailRead,
+    AdminOrderGroupRead,
     AdminOrderRead,
     AdminOrderSiblingRead,
     CustomerOrderGroupRead,
@@ -52,6 +60,10 @@ from app.schemas.order import (
 )
 from app.schemas.photo import PartnerPhotoRead, PhotoRead
 from app.services.messages import MessageService, has_customer_balance_due
+from app.services.recurring_partner_billing import (
+    RecurringPartnerBillingService,
+    billing_month,
+)
 from app.services.service_catalog import ServiceCatalogService
 from app.services.storage import StoredFile, get_storage_provider
 from app.services.timeline import TimelineService
@@ -94,7 +106,8 @@ AS_REQUEST_ALLOWED_STATUSES = {
 
 # 협력사 사진 업로드 허용 상태 집합.
 # 시작 가능(STARTABLE) 상태 + 작업진행(IN_PROGRESS)을 합친 "활성 작업 구간"으로 정의한다.
-# - STARTABLE 포함: 현재 플로우에서 협력사가 '작업 시작'을 누르기 전(작업예정 등)에도 사진을 올릴 수 있도록 허용.
+# - STARTABLE 포함: 현재 플로우에서 협력사가 '작업 시작'을 누르기 전에도
+#   사진을 올릴 수 있도록 허용.
 # - IN_PROGRESS 포함: 멀티 배치 업로드를 허용하는 invariant 보장(작업진행 중 여러 번 나눠 업로드).
 # - 제외: 사전/상담 상태(신규접수·상담중·협력사확인중), 검수/전달 단계(사진검수대기·고객전달필요),
 #   종료/봉인 상태(고객전달완료·서비스완료·취소)에는 자동 공개 사진이 새로 올라오지 못하게 막는다.
@@ -203,6 +216,9 @@ class OrderService:
     ) -> OrderGroup:
         if not payload.lines:
             raise ValueError("at_least_one_line_required")
+        self._lock_assignable_partner_ids(
+            [line.partner_id for line in payload.lines if line.partner_id is not None]
+        )
         group = OrderGroup(
             id=str(uuid4()),
             customer_token=generate_customer_token(),
@@ -238,6 +254,9 @@ class OrderService:
         group = OrderGroupRepository(self.db).get(group_id)
         if group is None:
             raise ValueError("group_not_found")
+        self._lock_assignable_partner_ids(
+            [payload.partner_id] if payload.partner_id is not None else []
+        )
         order = self._create_line_internal(group, payload, actor_user_id=actor_user_id)
         self.db.commit()
         self.db.refresh(order)
@@ -250,6 +269,7 @@ class OrderService:
         payload: OrderGroupCreate,
         *,
         actor_user_id: str | None = None,
+        commit: bool = True,
     ) -> OrderGroup:
         """라인 0개 그룹 생성(정기계약 전용). payload.lines는 무시한다."""
         group = OrderGroup(
@@ -264,8 +284,11 @@ class OrderService:
             notes=payload.notes,
         )
         self.db.add(group)
-        self.db.commit()
-        self.db.refresh(group)
+        if commit:
+            self.db.commit()
+            self.db.refresh(group)
+        else:
+            self.db.flush()
         return group
 
     def add_recurring_line(
@@ -277,9 +300,31 @@ class OrderService:
         actor_user_id: str | None = None,
     ) -> Order:
         """정기 회차 라인 생성. commit하지 않는다 — caller(RecurringService)가 트랜잭션 소유."""
-        order = self._create_line_internal(group, payload, actor_user_id=actor_user_id)
+        self._lock_assignable_partner_ids(
+            [payload.partner_id] if payload.partner_id is not None else []
+        )
+        order = self._create_line_internal(
+            group,
+            payload,
+            actor_user_id=actor_user_id,
+            apply_catalog_price_defaults=False,
+        )
         order.recurring_contract_id = recurring_contract_id
         return order
+
+    def _lock_assignable_partner_ids(self, partner_ids: list[str]) -> None:
+        ids = sorted(set(partner_ids))
+        if not ids:
+            return
+        partners = {partner.id: partner for partner in PartnerRepository(self.db).lock_ids(ids)}
+        if any(partner_id not in partners for partner_id in ids):
+            raise ValueError("partner_not_found")
+        if any(
+            partners[partner_id].deleted_at is not None
+            or not partners[partner_id].is_active
+            for partner_id in ids
+        ):
+            raise ValueError("partner_inactive")
 
     def _create_line_internal(
         self,
@@ -287,9 +332,13 @@ class OrderService:
         payload: OrderLineCreate,
         *,
         actor_user_id: str | None,
+        apply_catalog_price_defaults: bool = True,
     ) -> Order:
         values = payload.model_dump()
-        self._apply_service_catalog(values)
+        self._apply_service_catalog(
+            values,
+            apply_price_defaults=apply_catalog_price_defaults,
+        )
         _normalize_receipt_fields(values)
         order = Order(
             id=str(uuid4()),
@@ -319,24 +368,226 @@ class OrderService:
             )
         return order
 
-    def update(self, order_id: str, payload: OrderUpdate, *, actor_user_id: str | None = None) -> Order:
+    def update(
+        self,
+        order_id: str,
+        payload: OrderUpdate,
+        *,
+        actor_user_id: str | None = None,
+    ) -> Order:
         order = self.orders.get(order_id)
         if order is None:
             raise ValueError("order_not_found")
-        self.db.refresh(order, with_for_update=True)
-
         changes = payload.model_dump(exclude_unset=True)
+        partner_ids = [order.partner_id] if order.partner_id is not None else []
+        if changes.get("partner_id") is not None:
+            partner_ids.append(changes["partner_id"])
+        locked_partners = {
+            partner.id: partner
+            for partner in PartnerRepository(self.db).lock_ids(partner_ids)
+        }
+        requested_partner_id = changes.get("partner_id")
+        recurring_contract = None
+        if order.recurring_contract_id is not None:
+            recurring_contract = RecurringContractRepository(self.db).get_for_update(
+                order.recurring_contract_id,
+                include_deleted=True,
+            )
+        self.db.refresh(order, with_for_update=True)
+        if order.partner_id is not None and order.partner_id not in locked_partners:
+            raise ValueError("order_partner_changed_concurrently")
+        is_partner_change = (
+            "partner_id" in changes and changes["partner_id"] != order.partner_id
+        )
+        has_photo_history = (
+            self.db.scalar(
+                select(OrderPhoto.id).where(OrderPhoto.order_id == order.id).limit(1)
+            )
+            is not None
+            if is_partner_change or recurring_contract is not None
+            else False
+        )
+        if is_partner_change:
+            if (
+                order.partner_payment_status == PartnerPaymentStatus.PAID
+                or order.partner_settled_at is not None
+                or order.status in COMPLETED_JOB_STATUSES
+                or order.work_completed_at is not None
+                or has_photo_history
+            ):
+                raise ValueError("order_partner_history_locked")
+        if requested_partner_id is not None and requested_partner_id != order.partner_id:
+            requested_partner = locked_partners.get(requested_partner_id)
+            if requested_partner is None or requested_partner.deleted_at is not None:
+                raise ValueError("partner_not_found")
+            if not requested_partner.is_active:
+                raise ValueError("partner_inactive")
+        target_status = changes.get("status", order.status)
+        target_partner_id = changes.get("partner_id", order.partner_id)
+        historical_statuses = (*COMPLETED_JOB_STATUSES, OrderStatus.CANCELLED)
+        reactivates_cancelled_order = (
+            order.status == OrderStatus.CANCELLED
+            and target_status != OrderStatus.CANCELLED
+        )
+        target_partner_amount = changes.get(
+            "partner_payment_amount",
+            order.partner_payment_amount,
+        )
+        if (
+            reactivates_cancelled_order
+            and target_partner_id is None
+            and target_partner_amount is not None
+            and target_partner_amount > 0
+        ):
+            raise ValueError("order_partner_required")
+        if (
+            "status" in changes
+            and (
+                target_status not in historical_statuses
+                or reactivates_cancelled_order
+            )
+            and target_partner_id is not None
+        ):
+            target_partner = locked_partners.get(target_partner_id)
+            if target_partner is None or target_partner.deleted_at is not None:
+                raise ValueError("partner_not_found")
+            if not target_partner.is_active:
+                raise ValueError("partner_inactive")
+
+        partner_payment_fields = {"partner_payment_amount", "partner_payment_status"}
+        requested_partner_payment_fields = partner_payment_fields.intersection(changes)
+        requested_total_amount = "total_amount" in changes
         preserve_service_name = (
             changes.get("service_item_id") is not None
             and changes.get("service_item_id") == order.service_item_id
         )
         self._apply_service_catalog(changes, preserve_service_name=preserve_service_name)
         _normalize_receipt_fields(changes)
+        if recurring_contract is not None:
+            if recurring_contract.billing_mode == RecurringBillingMode.MONTHLY:
+                if requested_total_amount:
+                    raise ValueError("recurring_customer_payment_not_per_visit")
+                changes["total_amount"] = None
+            destination_date = order.recurring_planned_date or changes.get(
+                "scheduled_date",
+                order.scheduled_date,
+            )
+            original_date = order.recurring_planned_date or order.scheduled_date
+            if destination_date is not None:
+                billing = RecurringPartnerBillingService(self.db)
+                terms = billing.resolve(
+                    recurring_contract,
+                    billing_month(destination_date),
+                    refresh=True,
+                )
+                original_terms = (
+                    billing.resolve(
+                        recurring_contract,
+                        billing_month(original_date),
+                        refresh=True,
+                    )
+                    if original_date is not None
+                    else None
+                )
+                if terms.billing_mode == RecurringBillingMode.MONTHLY:
+                    if requested_partner_payment_fields:
+                        raise ValueError("recurring_partner_payment_not_per_visit")
+                    has_retained_per_visit_settlement = (
+                        order.recurring_partner_settlement_retained
+                        and order.partner_payment_amount is not None
+                        and order.partner_payment_amount > 0
+                    )
+                    if has_retained_per_visit_settlement:
+                        changes.pop("partner_payment_amount", None)
+                        changes.pop("partner_payment_status", None)
+                        changes.pop("partner_settled_at", None)
+                    elif (
+                        order.partner_payment_status
+                        in (PartnerPaymentStatus.PAID, PartnerPaymentStatus.HOLD)
+                        or order.partner_settled_at is not None
+                    ):
+                        raise ValueError("recurring_partner_payment_not_per_visit")
+                    else:
+                        changes["partner_payment_amount"] = None
+                        changes["partner_payment_status"] = None
+                        changes["partner_settled_at"] = None
+                elif (
+                    original_terms is not None
+                    and original_terms.billing_mode == RecurringBillingMode.MONTHLY
+                ):
+                    if (
+                        order.partner_payment_status
+                        in (PartnerPaymentStatus.PAID, PartnerPaymentStatus.HOLD)
+                        or order.partner_settled_at is not None
+                    ):
+                        raise ValueError("recurring_partner_payment_not_per_visit")
+                    changes["partner_payment_amount"] = (
+                        float(terms.partner_payment_amount)
+                        if terms.partner_payment_amount is not None
+                        else None
+                    )
+                    changes["partner_payment_status"] = (
+                        PartnerPaymentStatus.UNPAID
+                        if terms.partner_payment_amount is not None
+                        and terms.partner_payment_amount > 0
+                        else None
+                    )
+                    changes["partner_settled_at"] = None
+                elif (
+                    order.recurring_planned_date is None
+                    and original_date is not None
+                    and billing_month(original_date) != billing_month(destination_date)
+                ):
+                    if (
+                        order.partner_payment_status
+                        in (PartnerPaymentStatus.PAID, PartnerPaymentStatus.HOLD)
+                        or order.partner_settled_at is not None
+                    ):
+                        raise ValueError("recurring_partner_payment_not_per_visit")
+                    changes["partner_payment_amount"] = (
+                        float(terms.partner_payment_amount)
+                        if terms.partner_payment_amount is not None
+                        else None
+                    )
+                    changes["partner_payment_status"] = (
+                        PartnerPaymentStatus.UNPAID
+                        if terms.partner_payment_amount is not None
+                        and terms.partner_payment_amount > 0
+                        else None
+                    )
+                    changes["partner_settled_at"] = None
+                elif (
+                    "service_item_id" in changes
+                    and "partner_payment_amount" not in requested_partner_payment_fields
+                ):
+                    changes["partner_payment_amount"] = (
+                        float(terms.partner_payment_amount)
+                        if terms.partner_payment_amount is not None
+                        else None
+                    )
+            elif partner_payment_fields.intersection(changes):
+                raise ValueError("recurring_partner_payment_date_required")
+        if "partner_payment_status" in changes:
+            changes["partner_settled_at"] = (
+                order.partner_settled_at or utc_now()
+                if changes["partner_payment_status"] == PartnerPaymentStatus.PAID
+                else None
+            )
         old_status = order.status
         old_partner_id = order.partner_id
         old_scheduled_date = order.scheduled_date
         should_send_schedule_confirmed = False
         payment_changes = collect_payment_changes(order, changes)
+        if payment_changes:
+            target_partner_id = changes.get("partner_id", order.partner_id)
+            if target_partner_id is not None:
+                target_partner = locked_partners.get(target_partner_id)
+                if target_partner is None:
+                    raise ValueError("order_partner_changed_concurrently")
+                if target_partner.deleted_at is not None:
+                    raise ValueError("partner_not_found")
+                if not target_partner.is_active:
+                    raise ValueError("partner_inactive")
         schedule_changes = collect_schedule_changes(order, changes)
         for key, value in changes.items():
             if key == "customer_phone" and value is not None:
@@ -359,7 +610,11 @@ class OrderService:
                 event_type=TimelineEventType.STATUS_CHANGED,
                 title="상태 변경",
                 description="방문일 지정으로 자동 일정확정 처리되었습니다.",
-                metadata={"from": old_status, "to": OrderStatus.SCHEDULE_CONFIRMED.value, "auto": True},
+                metadata={
+                    "from": old_status,
+                    "to": OrderStatus.SCHEDULE_CONFIRMED.value,
+                    "auto": True,
+                },
             )
             should_send_schedule_confirmed = True
 
@@ -399,7 +654,12 @@ class OrderService:
                 title="결제/정산 변경",
                 description="최종결제완료(서비스완료) 전환으로 자동 완납 처리되었습니다.",
                 metadata={
-                    "changes": {"payment_status": {"from": from_payment, "to": PaymentStatus.PAID.value}},
+                    "changes": {
+                        "payment_status": {
+                            "from": from_payment,
+                            "to": PaymentStatus.PAID.value,
+                        }
+                    },
                     "auto": True,
                 },
             )
@@ -420,7 +680,10 @@ class OrderService:
                 actor_user_id=actor_user_id,
                 event_type=TimelineEventType.PARTNER_ASSIGNED,
                 title="협력사 배정",
-                metadata={"partner_id": changes["partner_id"]},
+                metadata={
+                    "partner_id": changes["partner_id"],
+                    "from_partner_id": old_partner_id,
+                },
             )
 
         if payment_changes:
@@ -463,7 +726,121 @@ class OrderService:
         self.db.refresh(order)
         return order
 
+    def update_with_group(
+        self,
+        order_id: str,
+        line_payload: OrderUpdate,
+        group_payload: OrderGroupUpdate,
+        *,
+        actor_user_id: str | None = None,
+    ) -> Order:
+        order = self.orders.get(order_id)
+        if order is None:
+            raise ValueError("order_not_found")
+        try:
+            requested_partner_id = (
+                line_payload.partner_id
+                if "partner_id" in line_payload.model_fields_set
+                else None
+            )
+            self._lock_group_dependencies(
+                order.group_id,
+                requested_partner_id=requested_partner_id,
+            )
+            self._apply_group_update(
+                order.group_id,
+                group_payload,
+                actor_user_id=actor_user_id,
+            )
+            self.db.flush()
+            return self.update(
+                order_id,
+                line_payload,
+                actor_user_id=actor_user_id,
+            )
+        except Exception:
+            self.db.rollback()
+            raise
+
+    def _lock_group_dependencies(
+        self,
+        group_id: str,
+        *,
+        requested_partner_id: str | None = None,
+    ) -> None:
+        observed_lines = self.db.execute(
+            select(Order.id, Order.partner_id, Order.recurring_contract_id).where(
+                Order.group_id == group_id,
+                Order.deleted_at.is_(None),
+            )
+        ).all()
+        partner_ids = [
+            partner_id
+            for _order_id, partner_id, _contract_id in observed_lines
+            if partner_id is not None
+        ]
+        if requested_partner_id is not None:
+            partner_ids.append(requested_partner_id)
+        locked_partner_ids = {
+            partner.id for partner in PartnerRepository(self.db).lock_ids(partner_ids)
+        }
+        contract_ids = [
+            contract_id
+            for _order_id, _partner_id, contract_id in observed_lines
+            if contract_id is not None
+        ]
+        locked_contract_ids = {
+            contract.id
+            for contract in RecurringContractRepository(self.db).lock_ids(contract_ids)
+        }
+        locked_lines = list(
+            self.db.scalars(
+                select(Order)
+                .where(
+                    Order.group_id == group_id,
+                    Order.deleted_at.is_(None),
+                )
+                .order_by(Order.id.asc())
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
+        )
+        if any(
+            (line.partner_id is not None and line.partner_id not in locked_partner_ids)
+            or (
+                line.recurring_contract_id is not None
+                and line.recurring_contract_id not in locked_contract_ids
+            )
+            for line in locked_lines
+        ):
+            raise ValueError("order_group_changed_concurrently")
+        group = self.db.scalar(
+            select(OrderGroup)
+            .where(OrderGroup.id == group_id, OrderGroup.deleted_at.is_(None))
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+        if group is None:
+            raise ValueError("group_not_found")
+
     def update_group(
+        self,
+        group_id: str,
+        payload: OrderGroupUpdate,
+        *,
+        actor_user_id: str | None = None,
+    ) -> OrderGroup:
+        self._lock_group_dependencies(group_id)
+        group = self._apply_group_update(
+            group_id,
+            payload,
+            actor_user_id=actor_user_id,
+        )
+        self.db.commit()
+        self.db.refresh(group)
+        return group
+
+    def _apply_group_update(
         self,
         group_id: str,
         payload: OrderGroupUpdate,
@@ -525,20 +902,24 @@ class OrderService:
                         },
                     )
 
-        self.db.commit()
-        self.db.refresh(group)
         return group
 
-    def _apply_service_catalog(self, values: dict, *, preserve_service_name: bool = False) -> None:
+    def _apply_service_catalog(
+        self,
+        values: dict,
+        *,
+        preserve_service_name: bool = False,
+        apply_price_defaults: bool = True,
+    ) -> None:
         service_item_id = values.get("service_item_id")
         if service_item_id:
             item, _category = self.service_catalog.get_available_item(service_item_id)
             values["service_category_id"] = item.category_id
             if not preserve_service_name:
                 values["service_name"] = item.name
-            if values.get("total_amount") is None:
+            if apply_price_defaults and values.get("total_amount") is None:
                 values["total_amount"] = float(item.base_price or 0)
-            if values.get("partner_payment_amount") is None:
+            if apply_price_defaults and values.get("partner_payment_amount") is None:
                 values["partner_payment_amount"] = float(item.partner_base_price or 0)
             return
 
@@ -787,7 +1168,10 @@ class OrderService:
                 description=(
                     "협력사가 AS 작업 완료를 처리했습니다."
                     if was_as_requested
-                    else "협력사가 작업 완료를 처리했습니다. 자동 공개된 사진으로 고객 전달이 가능합니다."
+                    else (
+                        "협력사가 작업 완료를 처리했습니다. "
+                        "자동 공개된 사진으로 고객 전달이 가능합니다."
+                    )
                 ),
             )
             self.db.commit()
@@ -797,7 +1181,10 @@ class OrderService:
             with suppress(Exception):
                 storage.delete(stored_signature.storage_key)
             raise
-        if settings.automation_send_customer_balance_due and should_send_customer_balance_due(order):
+        if (
+            settings.automation_send_customer_balance_due
+            and should_send_customer_balance_due(order)
+        ):
             self._send_automation_message(
                 order,
                 MessageSendRequest(
@@ -843,12 +1230,22 @@ class OrderService:
         if not memo:
             raise ValueError("as_memo_required")
         order = self.orders.get(order_id)
-        if order is not None:
-            self.db.refresh(order, with_for_update=True)
         if order is None or order.deleted_at is not None:
             raise ValueError("order_not_found")
         if not order.partner_id:
             raise ValueError("partner_not_assigned")
+        observed_partner_id = order.partner_id
+        partner = PartnerRepository(self.db).get_for_update(
+            observed_partner_id,
+            include_deleted=True,
+        )
+        self.db.refresh(order, with_for_update=True)
+        if order.partner_id != observed_partner_id:
+            raise ValueError("order_partner_changed_concurrently")
+        if partner is None or partner.deleted_at is not None:
+            raise ValueError("partner_not_found")
+        if not partner.is_active:
+            raise ValueError("partner_inactive")
         if order.as_requested:
             raise ValueError("as_request_already_accepted")
         if order.status not in AS_REQUEST_ALLOWED_STATUSES:
@@ -1130,7 +1527,11 @@ class OrderService:
         )
 
 
-def to_admin_group_dto(group: OrderGroup, *, lines: list[Order] | None = None) -> AdminOrderGroupRead:
+def to_admin_group_dto(
+    group: OrderGroup,
+    *,
+    lines: list[Order] | None = None,
+) -> AdminOrderGroupRead:
     return AdminOrderGroupRead(
         id=group.id,
         customer_token=group.customer_token,
@@ -1364,7 +1765,11 @@ def to_partner_job_dto(
             to_partner_photo_dto(
                 photo,
                 order_id=order.id,
-                photo_source="customer_as" if photo.id in allowed_customer_as_photo_ids else "partner",
+                photo_source=(
+                    "customer_as"
+                    if photo.id in allowed_customer_as_photo_ids
+                    else "partner"
+                ),
             )
             for photo in partner_photos
         ],
@@ -1444,7 +1849,11 @@ def _to_customer_line_dto(
     )
 
 
-def to_customer_order_dto(order: Order, *, photos: list[OrderPhoto] | None = None) -> CustomerOrderRead:
+def to_customer_order_dto(
+    order: Order,
+    *,
+    photos: list[OrderPhoto] | None = None,
+) -> CustomerOrderRead:
     payment_visible = bool(order.customer_visible_payment)
     return CustomerOrderRead(
         id=order.id,

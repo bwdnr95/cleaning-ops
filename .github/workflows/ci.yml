@@ -46,6 +46,25 @@ jobs:
           python -m pip install --upgrade pip
           pip install -e ".[dev]"
 
+      - name: Apply Alembic migrations (PostgreSQL)
+        env:
+          DATABASE_URL: "postgresql+psycopg://cleanops:cleanops@localhost:5432/cleanops_ci"
+        run: |
+          python -m alembic upgrade head
+          python -m scripts.seed_dev
+          python -m alembic current
+
+      - name: PostgreSQL concurrency regressions
+        env:
+          ENVIRONMENT: test
+          DATABASE_URL: "postgresql+psycopg://cleanops:cleanops@localhost:5432/cleanops_ci"
+          POSTGRES_CONCURRENCY_DATABASE_URL: "postgresql+psycopg://cleanops:cleanops@localhost:5432/cleanops_ci"
+          FRONTEND_URL: "http://localhost:5173"
+          STORAGE_ROOT: "ci_storage"
+          MESSAGE_PROVIDER: "mock"
+          SECRET_KEY: "ci-secret-not-used-in-prod-but-32chars-long-x"
+        run: python -m pytest -q tests/test_recurring_billing_concurrency_postgres.py
+
       - name: Ruff lint
         run: ruff check .
 
@@ -65,14 +84,6 @@ jobs:
       - name: Apply Alembic migrations (SQLite)
         env:
           DATABASE_URL: "sqlite:///./ci_migrations.sqlite"
-        run: |
-          python -m alembic upgrade head
-          python -m scripts.seed_dev
-          python -m alembic current
-
-      - name: Apply Alembic migrations (PostgreSQL)
-        env:
-          DATABASE_URL: "postgresql+psycopg://cleanops:cleanops@localhost:5432/cleanops_ci"
         run: |
           python -m alembic upgrade head
           python -m scripts.seed_dev

@@ -67,6 +67,11 @@ export interface OrderGroupUpdateInput {
   notes?: string | null;
 }
 
+export interface OrderEditUpdateInput {
+  line: UpdateOrderInput;
+  group: OrderGroupUpdateInput;
+}
+
 export interface AdminOrder extends AdminOrderLineInput {
   id: string;
   group_id: string;
@@ -300,6 +305,16 @@ export function getAdminOrder(orderId: string): Promise<AdminOrder> {
 
 export function updateAdminOrder(orderId: string, input: UpdateOrderInput): Promise<AdminOrder> {
   return apiRequest(`/admin/orders/${encodeURIComponent(orderId)}`, {
+    method: 'PATCH',
+    body: input,
+  }) as Promise<AdminOrder>;
+}
+
+export function updateAdminOrderEdit(
+  orderId: string,
+  input: OrderEditUpdateInput,
+): Promise<AdminOrder> {
+  return apiRequest(`/admin/orders/${encodeURIComponent(orderId)}/edit`, {
     method: 'PATCH',
     body: input,
   }) as Promise<AdminOrder>;

@@ -940,6 +940,34 @@ def test_as_request_requires_admin(client):
     assert res.status_code == 401
 
 
+def test_as_request_rejects_archived_partner_before_state_change(db_session):
+    from datetime import UTC, datetime
+
+    from app.models.order import Order
+    from app.models.partner import Partner
+    from app.services.orders import OrderService
+
+    order = db_session.get(Order, DEV_ORDER_ID)
+    partner = db_session.get(Partner, DEV_PARTNER_ID)
+    assert order is not None
+    assert partner is not None
+    order.status = OrderStatus.CUSTOMER_DELIVERY_DONE
+    partner.deleted_at = datetime.now(UTC)
+    partner.is_active = False
+    db_session.commit()
+
+    with pytest.raises(ValueError, match="partner_not_found"):
+        OrderService(db_session).request_as(
+            order.id,
+            memo="재방문 요청",
+            actor_user_id="seed-admin-user",
+        )
+
+    db_session.refresh(order)
+    assert order.as_requested is False
+    assert order.status == OrderStatus.CUSTOMER_DELIVERY_DONE
+
+
 def test_as_request_without_partner_is_rejected(db_session):
     from datetime import date
 
