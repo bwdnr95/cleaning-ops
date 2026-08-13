@@ -2,6 +2,7 @@ import React from 'react';
 
 import { orderWorkflowStatusValue } from '../../../domain/orderStatus';
 import { isBalanceIncomplete } from '../../../domain/paymentStatus';
+import { receiptStatusAfterTypeChange } from '../../../domain/receiptType';
 import type { AdminOrderDetail } from './OrderDetailModel';
 import { isAsRequestAllowedStatus, isBalanceNoticeAllowedStatus } from './OrderDetailRules';
 
@@ -93,8 +94,7 @@ export function useOrderDetailFormState(order: AdminOrderDetail | null) {
 
   const setReceiptType = (next: string) => {
     setSelectedReceiptType(next);
-    if (next === 'none') setSelectedReceiptStatus('not_applicable');
-    else if (selectedReceiptStatus === 'not_applicable') setSelectedReceiptStatus('');
+    setSelectedReceiptStatus(receiptStatusAfterTypeChange(next, selectedReceiptStatus));
   };
 
   return {

@@ -14,6 +14,18 @@ export const RECEIPT_STATUSES = [
   { value: 'not_applicable', label: '해당없음' },
 ];
 
+export function receiptStatusAfterTypeChange(nextType: string, currentStatus: string) {
+  if (!nextType) return '';
+  if (nextType === 'none') return 'not_applicable';
+  return currentStatus === 'not_applicable' ? '' : currentStatus;
+}
+
+export function receiptStatusForPayload(type: string, status: string) {
+  if (!type) return null;
+  if (type === 'none') return 'not_applicable';
+  return status || null;
+}
+
 export function receiptTypeLabel(value) {
   return RECEIPT_TYPES.find((item) => item.value === value)?.label || '';
 }

@@ -1,5 +1,6 @@
 import { deleteAdminOrder, sendOrderAsRequest, updateAdminOrder } from '../../../api/admin';
 import { orderStatusLabel } from '../../../domain/orderStatus';
+import { receiptStatusForPayload } from '../../../domain/receiptType';
 import type { AdminOrderDetail, AdminPartnerOption, MessageActionDraft } from './OrderDetailModel';
 import { isAsRequestAllowedStatus, MESSAGE_ACTIONS, WORK_DONE_STATUS } from './OrderDetailRules';
 
@@ -109,7 +110,7 @@ export function useOrderDetailMutations({
         payment_status: selectedPaymentStatus || null,
         partner_payment_status: selectedPartnerPaymentStatus || null,
         receipt_type: selectedReceiptType || null,
-        receipt_status: selectedReceiptType === 'none' ? 'not_applicable' : (selectedReceiptStatus || null),
+        receipt_status: receiptStatusForPayload(selectedReceiptType, selectedReceiptStatus),
         onsite_extra_amount: onsite,
         balance_amount: balance,
       });
