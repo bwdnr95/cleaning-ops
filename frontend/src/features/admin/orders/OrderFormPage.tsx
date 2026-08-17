@@ -26,6 +26,7 @@ import {
   updateReceiptType,
   updateServiceCategory,
   updateServiceItem,
+  updateVisitDates,
 } from './OrderFormState';
 import type {
   OrderFormGroupFieldChange,
@@ -138,6 +139,10 @@ export function OrderFormPage({
     setForm((current) => updateMoneyField(current, lineIndex, key, value));
   }, []);
 
+  const handleVisitDatesChange = React.useCallback((lineIndex: number, value: readonly string[]) => {
+    setForm((current) => updateVisitDates(current, lineIndex, value));
+  }, []);
+
   const handlePartnerChange = React.useCallback((lineIndex: number, partnerId: string) => {
     setForm((current) => updatePartner(current, lineIndex, partnerId, partners.data || []));
   }, [partners.data]);
@@ -219,6 +224,7 @@ export function OrderFormPage({
     onSubmit: handleSubmit,
     onGroupFieldChange: setGroupField,
     onLineFieldChange: setLineField,
+    onVisitDatesChange: handleVisitDatesChange,
     onMoneyChange: handleMoneyChange,
     onPartnerChange: handlePartnerChange,
     onServiceCategoryChange: handleServiceCategoryChange,

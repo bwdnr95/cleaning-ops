@@ -293,7 +293,7 @@ function DashList({ title, subtitle, jobs, onOpen, onQueue, accent, muted = fals
         {!isLoading && error && <DashMessage text="작업 목록을 불러오지 못했습니다." tone="danger" />}
         {!isLoading && !error && jobs.length === 0 && <DashMessage text="표시할 작업이 없습니다." />}
         {!isLoading && !error && jobs.map((j, i) => (
-          <button key={j.id} onClick={() => onOpen && onOpen(j.id)}
+          <button key={j.id} data-testid={`dashboard-job-${j.id}`} onClick={() => onOpen && onOpen(j.id)}
             style={{
               width: '100%', textAlign: 'left',
               display: 'grid', gridTemplateColumns: '80px 1fr 110px 90px',
@@ -354,7 +354,7 @@ const KPI_NAVIGATION = [
   { key: 'unpaid_check', targetPage: 'orders', ordersTab: 'unpaid_check', datePreset: 'all' },
   { key: 'customer_check', targetPage: 'orders', ordersTab: 'customer_check', datePreset: 'all' },
   { key: 'monthly_done', targetPage: 'orders', ordersTab: 'monthly_done', datePreset: 'month' },
-  { key: 'monthly_contract', targetPage: 'orders', ordersTab: 'all', datePreset: 'month' },
+  { key: 'monthly_contract', targetPage: 'orders', ordersTab: 'monthly_contract', datePreset: 'month' },
   { key: 'receivable', targetPage: 'orders', ordersTab: 'receivable', datePreset: 'all' },
 ];
 
@@ -384,7 +384,10 @@ function toDashJobs(orders, target) {
   const wanted = target === 'tomorrow' ? addDays(today, 1) : today;
 
   return orders
-    .filter((order) => isSameDateValue(order.scheduled_date, wanted))
+    .filter((order) => {
+      const visitDates = order.visit_dates?.length ? order.visit_dates : [order.scheduled_date];
+      return visitDates.some((visitDate) => isSameDateValue(visitDate, wanted));
+    })
     // 오늘/내일 모두 '일정 및 작업 확정' 상태로 좁힌다(확정 이전·완료 이후는 리스트에서 제외).
     .filter((order) => CONFIRMED_JOB_STATUSES.includes(order.status))
     .slice(0, 5)

@@ -1,4 +1,5 @@
 import { DatePicker } from '../../../components/common/DatePicker';
+import { MultiDatePicker } from '../../../components/common/MultiDatePicker';
 import { Icon } from '../../../components/common/ui';
 import { ORDER_STATUS_OPTIONS } from '../../../domain/orderStatus';
 import { OrderFormAsFields } from './OrderFormAsFields';
@@ -23,6 +24,7 @@ interface OrderFormLineEditorProps {
   readonly partners: readonly OrderFormPartner[];
   readonly brokers: readonly OrderFormBroker[];
   readonly onFieldChange: (lineIndex: number, key: OrderLineField, value: string) => void;
+  readonly onVisitDatesChange: (lineIndex: number, value: readonly string[]) => void;
   readonly onMoneyChange: (lineIndex: number, key: OrderMoneyField, value: string) => void;
   readonly onPartnerChange: (lineIndex: number, partnerId: string) => void;
   readonly onServiceCategoryChange: (lineIndex: number, categoryId: string) => void;
@@ -47,6 +49,7 @@ export function OrderFormLineEditor({
   partners,
   brokers,
   onFieldChange,
+  onVisitDatesChange,
   onMoneyChange,
   onPartnerChange,
   onServiceCategoryChange,
@@ -113,7 +116,13 @@ export function OrderFormLineEditor({
           <TextField testId={`order-line-${lineIndex}-service-name`} label="상품명" required value={line.service_name} onChange={(value) => onFieldChange(lineIndex, 'service_name', value)} />
           <TextField label="수량/규격" value={line.size_or_quantity} onChange={(value) => onFieldChange(lineIndex, 'size_or_quantity', value)} />
           <Field label="접수일"><DatePicker testId={`order-line-${lineIndex}-received-date`} value={line.received_date} onChange={(value) => onFieldChange(lineIndex, 'received_date', value)} /></Field>
-          <Field label="방문 예정일"><DatePicker testId={`order-line-${lineIndex}-scheduled-date`} value={line.scheduled_date} onChange={(value) => onFieldChange(lineIndex, 'scheduled_date', value)} placeholder="방문일 선택" /></Field>
+          <Field label="방문 예정일">
+            <MultiDatePicker
+              testId={`order-line-${lineIndex}-visit-dates`}
+              value={line.visit_dates}
+              onChange={(value) => onVisitDatesChange(lineIndex, value)}
+            />
+          </Field>
           <TextField testId={`order-line-${lineIndex}-requested-time`} label="요청 시간" value={line.requested_time} onChange={(value) => onFieldChange(lineIndex, 'requested_time', value)} placeholder="14:00 또는 오후 2-5시" />
           <Field label="중개사">
             <select className="input" data-testid={`order-line-${lineIndex}-broker`} value={line.broker_id} onChange={(event) => onFieldChange(lineIndex, 'broker_id', event.target.value)}>

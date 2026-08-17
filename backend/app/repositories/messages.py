@@ -1,8 +1,9 @@
-from datetime import datetime
+from datetime import UTC, date, datetime, time, timedelta
 
 from sqlalchemy import and_, func, or_, select, true, update
 from sqlalchemy.orm import Session
 
+from app.core.time import business_timezone, to_business_time
 from app.domain.constants import (
     MESSAGE_PROVIDER_OUTCOME_UNKNOWN_ERROR_CODES,
     MessageStatus,
@@ -11,6 +12,36 @@ from app.domain.constants import (
 from app.models.message import MessageLog
 from app.models.order import Order
 from app.repositories.base import Repository
+
+
+def _target_visit_filter(target_visit_date: date | None):
+    if target_visit_date is None:
+        return true()
+
+    timezone = business_timezone()
+    legacy_attempt_start = datetime.combine(
+        target_visit_date - timedelta(days=1),
+        time.min,
+        tzinfo=timezone,
+    ).astimezone(UTC)
+    legacy_attempt_end = datetime.combine(
+        target_visit_date,
+        time.min,
+        tzinfo=timezone,
+    ).astimezone(UTC)
+    attempted_at = func.coalesce(
+        MessageLog.requested_at,
+        MessageLog.sent_at,
+        MessageLog.created_at,
+    )
+    return or_(
+        MessageLog.target_visit_date == target_visit_date,
+        and_(
+            MessageLog.target_visit_date.is_(None),
+            attempted_at >= legacy_attempt_start,
+            attempted_at < legacy_attempt_end,
+        ),
+    )
 
 
 class MessageRepository(Repository[MessageLog]):
@@ -56,11 +87,13 @@ class MessageRepository(Repository[MessageLog]):
         order_id: str,
         message_type: MessageType,
         sent_since: datetime | None = None,
+        target_visit_date: date | None = None,
     ) -> datetime | None:
         conditions = [
             MessageLog.order_id == order_id,
             MessageLog.message_type == message_type,
             MessageLog.status.in_([MessageStatus.SENT, MessageStatus.DELIVERED]),
+            _target_visit_filter(target_visit_date),
         ]
         if sent_since is not None:
             conditions.append(MessageLog.sent_at >= sent_since)
@@ -71,6 +104,29 @@ class MessageRepository(Repository[MessageLog]):
             .limit(1)
         ).scalar_one_or_none()
 
+    def successful_day_before_target_dates(self, order_id: str) -> set[date]:
+        rows = self.db.execute(
+            select(
+                MessageLog.target_visit_date,
+                MessageLog.requested_at,
+                MessageLog.sent_at,
+                MessageLog.created_at,
+            ).where(
+                MessageLog.order_id == order_id,
+                MessageLog.message_type == MessageType.CUSTOMER_DAY_BEFORE,
+                MessageLog.status.in_([MessageStatus.SENT, MessageStatus.DELIVERED]),
+            )
+        )
+        target_dates: set[date] = set()
+        for target_date, requested_at, sent_at, created_at in rows:
+            if target_date is not None:
+                target_dates.add(target_date)
+                continue
+            attempted_at = requested_at or sent_at or created_at
+            if attempted_at is not None:
+                target_dates.add(to_business_time(attempted_at).date() + timedelta(days=1))
+        return target_dates
+
     def has_blocking_delivery_attempt(
         self,
         *,
@@ -79,8 +135,13 @@ class MessageRepository(Repository[MessageLog]):
         retry_since: datetime,
         successful_since: datetime | None = None,
         recipient_partner_id: str | None = None,
+        target_visit_date: date | None = None,
     ) -> bool:
-        attempted_at = func.coalesce(MessageLog.requested_at, MessageLog.created_at)
+        attempted_at = func.coalesce(
+            MessageLog.requested_at,
+            MessageLog.sent_at,
+            MessageLog.created_at,
+        )
         successful_attempt = MessageLog.status.in_([MessageStatus.SENT, MessageStatus.DELIVERED])
 
         epoch_filter = attempted_at >= successful_since if successful_since is not None else true()
@@ -97,6 +158,7 @@ class MessageRepository(Repository[MessageLog]):
                     MessageLog.message_type == message_type,
                     recipient_filter,
                     epoch_filter,
+                    _target_visit_filter(target_visit_date),
                     or_(
                         successful_attempt,
                         and_(
@@ -129,13 +191,19 @@ class MessageRepository(Repository[MessageLog]):
         message_type: MessageType,
         attempted_since: datetime | None = None,
         recipient_partner_id: str | None = None,
+        target_visit_date: date | None = None,
     ) -> bool:
-        attempted_at = func.coalesce(MessageLog.requested_at, MessageLog.created_at)
+        attempted_at = func.coalesce(
+            MessageLog.requested_at,
+            MessageLog.sent_at,
+            MessageLog.created_at,
+        )
         conditions = [
             MessageLog.order_id == order_id,
             MessageLog.message_type == message_type,
             MessageLog.status == MessageStatus.PENDING,
             MessageLog.provider_error_code.in_(MESSAGE_PROVIDER_OUTCOME_UNKNOWN_ERROR_CODES),
+            _target_visit_filter(target_visit_date),
         ]
         if attempted_since is not None:
             conditions.append(attempted_at >= attempted_since)
@@ -153,12 +221,18 @@ class MessageRepository(Repository[MessageLog]):
         message_type: MessageType,
         attempted_since: datetime | None = None,
         recipient_partner_id: str | None = None,
+        target_visit_date: date | None = None,
     ) -> bool:
-        attempted_at = func.coalesce(MessageLog.requested_at, MessageLog.created_at)
+        attempted_at = func.coalesce(
+            MessageLog.requested_at,
+            MessageLog.sent_at,
+            MessageLog.created_at,
+        )
         conditions = [
             MessageLog.order_id == order_id,
             MessageLog.message_type == message_type,
             MessageLog.status == MessageStatus.PENDING,
+            _target_visit_filter(target_visit_date),
         ]
         if attempted_since is not None:
             conditions.append(attempted_at >= attempted_since)
@@ -204,8 +278,13 @@ class MessageRepository(Repository[MessageLog]):
         message_type: MessageType,
         pending_before: datetime,
         recipient_partner_id: str | None = None,
+        target_visit_date: date | None = None,
     ) -> int:
-        attempted_at = func.coalesce(MessageLog.requested_at, MessageLog.created_at)
+        attempted_at = func.coalesce(
+            MessageLog.requested_at,
+            MessageLog.sent_at,
+            MessageLog.created_at,
+        )
         recipient_filter = (
             MessageLog.recipient_partner_id == recipient_partner_id
             if recipient_partner_id is not None
@@ -217,6 +296,7 @@ class MessageRepository(Repository[MessageLog]):
                 MessageLog.order_id == order_id,
                 MessageLog.message_type == message_type,
                 recipient_filter,
+                _target_visit_filter(target_visit_date),
                 MessageLog.status == MessageStatus.PENDING,
                 MessageLog.provider != "solapi",
                 attempted_at <= pending_before,
@@ -243,8 +323,13 @@ class MessageRepository(Repository[MessageLog]):
         message_type: MessageType,
         pending_before: datetime,
         recipient_partner_id: str | None = None,
+        target_visit_date: date | None = None,
     ) -> int:
-        attempted_at = func.coalesce(MessageLog.requested_at, MessageLog.created_at)
+        attempted_at = func.coalesce(
+            MessageLog.requested_at,
+            MessageLog.sent_at,
+            MessageLog.created_at,
+        )
         recipient_filter = (
             MessageLog.recipient_partner_id == recipient_partner_id
             if recipient_partner_id is not None
@@ -256,6 +341,7 @@ class MessageRepository(Repository[MessageLog]):
                 MessageLog.order_id == order_id,
                 MessageLog.message_type == message_type,
                 recipient_filter,
+                _target_visit_filter(target_visit_date),
                 MessageLog.status == MessageStatus.PENDING,
                 MessageLog.provider == "solapi",
                 attempted_at <= pending_before,

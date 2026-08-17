@@ -81,6 +81,11 @@ export function OrderImportDialog({ onClose, onImported }: Props) {
             <div className="mono" style={{ wordBreak: 'break-word' }}>
               group_key, customer_name, customer_phone, customer_address, scheduled_date, service_name, total_amount
             </div>
+            <div style={{ marginTop: 8, fontWeight: 700, color: 'var(--text)' }}>여러 방문일(선택)</div>
+            <div className="mono" style={{ wordBreak: 'break-word' }}>visit_dates</div>
+            <div style={{ marginTop: 3, color: 'var(--text-tertiary)' }}>
+              여러 날짜는 쉼표, 세미콜론 또는 줄바꿈으로 구분하세요. 생략하면 scheduled_date가 방문일로 등록됩니다.
+            </div>
             <div style={{ marginTop: 8, color: 'var(--text-tertiary)' }}>
               한 그룹 안에서 일부 행이 실패하면 그 group_key 전체가 등록되지 않고 실패 목록에 표시됩니다.
             </div>

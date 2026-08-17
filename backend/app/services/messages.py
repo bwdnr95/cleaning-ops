@@ -90,6 +90,7 @@ DAY_BEFORE_NOTICE_RECOVERY_STATUSES: frozenset[str] = frozenset(
     {
         *DAY_BEFORE_NOTICE_AUTOMATION_STATUSES,
         OrderStatus.DAY_BEFORE_NOTICE_DONE.value,
+        OrderStatus.IN_PROGRESS.value,
     }
 )
 
@@ -1058,11 +1059,17 @@ class MessageService:
         recipient_partner_id = (
             order.partner_id if payload.recipient_type == RecipientType.PARTNER else None
         )
+        target_visit_date = (
+            expected_scheduled_date or (business_today() + timedelta(days=1))
+            if payload.message_type == MessageType.CUSTOMER_DAY_BEFORE
+            else None
+        )
         marked_unknown_count = self.messages.mark_stale_solapi_pending_unknown(
             order_id=order.id,
             message_type=payload.message_type,
             pending_before=pending_before,
             recipient_partner_id=recipient_partner_id,
+            target_visit_date=target_visit_date,
         )
         if marked_unknown_count:
             self.timeline.record(
@@ -1083,6 +1090,7 @@ class MessageService:
             message_type=payload.message_type,
             pending_before=pending_before,
             recipient_partner_id=recipient_partner_id,
+            target_visit_date=target_visit_date,
         )
         if expired_count:
             self.timeline.record(
@@ -1105,6 +1113,7 @@ class MessageService:
             retry_since=pending_before,
             successful_since=effective_successful_since,
             recipient_partner_id=recipient_partner_id,
+            target_visit_date=target_visit_date,
         ):
             self.db.commit()
             return None
@@ -1201,7 +1210,7 @@ class MessageService:
         if (
             settings.automation_day_before_notice_scheduler_enabled
             and is_day_before_recovery_time
-            and order.scheduled_date == tomorrow
+            and tomorrow in order.visit_dates
             and order.status in DAY_BEFORE_NOTICE_RECOVERY_STATUSES
             and partner_confirmed_at is not None
         ):
@@ -1237,7 +1246,7 @@ class MessageService:
 
         if (
             settings.automation_send_schedule_confirmed
-            and order.scheduled_date is not None
+            and bool(order.visit_dates)
             and order.status in SCHEDULE_CONFIRMATION_RECOVERY_STATUSES
         ):
             if partner_confirmed_at is not None:
@@ -1310,8 +1319,17 @@ class MessageService:
         notice_date = target_date or business_today() + timedelta(days=1)
         orders = self.orders.list_day_before_notice_candidates(
             target_date=notice_date,
-            statuses=DAY_BEFORE_NOTICE_AUTOMATION_STATUSES,
+            statuses=set(DAY_BEFORE_NOTICE_RECOVERY_STATUSES),
         )
+        orders = [
+            order
+            for order in orders
+            if order.status != OrderStatus.DAY_BEFORE_NOTICE_DONE
+            or bool(
+                self.messages.successful_day_before_target_dates(order.id)
+                - {notice_date}
+            )
+        ]
         order_ids = [order.id for order in orders]
         sent_order_ids: list[str] = []
         skipped_order_ids: list[str] = []
@@ -1367,6 +1385,7 @@ class MessageService:
                     order_id=order_id,
                     message_type=MessageType.CUSTOMER_DAY_BEFORE,
                     sent_since=sent_since,
+                    target_visit_date=notice_date,
                 )
                 if last_sent_at:
                     if current_order is not None:
@@ -1379,6 +1398,7 @@ class MessageService:
                     order_id=order_id,
                     message_type=MessageType.CUSTOMER_DAY_BEFORE,
                     attempted_since=sent_since,
+                    target_visit_date=notice_date,
                 ):
                     retryable_order_ids.append(order_id)
                 continue
@@ -1412,6 +1432,11 @@ class MessageService:
         if order is None:
             raise ValueError("order_not_found")
         self._validate_message_preconditions(order, payload)
+        rendered_scheduled_date = (
+            business_today() + timedelta(days=1)
+            if payload.message_type == MessageType.CUSTOMER_DAY_BEFORE
+            else None
+        )
 
         recipient_type, recipient_name, recipient_phone = self._resolve_recipient(order, payload)
         partner = self.partners.get(order.partner_id) if order.partner_id else None
@@ -1420,12 +1445,14 @@ class MessageService:
             order,
             partner,
             customer_link,
+            scheduled_date=rendered_scheduled_date,
         )
         content = self._render_content(
             payload,
             order=order,
             partner=partner,
             customer_link=customer_link,
+            scheduled_date=rendered_scheduled_date,
         )
         kakao_template_id, kakao_variables = self._build_kakao_template(payload, context)
         kakao_preview_state = self._build_kakao_preview_state(payload, kakao_template_id)
@@ -1474,7 +1501,17 @@ class MessageService:
             payload,
             expected_scheduled_date=expected_scheduled_date,
         )
-        dispatch_scheduled_date = order.scheduled_date
+        dispatch_scheduled_date = (
+            expected_scheduled_date or (business_today() + timedelta(days=1))
+            if payload.message_type == MessageType.CUSTOMER_DAY_BEFORE
+            else expected_scheduled_date or order.scheduled_date
+        )
+        rendered_scheduled_date = (
+            dispatch_scheduled_date
+            if payload.message_type == MessageType.CUSTOMER_DAY_BEFORE
+            else None
+        )
+        dispatch_visit_dates = tuple(order.visit_dates)
         dispatch_requested_time = order.requested_time
         dispatch_partner_confirmed_at = (
             self.timeline.latest_current_partner_confirmation(
@@ -1502,6 +1539,7 @@ class MessageService:
             message_type=payload.message_type,
             pending_before=pending_before,
             recipient_partner_id=recipient_partner_id,
+            target_visit_date=rendered_scheduled_date,
         )
         if marked_unknown_count:
             self.timeline.record(
@@ -1521,6 +1559,7 @@ class MessageService:
             message_type=payload.message_type,
             attempted_since=current_message_epoch,
             recipient_partner_id=recipient_partner_id,
+            target_visit_date=rendered_scheduled_date,
         ):
             self.db.commit()
             raise ValueError("message_outcome_unknown")
@@ -1529,6 +1568,7 @@ class MessageService:
             message_type=payload.message_type,
             pending_before=pending_before,
             recipient_partner_id=recipient_partner_id,
+            target_visit_date=rendered_scheduled_date,
         )
         if expired_pending_count:
             self.timeline.record(
@@ -1546,6 +1586,7 @@ class MessageService:
             message_type=payload.message_type,
             attempted_since=current_message_epoch,
             recipient_partner_id=recipient_partner_id,
+            target_visit_date=rendered_scheduled_date,
         ):
             raise ValueError("message_send_in_progress")
 
@@ -1561,6 +1602,7 @@ class MessageService:
                 error_code="recipient_phone_missing",
                 error_message="수신자 전화번호가 없어 메시지를 발송할 수 없습니다.",
                 actor_user_id=actor_user_id,
+                target_visit_date=rendered_scheduled_date,
             )
 
         # FIX 6: 고객 링크가 포함되는 고객 메시지인데 customer_token 이 없으면
@@ -1578,6 +1620,7 @@ class MessageService:
                 error_code="customer_token_missing",
                 error_message="고객 링크 토큰이 없어 메시지를 발송할 수 없습니다.",
                 actor_user_id=actor_user_id,
+                target_visit_date=rendered_scheduled_date,
             )
 
         customer_link = self._build_customer_link(order.customer_token)
@@ -1585,12 +1628,14 @@ class MessageService:
             order,
             partner,
             customer_link,
+            scheduled_date=rendered_scheduled_date,
         )
         content = self._render_content(
             payload,
             order=order,
             partner=partner,
             customer_link=customer_link,
+            scheduled_date=rendered_scheduled_date,
         )
         kakao_template_id, kakao_variables = self._build_kakao_template(payload, context)
         message_log_id = str(uuid4())
@@ -1619,6 +1664,7 @@ class MessageService:
             recipient_phone=recipient_phone,
             recipient_partner_id=recipient_partner_id,
             message_type=payload.message_type,
+            target_visit_date=rendered_scheduled_date,
             channel=channel,
             content=content,
             status=MessageStatus.PENDING,
@@ -1687,6 +1733,7 @@ class MessageService:
                 payload,
                 log,
                 dispatch_scheduled_date=dispatch_scheduled_date,
+                dispatch_visit_dates=dispatch_visit_dates,
                 dispatch_requested_time=dispatch_requested_time,
                 dispatch_partner_confirmed_at=dispatch_partner_confirmed_at,
             )
@@ -1775,23 +1822,23 @@ class MessageService:
                 order_id=order.id,
                 partner_id=order.partner_id,
             )
-            if order.scheduled_date is None or partner_confirmed_at is None:
+            if not order.visit_dates or partner_confirmed_at is None:
                 raise ValueError("partner_confirmation_required")
             if (
                 expected_scheduled_date is not None
-                and order.scheduled_date != expected_scheduled_date
+                and expected_scheduled_date not in order.visit_dates
             ):
                 raise ValueError("schedule_confirmation_target_changed")
             if order.status not in SCHEDULE_CONFIRMATION_RECOVERY_STATUSES:
                 raise ValueError("schedule_confirmation_not_allowed")
         if payload.message_type == MessageType.CUSTOMER_DAY_BEFORE:
             if (
-                order.scheduled_date is None
+                not order.visit_dates
                 or order.status not in DAY_BEFORE_NOTICE_RECOVERY_STATUSES
             ):
                 raise ValueError("day_before_notice_not_allowed")
             target_date = expected_scheduled_date or (business_today() + timedelta(days=1))
-            if order.scheduled_date != target_date:
+            if target_date not in order.visit_dates:
                 if expected_scheduled_date is None:
                     raise ValueError("day_before_notice_not_due")
                 raise ValueError("day_before_notice_target_changed")
@@ -1867,6 +1914,7 @@ class MessageService:
         error_code: str,
         error_message: str,
         actor_user_id: str | None,
+        target_visit_date: date | None = None,
     ) -> MessageLog:
         """발송 전 검증 실패를 FAILED 로그 + timeline 으로 기록한다.
 
@@ -1886,6 +1934,7 @@ class MessageService:
             recipient_phone=recipient_phone or "",
             recipient_partner_id=recipient_partner_id,
             message_type=payload.message_type,
+            target_visit_date=target_visit_date,
             channel=payload.channel,
             content="",
             status=MessageStatus.FAILED,
@@ -2156,6 +2205,7 @@ class MessageService:
         log: MessageLog,
         *,
         dispatch_scheduled_date: date | None,
+        dispatch_visit_dates: tuple[date, ...],
         dispatch_requested_time: str | None,
         dispatch_partner_confirmed_at: datetime | None,
     ) -> bool:
@@ -2175,6 +2225,11 @@ class MessageService:
             }
             else None
         )
+        if (
+            expected_scheduled_date is not None
+            and tuple(order.visit_dates) != dispatch_visit_dates
+        ):
+            return False
         if expected_scheduled_date is not None and order.requested_time != dispatch_requested_time:
             return False
         try:
@@ -2412,6 +2467,8 @@ class MessageService:
         order: Order,
         partner: Partner | None,
         customer_link: str,
+        *,
+        scheduled_date: date | None = None,
     ) -> dict[str, object]:
         partner_login_link = self._build_partner_login_link(order.id)
         schedule_amount = (
@@ -2430,7 +2487,7 @@ class MessageService:
             "customer_name": customer_name_without_honorific(order.customer_name),
             "service_name": format_service_name(order),
             "size_or_quantity": order.size_or_quantity or "-",
-            "schedule": format_schedule(order),
+            "schedule": format_schedule(order, scheduled_date=scheduled_date),
             "customer_address": order.customer_address,
             "customer_link": customer_link,
             # 사진/전날/잔금 알림톡의 고객링크는 '버튼 웹링크' 변수(#{고객링크})다. 버튼 URL은
@@ -2520,8 +2577,9 @@ class MessageService:
         order: Order,
         partner: Partner | None,
         customer_link: str,
+        scheduled_date: date | None = None,
     ) -> str:
-        schedule = format_schedule(order)
+        schedule = format_schedule(order, scheduled_date=scheduled_date)
         customer_name = customer_name_without_honorific(order.customer_name)
         if payload.message_type == MessageType.CUSTOMER_PHOTO_READY:
             return (
@@ -2700,8 +2758,9 @@ def business_day_start_utc() -> datetime:
     return local_start.astimezone(UTC)
 
 
-def format_schedule(order: Order) -> str:
-    date_text = order.scheduled_date.isoformat() if order.scheduled_date else "일정 미정"
+def format_schedule(order: Order, *, scheduled_date: date | None = None) -> str:
+    visit_dates = [scheduled_date] if scheduled_date is not None else order.visit_dates
+    date_text = " / ".join(value.isoformat() for value in visit_dates) or "일정 미정"
     if order.requested_time:
         return f"{date_text} {order.requested_time}"
     return date_text

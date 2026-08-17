@@ -35,9 +35,14 @@ export function MessageActionsPanel({
   readonly onAsRequestOpen: () => void;
 }) {
   const hasDayBeforeStatus = isDayBeforeNoticeAllowedStatus(order.status);
-  const isTomorrowVisit = isRelativeAppDateValue(order.scheduled_date, 1);
+  const visitDates = order.visit_dates?.length
+    ? order.visit_dates
+    : order.scheduled_date
+      ? [order.scheduled_date]
+      : [];
+  const isTomorrowVisit = visitDates.some((visitDate) => isRelativeAppDateValue(visitDate, 1));
   const canSendDayBefore = hasDayBeforeStatus && isTomorrowVisit;
-  const dayBeforeBlockedText = !order.scheduled_date || !hasDayBeforeStatus
+  const dayBeforeBlockedText = visitDates.length === 0 || !hasDayBeforeStatus
     ? '방문일과 협력사 작업확인이 확정된 주문에서만 발송할 수 있습니다.'
     : !isTomorrowVisit
       ? '방문 하루 전인 주문에서만 전날 안내를 발송할 수 있습니다.'

@@ -39,6 +39,19 @@ export function updateLineField<K extends OrderLineField>(
   return replaceLine(form, lineIndex, nextLine);
 }
 
+export function updateVisitDates(
+  form: OrderGroupForm,
+  lineIndex: number,
+  visitDates: readonly string[],
+): OrderGroupForm {
+  const normalized = [...new Set(visitDates)].sort();
+  return replaceLine(form, lineIndex, {
+    ...form.lines[lineIndex],
+    scheduled_date: normalized[0] || '',
+    visit_dates: normalized,
+  });
+}
+
 export function addOrderLine(form: OrderGroupForm): OrderGroupForm {
   return { ...form, lines: [...form.lines, createEmptyLineForm()] };
 }

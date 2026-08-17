@@ -111,7 +111,11 @@ export function OrderDetailSummarySections({
         <KV col={2}>
           <KVItem label="상품명" value={order.service_name}/>
           <KVItem label="수량/규격" value={formatQuantity(order.size_or_quantity) || '-'}/>
-          <KVItem label="방문 예정일" value={order.scheduled_date || '미정'}/>
+          <KVItem
+            label="방문 예정일"
+            value={(order.visit_dates || (order.scheduled_date ? [order.scheduled_date] : [])).join(' · ') || '미정'}
+            multiline
+          />
           <KVItem label="요청 시간" value={order.requested_time || '-'}/>
           <KVItem label="상세" value={order.service_detail || '-'} span={2} multiline/>
         </KV>

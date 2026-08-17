@@ -1,4 +1,4 @@
-import { DatePicker } from '../../../components/common/DatePicker';
+import { MultiDatePicker } from '../../../components/common/MultiDatePicker';
 import { Icon } from '../../../components/common/ui';
 import { ORDER_STATUS_OPTIONS } from '../../../domain/orderStatus';
 import type { AdminPartnerOption } from './OrderDetailModel';
@@ -62,19 +62,19 @@ export function PartnerAssignPanel({
 }
 
 export function SchedulePanel({
-  selectedScheduledDate,
+  selectedVisitDates,
   selectedRequestedTime,
   isSaving,
   hasScheduleChanges,
-  onSelectedScheduledDateChange,
+  onSelectedVisitDatesChange,
   onSelectedRequestedTimeChange,
   onScheduleSave,
 }: {
-  readonly selectedScheduledDate: string;
+  readonly selectedVisitDates: readonly string[];
   readonly selectedRequestedTime: string;
   readonly isSaving: boolean;
   readonly hasScheduleChanges: boolean;
-  readonly onSelectedScheduledDateChange: (value: string) => void;
+  readonly onSelectedVisitDatesChange: (value: string[]) => void;
   readonly onSelectedRequestedTimeChange: (value: string) => void;
   readonly onScheduleSave: () => void;
 }) {
@@ -83,11 +83,10 @@ export function SchedulePanel({
       <PanelTitle dirty={hasScheduleChanges}>방문 일정</PanelTitle>
       <label style={{ display: 'flex', flexDirection: 'column', gap: 5, marginBottom: 8 }}>
         <span style={{ fontSize: 10.5, color: 'var(--text-tertiary)', fontWeight: 600 }}>방문 예정일</span>
-        <DatePicker
-          testId="detail-scheduled-date"
-          value={selectedScheduledDate}
-          onChange={onSelectedScheduledDateChange}
-          placeholder="방문일 선택"
+        <MultiDatePicker
+          testId="detail-visit-dates"
+          value={selectedVisitDates}
+          onChange={onSelectedVisitDatesChange}
         />
       </label>
       <label style={{ display: 'flex', flexDirection: 'column', gap: 5, marginBottom: 8 }}>

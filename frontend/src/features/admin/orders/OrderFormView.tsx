@@ -9,6 +9,7 @@ import type {
   OrderFormBroker,
   OrderFormGroupFieldChange,
   OrderFormLineFieldChange,
+  OrderFormVisitDatesChange,
   OrderFormPartner,
   OrderFormServiceCategory,
   OrderGroupForm,
@@ -41,6 +42,7 @@ export interface OrderFormViewActions {
   readonly onSubmit: (event: React.FormEvent<HTMLFormElement>) => void;
   readonly onGroupFieldChange: OrderFormGroupFieldChange;
   readonly onLineFieldChange: OrderFormLineFieldChange;
+  readonly onVisitDatesChange: OrderFormVisitDatesChange;
   readonly onMoneyChange: (lineIndex: number, key: OrderMoneyField, value: string) => void;
   readonly onPartnerChange: (lineIndex: number, partnerId: string) => void;
   readonly onServiceCategoryChange: (lineIndex: number, categoryId: string) => void;
@@ -132,6 +134,7 @@ export function OrderFormView({
                     partners={resources.partners}
                     brokers={resources.brokers}
                     onFieldChange={actions.onLineFieldChange}
+                    onVisitDatesChange={actions.onVisitDatesChange}
                     onMoneyChange={actions.onMoneyChange}
                     onPartnerChange={actions.onPartnerChange}
                     onServiceCategoryChange={actions.onServiceCategoryChange}

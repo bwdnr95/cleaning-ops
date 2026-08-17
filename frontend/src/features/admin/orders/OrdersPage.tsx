@@ -533,14 +533,18 @@ export function OrdersPage({ onOpenOrder, onCreateOrder, onEditOrder, initialTab
   };
 
   const handleBulkScheduleChange = async () => {
-    // 날짜를 비우면(지우기) 방문일을 미배정으로 변경한다.
     const toUnassigned = !bulkScheduledDate;
-    if (toUnassigned && !window.confirm(`선택한 ${selected.size}건의 방문일을 미배정으로 비울까요?`)) {
+    const confirmation = toUnassigned
+      ? `선택한 ${selected.size}건의 기존 방문일 전체를 지우고 미배정으로 변경할까요?`
+      : `선택한 ${selected.size}건의 기존 방문일 전체를 지우고 ${bulkScheduledDate} 하루로 교체할까요?`;
+    if (!window.confirm(confirmation)) {
       return;
     }
     await runSelectedOrdersAction({
       successLabel: toUnassigned ? '방문일을 미배정으로 변경했습니다.' : `방문일을 ${bulkScheduledDate}(으)로 변경했습니다.`,
-      execute: (orderId) => updateAdminOrder(orderId, { scheduled_date: bulkScheduledDate || null }),
+      execute: (orderId) => updateAdminOrder(orderId, {
+        visit_dates: bulkScheduledDate ? [bulkScheduledDate] : [],
+      }),
     });
   };
 
@@ -1414,7 +1418,7 @@ function BulkActionPanel({
           <button data-testid="orders-bulk-schedule-apply" className="btn btn--primary btn--sm" disabled={isSaving} onClick={onApplySchedule}>
             {isSaving ? '처리 중' : '적용'}
           </button>
-          <span style={{ color: 'var(--text-tertiary)', fontSize: 11.5 }}>날짜를 비우면(지우기) 미배정으로 변경</span>
+          <span style={{ color: 'var(--text-tertiary)', fontSize: 11.5 }}>기존 방문일 전체를 선택한 하루로 교체 · 날짜를 비우면 미배정</span>
         </>
       )}
 
@@ -1480,6 +1484,7 @@ function getVisibleStatusTabKey(tab) {
     work: 'schedule_work_confirmed',
     deliver: 'work_done',
     monthly_done: 'final_payment_complete',
+    monthly_contract: 'all',
     // 대시보드 재정의(260702) 드릴다운 탭 → 탭바 하이라이트 근사 매핑.
     unpaid_check: 'work_done',
     customer_check: 'customer_check_needed',
@@ -1586,7 +1591,7 @@ function toOrderRow(order) {
     asRequested: Boolean(order.as_requested),
     receivedRaw: order.received_date,
     received: formatDate(order.received_date),
-    visit: formatDate(order.scheduled_date) || '미정',
+    visit: formatVisitDates(order),
     scheduledDate: order.scheduled_date,
     timeWindow: order.requested_time || '-',
     team: order.team_name || '미배정',
@@ -1608,6 +1613,13 @@ function toOrderRow(order) {
     photo: toPhotoState(rawStatus),
     delivered: toDeliveredState(rawStatus),
   };
+}
+
+function formatVisitDates(order) {
+  const dates = order.visit_dates || (order.scheduled_date ? [order.scheduled_date] : []);
+  if (dates.length === 0) return '미정';
+  if (dates.length === 1) return formatDate(dates[0]);
+  return `${formatDate(dates[0])} 외 ${dates.length - 1}일`;
 }
 
 function createDateFilter(preset) {
@@ -1676,7 +1688,7 @@ function createInitialDateFilter(initialTab, initialDatePreset) {
   if (['payment_check', 'photo_review', 'deliver', 'partner_pending', 'unpaid_check', 'customer_check', 'receivable'].includes(initialTab)) {
     return createDateFilter('all');
   }
-  if (['monthly_done', 'monthly_revenue'].includes(initialTab)) {
+  if (['monthly_done', 'monthly_contract', 'monthly_revenue'].includes(initialTab)) {
     return createDateFilter('month');
   }
   // 기본 진입은 '오늘부터'(미래+미정)만 노출, '전체'를 눌러야 과거까지 본다.

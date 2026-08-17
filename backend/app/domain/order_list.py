@@ -94,9 +94,10 @@ def is_balance_incomplete(payment_status: str | None) -> bool:
 
 def has_past_incomplete_balance(order: Order, today: date) -> bool:
     """과거 방문 + 잔금 미완 (frontend hasPastIncompleteBalance)."""
+    last_visit_date = order.visit_dates[-1] if order.visit_dates else None
     return bool(
-        order.scheduled_date is not None
-        and order.scheduled_date < today
+        last_visit_date is not None
+        and last_visit_date < today
         and is_balance_incomplete(order.payment_status)
     )
 

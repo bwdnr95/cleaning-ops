@@ -1,11 +1,15 @@
 from datetime import date, datetime
 from decimal import Decimal
+from typing import TYPE_CHECKING
 
 from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Numeric, String, Text, UniqueConstraint
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.domain.constants import OrderStatus
 from app.models.base import Base, TimestampMixin
+
+if TYPE_CHECKING:
+    from app.models.order_visit import OrderVisit
 
 
 class Order(TimestampMixin, Base):
@@ -94,8 +98,21 @@ class Order(TimestampMixin, Base):
     # 정기청소에서 자동 생성된 회차의 '생성 당시 예정일'(불변). 멱등 생성 키.
     # scheduled_date는 운영자가 옮길 수 있어 멱등 키로 쓰지 않는다.
     recurring_planned_date: Mapped[date | None] = mapped_column(Date, index=True)
+    visits: Mapped[list["OrderVisit"]] = relationship(
+        back_populates="order",
+        cascade="all, delete-orphan",
+        lazy="selectin",
+        order_by="OrderVisit.visit_date",
+    )
     deleted_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True),
         nullable=True,
         index=True,
     )
+
+    @property
+    def visit_dates(self) -> list[date]:
+        dates = sorted({visit.visit_date for visit in self.visits})
+        if dates:
+            return dates
+        return [self.scheduled_date] if self.scheduled_date is not None else []

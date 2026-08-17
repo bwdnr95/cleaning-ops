@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import os
+import subprocess
+import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -11,6 +13,7 @@ from uuid import uuid4
 
 import pytest
 from sqlalchemy import create_engine, select, text
+from sqlalchemy.engine import make_url
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -177,6 +180,27 @@ def _wait_for_database_lock(engine, backend_pid: int) -> None:
             return
         time.sleep(0.05)
     raise AssertionError(f"backend {backend_pid} did not wait on a database lock")
+
+
+def _wait_for_application_pid(engine, *, database_name: str, application_name: str) -> int:
+    deadline = time.monotonic() + 10
+    while time.monotonic() < deadline:
+        with engine.connect() as connection:
+            backend_pid = connection.scalar(
+                text(
+                    "SELECT pid FROM pg_stat_activity "
+                    "WHERE datname = :database_name AND application_name = :application_name "
+                    "ORDER BY backend_start DESC LIMIT 1"
+                ),
+                {
+                    "database_name": database_name,
+                    "application_name": application_name,
+                },
+            )
+        if backend_pid is not None:
+            return int(backend_pid)
+        time.sleep(0.05)
+    raise AssertionError(f"application {application_name} did not connect")
 
 
 def test_mode_change_commits_before_settlement_rechecks_order(
@@ -1235,3 +1259,322 @@ def test_downgrade_lock_blocks_history_insert_until_transaction_finishes(
     finally:
         with engine.begin() as cleanup:
             cleanup.execute(text(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE'))
+
+
+def test_order_visit_downgrade_lock_blocks_concurrent_visit_insert(
+    postgres_sessions,
+) -> None:
+    engine, _factory = postgres_sessions
+    migration_path = (
+        Path(__file__).parents[1]
+        / "alembic"
+        / "versions"
+        / "0032_order_visit_dates.py"
+    )
+    namespace = run_path(str(migration_path))
+    schema = f"order_visit_migration_race_{uuid4().hex}"
+    with engine.begin() as setup:
+        setup.execute(text(f'CREATE SCHEMA "{schema}"'))
+        setup.execute(
+            text(
+                f'CREATE TABLE "{schema}".orders '
+                "(id varchar(36) PRIMARY KEY, scheduled_date date NULL)"
+            )
+        )
+        setup.execute(
+            text(
+                f'CREATE TABLE "{schema}".order_visits '
+                "(id varchar(36) PRIMARY KEY, order_id varchar(36) NOT NULL, "
+                "visit_date date NOT NULL, UNIQUE (order_id, visit_date))"
+            )
+        )
+        setup.execute(
+            text(
+                f'INSERT INTO "{schema}".orders (id, scheduled_date) '
+                "VALUES ('order-1', DATE '2026-08-17')"
+            )
+        )
+        setup.execute(
+            text(
+                f'INSERT INTO "{schema}".order_visits (id, order_id, visit_date) '
+                "VALUES ('visit-1', 'order-1', DATE '2026-08-17')"
+            )
+        )
+    pid: Queue[int] = Queue()
+    result: Queue[str] = Queue()
+
+    try:
+        with engine.connect() as locking:
+            transaction = locking.begin()
+            locking.execute(text(f'SET LOCAL search_path TO "{schema}"'))
+            namespace["lock_downgrade_state"](locking)
+            namespace["_ensure_downgrade_is_representable"](locking)
+
+            def insert_visit() -> None:
+                with engine.begin() as inserting:
+                    inserting.execute(text(f'SET LOCAL search_path TO "{schema}"'))
+                    pid.put(int(inserting.scalar(text("SELECT pg_backend_pid()"))))
+                    inserting.execute(
+                        text(
+                            "INSERT INTO order_visits (id, order_id, visit_date) "
+                            "VALUES ('visit-2', 'order-1', DATE '2026-08-19')"
+                        )
+                    )
+                    result.put("inserted")
+
+            worker = Thread(target=insert_visit, daemon=True)
+            worker.start()
+            _wait_for_database_lock(engine, pid.get(timeout=5))
+            transaction.rollback()
+            worker.join(timeout=5)
+            assert not worker.is_alive()
+
+        assert result.get(timeout=1) == "inserted"
+        with engine.connect() as verify:
+            count = verify.scalar(
+                text(f'SELECT count(*) FROM "{schema}".order_visits')
+            )
+            assert count == 2
+    finally:
+        with engine.begin() as cleanup:
+            cleanup.execute(text(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE'))
+
+
+@pytest.mark.parametrize("legacy_lock_order", ["order_first", "message_first"])
+def test_split_visit_migrations_avoid_legacy_lock_cycles(
+    postgres_sessions,
+    legacy_lock_order: str,
+) -> None:
+    _engine, _factory = postgres_sessions
+    assert POSTGRES_URL is not None
+    base_url = make_url(POSTGRES_URL)
+    database_name = f"gate_mv_split_{uuid4().hex}"
+    application_name = f"mv-split-{uuid4().hex}"
+    admin_engine = create_engine(
+        base_url.set(database="postgres"),
+        isolation_level="AUTOCOMMIT",
+    )
+    case_url = base_url.set(database=database_name)
+    migration_url = case_url.update_query_dict({"application_name": application_name})
+    backend_dir = Path(__file__).parents[1]
+    migration_environment = os.environ.copy()
+    migration_environment["DATABASE_URL"] = migration_url.render_as_string(
+        hide_password=False
+    )
+
+    with admin_engine.connect() as admin:
+        admin.execute(text(f'CREATE DATABASE "{database_name}"'))
+    case_engine = create_engine(case_url)
+    try:
+        subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "alembic",
+                "upgrade",
+                "0031_partner_billing_periods",
+            ],
+            cwd=backend_dir,
+            env=migration_environment,
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        with case_engine.begin() as setup:
+            setup.execute(
+                text(
+                    "INSERT INTO order_groups "
+                    "(id, customer_token, customer_name, customer_phone, "
+                    "customer_address, customer_visible_payment) VALUES "
+                    "('group-probe', 'probe-token', '고객', '01012345678', '서울', false)"
+                )
+            )
+            setup.execute(
+                text(
+                    "INSERT INTO orders "
+                    "(id, group_id, status, received_date, scheduled_date, service_name, "
+                    "discount_amount, as_requested, as_intake_pending, "
+                    "recurring_partner_settlement_retained) VALUES "
+                    "('order-probe', 'group-probe', '일정확정', DATE '2026-08-17', "
+                    "DATE '2026-08-18', '입주청소', 0, false, false, false)"
+                )
+            )
+            setup.execute(
+                text(
+                    "INSERT INTO message_logs "
+                    "(id, order_id, recipient_type, recipient_name, recipient_phone, "
+                    "message_type, channel, content, status) VALUES "
+                    "('message-probe', 'order-probe', 'customer', '고객', '01012345678', "
+                    "'customer_day_before', 'sms', 'legacy', 'pending')"
+                )
+            )
+
+        migration_result: Queue[subprocess.CompletedProcess[str]] = Queue()
+
+        def run_upgrade() -> None:
+            migration_result.put(
+                subprocess.run(
+                    [sys.executable, "-m", "alembic", "upgrade", "head"],
+                    cwd=backend_dir,
+                    env=migration_environment,
+                    capture_output=True,
+                    text=True,
+                    timeout=60,
+                )
+            )
+
+        with case_engine.connect() as legacy:
+            transaction = legacy.begin()
+            if legacy_lock_order == "order_first":
+                legacy.execute(
+                    text(
+                        "UPDATE orders SET status = '전날안내필요', "
+                        "scheduled_date = DATE '2026-08-25' "
+                        "WHERE id = 'order-probe'"
+                    )
+                )
+            else:
+                legacy.execute(
+                    text("SELECT id FROM message_logs WHERE id = 'message-probe'")
+                )
+
+            worker = Thread(target=run_upgrade, daemon=True)
+            worker.start()
+            migration_pid = _wait_for_application_pid(
+                admin_engine,
+                database_name=database_name,
+                application_name=application_name,
+            )
+            _wait_for_database_lock(admin_engine, migration_pid)
+
+            if legacy_lock_order == "order_first":
+                legacy.execute(
+                    text(
+                        "UPDATE message_logs SET status = 'sent' "
+                        "WHERE id = 'message-probe'"
+                    )
+                )
+            else:
+                legacy.execute(
+                    text("SELECT id FROM orders WHERE id = 'order-probe' FOR UPDATE")
+                )
+                legacy.execute(
+                    text(
+                        "UPDATE orders SET status = '전날안내필요', "
+                        "scheduled_date = DATE '2026-08-25' "
+                        "WHERE id = 'order-probe'"
+                    )
+                )
+                legacy.execute(
+                    text(
+                        "UPDATE message_logs SET status = 'sent' "
+                        "WHERE id = 'message-probe'"
+                    )
+                )
+            legacy.execute(
+                text(
+                    "INSERT INTO orders "
+                    "(id, group_id, status, received_date, scheduled_date, service_name, "
+                    "discount_amount, as_requested, as_intake_pending, "
+                    "recurring_partner_settlement_retained) VALUES "
+                    "('order-gap', 'group-probe', '일정확정', DATE '2026-08-17', "
+                    "DATE '2026-08-26', '정기청소', 0, false, false, false)"
+                )
+            )
+            transaction.commit()
+            worker.join(timeout=30)
+            assert not worker.is_alive()
+
+        completed = migration_result.get(timeout=1)
+        assert completed.returncode == 0, completed.stderr
+        with case_engine.connect() as verify:
+            revision = verify.scalar(text("SELECT version_num FROM alembic_version"))
+            visit_rows = verify.execute(
+                text(
+                    "SELECT orders.id, orders.scheduled_date::text, "
+                    "order_visits.visit_date::text "
+                    "FROM orders LEFT JOIN order_visits "
+                    "ON order_visits.order_id = orders.id "
+                    "WHERE orders.id IN ('order-gap', 'order-probe') "
+                    "ORDER BY orders.id"
+                )
+            ).all()
+            has_target_column = verify.scalar(
+                text(
+                    "SELECT EXISTS (SELECT 1 FROM information_schema.columns "
+                    "WHERE table_schema = 'public' AND table_name = 'message_logs' "
+                    "AND column_name = 'target_visit_date')"
+                )
+            )
+        assert revision == "0033_day_before_target_visit_date"
+        assert visit_rows == [
+            ("order-gap", "2026-08-26", "2026-08-26"),
+            ("order-probe", "2026-08-25", "2026-08-25"),
+        ]
+        assert has_target_column is True
+
+        with case_engine.begin() as current_app:
+            current_app.execute(
+                text(
+                    "UPDATE orders SET scheduled_date = DATE '2026-09-02' "
+                    "WHERE id = 'order-probe'"
+                )
+            )
+            current_app.execute(
+                text("DELETE FROM order_visits WHERE order_id = 'order-probe'")
+            )
+            current_app.execute(
+                text(
+                    "INSERT INTO order_visits (id, order_id, visit_date) VALUES "
+                    "('current-visit-1', 'order-probe', DATE '2026-09-02'), "
+                    "('current-visit-2', 'order-probe', DATE '2026-09-07')"
+                )
+            )
+        with case_engine.connect() as verify:
+            current_visit_dates = verify.scalars(
+                text(
+                    "SELECT visit_date::text FROM order_visits "
+                    "WHERE order_id = 'order-probe' ORDER BY visit_date"
+                )
+            ).all()
+        assert current_visit_dates == ["2026-09-02", "2026-09-07"]
+
+        with pytest.raises(
+            SQLAlchemyError,
+            match="visit_dates_required_for_multi_visit_order",
+        ):
+            with case_engine.begin() as legacy_multi_update:
+                legacy_multi_update.execute(
+                    text(
+                        "UPDATE orders SET scheduled_date = DATE '2026-09-05' "
+                        "WHERE id = 'order-probe'"
+                    )
+                )
+        with case_engine.connect() as verify:
+            preserved_schedule = verify.scalar(
+                text(
+                    "SELECT scheduled_date::text FROM orders "
+                    "WHERE id = 'order-probe'"
+                )
+            )
+            preserved_visit_dates = verify.scalars(
+                text(
+                    "SELECT visit_date::text FROM order_visits "
+                    "WHERE order_id = 'order-probe' ORDER BY visit_date"
+                )
+            ).all()
+        assert preserved_schedule == "2026-09-02"
+        assert preserved_visit_dates == ["2026-09-02", "2026-09-07"]
+    finally:
+        case_engine.dispose()
+        with admin_engine.connect() as admin:
+            admin.execute(
+                text(
+                    "SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
+                    "WHERE datname = :database_name AND pid <> pg_backend_pid()"
+                ),
+                {"database_name": database_name},
+            )
+            admin.execute(text(f'DROP DATABASE IF EXISTS "{database_name}"'))
+        admin_engine.dispose()

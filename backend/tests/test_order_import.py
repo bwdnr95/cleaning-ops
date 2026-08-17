@@ -1,5 +1,6 @@
 import io
 
+import pytest
 from openpyxl import Workbook
 
 
@@ -81,6 +82,55 @@ def test_order_import_two_groups(client, seed_admin_token):
     assert body["succeeded_lines"] == 2
 
 
+def test_order_import_accepts_multiple_visit_dates(client, seed_admin_token):
+    headers = [
+        "group_key",
+        "customer_name",
+        "customer_phone",
+        "customer_address",
+        "scheduled_date",
+        "visit_dates",
+        "service_name",
+        "total_amount",
+    ]
+    data = _make_xlsx_with_headers(
+        headers,
+        [[
+            "MULTI",
+            "Multi Visit Import",
+            "010-1212-3434",
+            "Seoul Multi",
+            "2026-09-02",
+            "2026-09-02, 2026-09-03, 2026-09-07",
+            "Multi-day Cleaning",
+            300000,
+        ]],
+    )
+    response = client.post(
+        "/api/admin/orders/import",
+        files={
+            "file": (
+                "orders.xlsx",
+                data,
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            )
+        },
+        headers={"Authorization": f"Bearer {seed_admin_token}"},
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["succeeded_lines"] == 1
+
+    orders = client.get(
+        "/api/admin/orders?include_past_paid=true",
+        headers={"Authorization": f"Bearer {seed_admin_token}"},
+    )
+    assert orders.status_code == 200, orders.text
+    imported = next(
+        order for order in orders.json() if order["service_name"] == "Multi-day Cleaning"
+    )
+    assert imported["visit_dates"] == ["2026-09-02", "2026-09-03", "2026-09-07"]
+
+
 def test_order_import_reports_invalid_rows(client, seed_admin_token):
     data = _make_xlsx(
         [
@@ -105,6 +155,36 @@ def test_order_import_reports_invalid_rows(client, seed_admin_token):
     assert body["succeeded_groups"] == 1
     assert body["succeeded_lines"] == 1
     assert {failure["row_index"] for failure in body["failed"]} == {1, 2}
+
+
+@pytest.mark.parametrize("amount", ["NaN", "Infinity", "-Infinity"])
+def test_order_import_reports_non_finite_amounts(
+    client,
+    seed_admin_token,
+    amount: str,
+):
+    data = _make_xlsx(
+        [["G1", "Customer", "010-1111-2222", "Seoul", "2026-06-01", "Aircon", amount]]
+    )
+    response = client.post(
+        "/api/admin/orders/import",
+        files={
+            "file": (
+                "orders.xlsx",
+                data,
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            )
+        },
+        headers={"Authorization": f"Bearer {seed_admin_token}"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["succeeded_groups"] == 0
+    assert body["succeeded_lines"] == 0
+    assert body["failed"] == [
+        {"row_index": 1, "reason": f"invalid_total_amount:{amount}"}
+    ]
 
 
 def test_order_import_group_rollback_when_one_line_invalid(client, seed_admin_token):

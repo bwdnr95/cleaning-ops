@@ -8,6 +8,7 @@ export interface AdminOrderLineInput {
   status?: string;
   received_date?: string;
   scheduled_date?: string | null;
+  visit_dates?: readonly string[];
   requested_time?: string | null;
   partner_id?: string | null;
   team_name?: string | null;
@@ -103,8 +104,10 @@ export interface AdminOrderGroup {
 
 export interface AdminCalendarOrder {
   id: string;
+  visit_id: string;
   status: string;
   scheduled_date: string;
+  visit_dates: readonly string[];
   requested_time?: string | null;
   partner_id?: string | null;
   team_name?: string | null;

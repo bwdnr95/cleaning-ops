@@ -396,15 +396,28 @@ test('admin can run selected order bulk operations from the order list', async (
   await expect(page.getByTestId('orders-bulk-notice')).toContainText('2건');
   await expect.poll(() => getOrderPartnerIds(request, orders)).toEqual([SEED_PARTNER_ID, SEED_PARTNER_ID]);
 
+  const partnerSession = await loginViaApi(request, 'partner');
+  const partnerHeaders = authHeaders(partnerSession.access_token);
+  for (const order of orders) {
+    await checkedJson(await request.post(`${backendUrl}/api/partner/jobs/${order.id}/confirm`, {
+      headers: partnerHeaders,
+    }));
+  }
+  await expect.poll(() => getOrderStatuses(request, orders)).toEqual(['작업예정', '작업예정']);
+  const messageTypesBeforeBulkSend = await getOrderMessageTypes(request, orders);
+
   await selectOrderRows(page, orders);
   await page.getByTestId('orders-bulk-message-open').click();
   await page.getByTestId('orders-bulk-message-type').selectOption('customer_schedule_confirmed');
   await page.getByTestId('orders-bulk-message-apply').click();
   await expect(page.getByTestId('orders-bulk-notice')).toContainText('2건 고객 일정확정 안내를 발송했습니다.');
-  await expect.poll(() => getOrderMessageTypes(request, orders)).toEqual([
-    ['customer_schedule_confirmed'],
-    ['customer_schedule_confirmed'],
-  ]);
+  await expect.poll(async () => {
+    const messageTypesAfterBulkSend = await getOrderMessageTypes(request, orders);
+    return messageTypesAfterBulkSend.map((messageTypes, index) => (
+      messageTypes.filter((messageType) => messageType === 'customer_schedule_confirmed').length
+      - messageTypesBeforeBulkSend[index].filter((messageType) => messageType === 'customer_schedule_confirmed').length
+    ));
+  }).toEqual([1, 1]);
 });
 
 test('admin can adjust schedule from order detail and jump to related ops pages', async ({ page, request }) => {
@@ -420,7 +433,7 @@ test('admin can adjust schedule from order detail and jump to related ops pages'
   await page.getByTestId(`admin-order-row-${order.id}`).click();
   await expect(page.getByTestId('admin-order-detail-page')).toBeVisible();
 
-  await pickDate(page, 'detail-scheduled-date', '2026-05-06');
+  await pickVisitDates(page, 'detail-visit-dates', ['2026-05-06', '2026-05-08']);
   await page.getByTestId('detail-requested-time').fill('16:30');
   await page.getByTestId('detail-schedule-save').click();
   await expect(page.getByTestId('admin-action-notice')).toContainText('방문 일정 변경');
@@ -429,11 +442,13 @@ test('admin can adjust schedule from order detail and jump to related ops pages'
     const [detail] = await getOrderDetails(request, [order]);
     return {
       scheduledDate: detail.scheduled_date,
+      visitDates: detail.visit_dates,
       requestedTime: detail.requested_time,
       hasScheduleTimeline: detail.timeline.some((event) => event.event_type === 'memo_added' && event.title === '방문 일정 변경'),
     };
   }).toEqual({
     scheduledDate: '2026-05-06',
+    visitDates: ['2026-05-06', '2026-05-08'],
     requestedTime: '16:30',
     hasScheduleTimeline: true,
   });
@@ -520,7 +535,7 @@ test('admin can add a catalog item in product ops and use it in an order', async
   await page.getByTestId('order-customer-name').fill('E2E Admin Customer');
   await page.getByTestId('order-customer-phone').fill('010-4444-8899');
   await page.getByTestId('order-customer-address').fill('Seoul E2E Admin QA 1');
-  await pickDate(page, 'order-line-0-scheduled-date', '2026-06-12');
+  await pickVisitDates(page, 'order-line-0-visit-dates', ['2026-06-12', '2026-06-14']);
   await page.getByTestId('order-line-0-requested-time').fill('10:30');
   await page.getByTestId('order-line-0-partner').selectOption(SEED_PARTNER_ID);
   await page.getByLabel('결제 상태').selectOption('deposit_paid');
@@ -529,6 +544,7 @@ test('admin can add a catalog item in product ops and use it in an order', async
 
   await expect(page.getByTestId('admin-order-detail-page')).toBeVisible();
   await expect(page.getByText(updatedItemName).first()).toBeVisible();
+  await expect(page.getByText('2026-06-12 · 2026-06-14')).toBeVisible();
 });
 
 test('admin can edit and delete an unused partner explicitly', async ({ page }) => {
@@ -632,12 +648,12 @@ test('admin photo review sends customer links for automatically published photos
     const detail = await response.json();
     return {
       status: detail.status,
-      messages: detail.message_logs.length,
+      photoReadyMessages: detail.message_logs.filter((message) => message.message_type === 'customer_photo_ready').length,
       timeline: detail.timeline.map((event) => event.event_type),
     };
   }).toEqual(expect.objectContaining({
     status: '고객전달필요',
-    messages: 1,
+    photoReadyMessages: 1,
     timeline: expect.arrayContaining(['photo_approved', 'message_sent', 'customer_link_sent']),
   }));
 
@@ -688,6 +704,17 @@ async function createPhotoReviewJob(request) {
 
   const partnerSession = await loginViaApi(request, 'partner');
   const partnerHeaders = authHeaders(partnerSession.access_token);
+  await checkedJson(await request.post(`${backendUrl}/api/partner/jobs/${created.id}/photos`, {
+    headers: partnerHeaders,
+    multipart: {
+      photo_type: 'before',
+      file: {
+        name: 'e2e-before.png',
+        mimeType: 'image/png',
+        buffer: ONE_PIXEL_PNG,
+      },
+    },
+  }));
   await checkedJson(await request.post(`${backendUrl}/api/partner/jobs/${created.id}/start`, {
     headers: partnerHeaders,
   }));
@@ -704,6 +731,9 @@ async function createPhotoReviewJob(request) {
   }));
   await checkedJson(await request.post(`${backendUrl}/api/partner/jobs/${created.id}/complete`, {
     headers: partnerHeaders,
+    data: {
+      customer_signature_data_url: `data:image/png;base64,${ONE_PIXEL_PNG.toString('base64')}`,
+    },
   }));
   return { orderId: created.id, photoId: uploaded.id };
 }
@@ -898,12 +928,14 @@ async function createBulkActionOrders(request) {
 async function createDetailActionOrder(request) {
   const adminSession = await loginViaApi(request, 'admin');
   const adminHeaders = authHeaders(adminSession.access_token);
-  return checkedJson(await request.post(`${backendUrl}/api/admin/orders`, {
+  const created = await checkedJson(await request.post(`${backendUrl}/api/admin/orders`, {
     headers: adminHeaders,
     data: {
+      status: '일정확정',
       received_date: '2026-05-05',
       scheduled_date: '2026-05-05',
       requested_time: '09:00',
+      partner_id: SEED_PARTNER_ID,
       service_name: 'Detail Schedule QA',
       customer_name: 'Detail Schedule Customer',
       customer_phone: '010-9000-0505',
@@ -911,6 +943,50 @@ async function createDetailActionOrder(request) {
       customer_visible_payment: false,
     },
   }));
+  const partnerSession = await loginViaApi(request, 'partner');
+  const partnerHeaders = authHeaders(partnerSession.access_token);
+  await checkedJson(await request.post(`${backendUrl}/api/partner/jobs/${created.id}/photos`, {
+    headers: partnerHeaders,
+    multipart: {
+      photo_type: 'before',
+      file: {
+        name: 'detail-schedule-before.png',
+        mimeType: 'image/png',
+        buffer: ONE_PIXEL_PNG,
+      },
+    },
+  }));
+  await checkedJson(await request.post(`${backendUrl}/api/partner/jobs/${created.id}/start`, {
+    headers: partnerHeaders,
+  }));
+  await checkedJson(await request.post(`${backendUrl}/api/partner/jobs/${created.id}/photos`, {
+    headers: partnerHeaders,
+    multipart: {
+      photo_type: 'after',
+      file: {
+        name: 'detail-schedule-after.png',
+        mimeType: 'image/png',
+        buffer: ONE_PIXEL_PNG,
+      },
+    },
+  }));
+  await checkedJson(await request.post(`${backendUrl}/api/partner/jobs/${created.id}/complete`, {
+    headers: partnerHeaders,
+    data: {
+      customer_signature_data_url: `data:image/png;base64,${ONE_PIXEL_PNG.toString('base64')}`,
+    },
+  }));
+  await checkedJson(await request.patch(`${backendUrl}/api/admin/orders/${created.id}`, {
+    headers: adminHeaders,
+    data: {
+      status: '작업진행',
+      total_amount: 300000,
+      deposit_amount: 100000,
+      balance_amount: 200000,
+      payment_status: 'deposit_paid',
+    },
+  }));
+  return created;
 }
 
 async function pickDate(page, pickerTestId, dateValue) {
@@ -929,6 +1005,27 @@ async function pickDate(page, pickerTestId, dateValue) {
     await page.getByRole('button', { name: forward ? '다음 달' : '이전 달' }).click();
   }
   await page.getByTestId(`date-picker-day-${dateValue}`).click();
+}
+
+async function pickVisitDates(page, pickerTestId, dateValues) {
+  await page.getByTestId(pickerTestId).click();
+  const dialog = page.getByRole('dialog', { name: '방문 예정일 선택 달력' });
+  await dialog.getByRole('button', { name: '전체 해제' }).click();
+  for (const dateValue of dateValues) {
+    const [targetYear, targetMonth] = dateValue.split('-').map(Number);
+    const label = page.getByTestId(`${pickerTestId}-month-label`);
+    for (let i = 0; i < 36; i += 1) {
+      const matched = ((await label.textContent()) ?? '').match(/(\d+)\D+(\d+)/);
+      if (!matched) break;
+      const shownYear = Number(matched[1]);
+      const shownMonth = Number(matched[2]);
+      if (shownYear === targetYear && shownMonth === targetMonth) break;
+      const forward = targetYear * 12 + targetMonth > shownYear * 12 + shownMonth;
+      await dialog.getByRole('button', { name: forward ? '다음 달' : '이전 달' }).click();
+    }
+    await page.getByTestId(`${pickerTestId}-day-${dateValue}`).click();
+  }
+  await dialog.getByRole('button', { name: '선택 완료' }).click();
 }
 
 async function selectOrderRows(page, orders) {

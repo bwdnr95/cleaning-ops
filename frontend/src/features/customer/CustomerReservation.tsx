@@ -69,7 +69,7 @@ function CustomerHeader() {
   return (
     <header style={headerStyle}>
       <BrandLogo size="md" />
-      <div style={{ marginLeft: 'auto', fontSize: 10.5, color: '#94a3b8', fontWeight: 600, letterSpacing: '0.04em' }}>
+      <div style={{ marginLeft: 'auto', fontSize: 11.5, color: 'var(--text-tertiary)', fontWeight: 600, letterSpacing: '0.04em' }}>
         예약 확인센터
       </div>
     </header>
@@ -172,7 +172,7 @@ function ReservationContent({ order, customerToken, phoneSuffix, onOrderUpdate, 
         <div style={eyebrowStyle}>{statusHeadline(primaryLine?.status)}</div>
         <h1 style={contentTitleStyle}>
           {order.customer_name} 님<br />
-          <span style={{ color: '#475569', fontWeight: 600 }}>{visitHeadline(primaryLine)}</span>
+          <span style={{ color: 'var(--text-secondary)', fontWeight: 600 }}>{visitHeadline(lines)}</span>
         </h1>
 
         <div style={{ display: 'flex', gap: 6, marginTop: 14, flexWrap: 'wrap' }}>
@@ -230,8 +230,17 @@ function ReservationLineCard({ line, customerVisiblePayment, customerToken, phon
   return (
     <section data-testid={`customer-line-${line.id}`} style={summaryCardStyle}>
       <SummaryBlock title="방문 일시">
-        <div style={{ fontSize: 18, fontWeight: 800, letterSpacing: '-0.02em' }}>{formatKoreanDate(line.scheduled_date)}</div>
-        <div style={{ fontSize: 13, color: '#475569', marginTop: 3 }}>{line.requested_time || '시간 협의 중'}</div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+          {visitDatesOf(line).map((visitDate, index) => (
+            <div key={visitDate} style={{ fontSize: 17, fontWeight: 800, letterSpacing: '-0.02em' }}>
+              {index + 1}차 · {formatKoreanDate(visitDate)}
+            </div>
+          ))}
+          {visitDatesOf(line).length === 0 && (
+            <div style={{ fontSize: 17, fontWeight: 800 }}>일정 확인 중</div>
+          )}
+        </div>
+        <div style={{ fontSize: 13, color: 'var(--text-secondary)', marginTop: 3 }}>{line.requested_time || '시간 협의 중'}</div>
       </SummaryBlock>
       <CustomerRow icon="package" label="서비스">
         {line.service_name}
@@ -794,11 +803,22 @@ function canCustomerRequestAs(status) {
   return ['고객전달필요', '고객전달완료', '서비스완료'].includes(status);
 }
 
-function visitHeadline(order) {
-  if (!order || !order.scheduled_date) {
+function visitHeadline(lines) {
+  const dates = [...new Set((Array.isArray(lines) ? lines : []).flatMap(visitDatesOf))].sort();
+  if (dates.length === 0) {
     return '방문 일정은 확정 후 안내드립니다.';
   }
-  return `${formatKoreanDate(order.scheduled_date)} 방문 예정입니다`;
+  if (dates.length === 1) {
+    return `${formatKoreanDate(dates[0])} 방문 예정입니다`;
+  }
+  return `총 ${dates.length}회 방문 예정입니다`;
+}
+
+function visitDatesOf(order) {
+  if (Array.isArray(order?.visit_dates) && order.visit_dates.length > 0) {
+    return order.visit_dates;
+  }
+  return order?.scheduled_date ? [order.scheduled_date] : [];
 }
 
 function formatKoreanDate(value) {
@@ -975,8 +995,8 @@ const summaryCardStyle = css({
 });
 
 const smallLabelStyle = css({
-  fontSize: 10.5,
-  color: '#94a3b8',
+  fontSize: 11,
+  color: 'var(--text-tertiary)',
   fontWeight: 800,
   letterSpacing: '0.06em',
   marginBottom: 4,

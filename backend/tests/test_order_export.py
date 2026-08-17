@@ -22,7 +22,7 @@ def test_admin_order_export_xlsx_preserves_requested_order(
             "lines": [
                 {
                     "received_date": "2026-06-01",
-                    "scheduled_date": "2026-06-02",
+                    "visit_dates": ["2026-06-02", "2026-06-04", "2026-06-08"],
                     "requested_time": "10:00",
                     "service_name": "Export line A",
                     "size_or_quantity": "12.0sqm",
@@ -80,29 +80,32 @@ def test_admin_order_export_xlsx_preserves_requested_order(
     assert "증빙메모" in header
     assert "이윤" in header
     assert "내부메모" in header
+    assert "전체 방문일" in header
 
     order_id_index = header.index("주문ID")
     service_index = header.index("상품명")
     quantity_index = header.index("수량")
     profit_index = header.index("이윤")
     notes_index = header.index("내부메모")
+    visit_dates_index = header.index("전체 방문일")
 
     assert [row[order_id_index] for row in body] == [line_b["id"], line_a["id"]]
     assert [row[service_index] for row in body] == ["Export line B", "Export line A"]
     assert [row[quantity_index] for row in body] == ["3.5ea", "12sqm"]
     assert [row[profit_index] for row in body] == [60000, 60000]
     assert [row[notes_index] for row in body] == ["internal memo", "internal memo"]
+    assert body[1][visit_dates_index] == "2026-06-02, 2026-06-04, 2026-06-08"
 
     worksheet = workbook["orders"]
     assert worksheet.freeze_panes == "A2"
-    assert worksheet.auto_filter.ref == "A1:AI3"
+    assert worksheet.auto_filter.ref == "A1:AJ3"
     assert worksheet["A1"].font.bold is True
     assert worksheet["A1"].font.color.rgb == "00FFFFFF"
     assert worksheet["A1"].fill.fgColor.rgb == "001F2937"
-    assert worksheet.column_dimensions["I"].width == 34
-    assert worksheet.column_dimensions["N"].width == 28
-    assert worksheet["I2"].alignment.wrap_text is True
-    assert worksheet["P2"].number_format == "#,##0"
+    assert worksheet.column_dimensions["J"].width == 34
+    assert worksheet.column_dimensions["O"].width == 28
+    assert worksheet["J2"].alignment.wrap_text is True
+    assert worksheet["Q2"].number_format == "#,##0"
 
 
 def test_admin_order_export_empty_order_ids_returns_400(

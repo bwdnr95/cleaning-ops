@@ -1,3 +1,4 @@
+from dataclasses import replace
 from datetime import date
 from decimal import Decimal
 
@@ -18,7 +19,7 @@ def test_legacy_import_uses_current_customer_token_generator(db_session: Session
         preferred_group_id="legacy-token-import-group",
         status=OrderStatus.NEW,
         received_date=date(2030, 1, 1),
-        scheduled_date=None,
+        scheduled_date=date(2030, 1, 2),
         requested_time=None,
         team_name=None,
         service_name="입주청소",
@@ -53,3 +54,11 @@ def test_legacy_import_uses_current_customer_token_generator(db_session: Session
     assert order is not None
     assert group.customer_token.startswith("ct2_")
     assert order.customer_token == group.customer_token
+    assert order.visit_dates == [date(2030, 1, 2)]
+
+    apply_rows(db_session, [replace(row, scheduled_date=date(2030, 1, 9))])
+    db_session.flush()
+    db_session.expire(order, ["visits"])
+
+    assert order.scheduled_date == date(2030, 1, 9)
+    assert order.visit_dates == [date(2030, 1, 9)]

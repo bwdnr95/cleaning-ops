@@ -1,3 +1,4 @@
+from dataclasses import dataclass
 from datetime import date
 
 from sqlalchemy import func, or_, select
@@ -7,6 +8,7 @@ from app.core.time import business_today
 from app.domain.constants import OrderStatus
 from app.domain.payment_status import PaymentStatus
 from app.models.order import Order
+from app.models.order_visit import OrderVisit
 from app.repositories.base import Repository
 
 
@@ -40,6 +42,7 @@ class OrderRepository(Repository[Order]):
                 or_(
                     Order.scheduled_date.is_(None),
                     Order.scheduled_date >= today,
+                    Order.visits.any(OrderVisit.visit_date >= today),
                     Order.payment_status.in_(OVERDUE_UNPAID_PAYMENT_STATUSES),
                 )
             )
@@ -64,34 +67,56 @@ class OrderRepository(Repository[Order]):
         end_date: date,
         *,
         partner_id: str | None = None,
-    ) -> list[Order]:
+    ) -> list["OrderVisitOccurrence"]:
         # 달력에는 취소건을 기본 숨김(카운트 정의와 일치). 기록은 주문목록 '취소' 탭에서 확인.
         stmt = (
             select(Order)
             .where(
                 Order.deleted_at.is_(None),
                 Order.status != OrderStatus.CANCELLED,
-                Order.scheduled_date >= start_date,
-                Order.scheduled_date <= end_date,
+                or_(
+                    Order.scheduled_date.between(start_date, end_date),
+                    Order.visits.any(OrderVisit.visit_date.between(start_date, end_date)),
+                ),
             )
-            .order_by(Order.scheduled_date.asc(), Order.requested_time.asc().nulls_last(), Order.id.asc())
         )
         if partner_id:
             stmt = stmt.where(Order.partner_id == partner_id)
-        return list(self.db.scalars(stmt))
+        occurrences: list[OrderVisitOccurrence] = []
+        for order in self.db.scalars(stmt):
+            visit_ids = {visit.visit_date: visit.id for visit in order.visits}
+            for visit_date in order.visit_dates:
+                if start_date <= visit_date <= end_date:
+                    occurrences.append(
+                        OrderVisitOccurrence(
+                            order=order,
+                            visit_id=visit_ids.get(
+                                visit_date,
+                                f"legacy:{order.id}:{visit_date.isoformat()}",
+                            ),
+                            visit_date=visit_date,
+                        )
+                    )
+        occurrences.sort(
+            key=lambda row: (
+                row.visit_date,
+                row.order.requested_time or "",
+                row.order.id,
+            )
+        )
+        return occurrences
 
     def list_for_partner(self, partner_id: str) -> list[Order]:
         # 협력사 작업목록에도 취소건은 기본 숨김.
-        stmt = (
-            select(Order)
-            .where(
-                Order.deleted_at.is_(None),
-                Order.partner_id == partner_id,
-                Order.status != OrderStatus.CANCELLED,
-            )
-            .order_by(Order.scheduled_date.asc())
+        stmt = select(Order).where(
+            Order.deleted_at.is_(None),
+            Order.partner_id == partner_id,
+            Order.status != OrderStatus.CANCELLED,
         )
-        return list(self.db.scalars(stmt))
+        rows = list(self.db.scalars(stmt))
+        today = business_today()
+        rows.sort(key=lambda order: order_visit_sort_key(order, today, reverse_visit=False))
+        return rows
 
     def list_by_group(self, group_id: str) -> list[Order]:
         stmt = (
@@ -112,7 +137,10 @@ class OrderRepository(Repository[Order]):
     def count_scheduled_on(self, target: date) -> int:
         stmt = select(func.count(Order.id)).where(
             Order.deleted_at.is_(None),
-            Order.scheduled_date == target,
+            or_(
+                Order.scheduled_date == target,
+                Order.visits.any(OrderVisit.visit_date == target),
+            ),
         )
         return int(self.db.scalar(stmt) or 0)
 
@@ -126,7 +154,10 @@ class OrderRepository(Repository[Order]):
             select(Order)
             .where(
                 Order.deleted_at.is_(None),
-                Order.scheduled_date == target_date,
+                or_(
+                    Order.scheduled_date == target_date,
+                    Order.visits.any(OrderVisit.visit_date == target_date),
+                ),
                 Order.status.in_(statuses),
             )
             .order_by(Order.requested_time.asc().nulls_last(), Order.id.asc())
@@ -142,29 +173,41 @@ OVERDUE_UNPAID_PAYMENT_STATUSES: tuple[str, ...] = (
 )
 
 
+@dataclass(frozen=True)
+class OrderVisitOccurrence:
+    order: Order
+    visit_id: str
+    visit_date: date
+
+
 def is_overdue_unpaid_order(order: Order, today: date) -> bool:
+    last_visit_date = order.visit_dates[-1] if order.visit_dates else None
     return (
-        order.scheduled_date is not None
-        and order.scheduled_date < today
+        last_visit_date is not None
+        and last_visit_date < today
         and order.payment_status in OVERDUE_UNPAID_PAYMENT_STATUSES
     )
 
 
 def order_visit_sort_key(order: Order, today: date, *, reverse_visit: bool) -> tuple:
-    scheduled_date = order.scheduled_date
-    if scheduled_date is not None and scheduled_date >= today:
+    visit_dates = order.visit_dates
+    future_dates = [visit_date for visit_date in visit_dates if visit_date >= today]
+    sort_date = (
+        min(future_dates)
+        if future_dates
+        else (visit_dates[-1] if visit_dates else None)
+    )
+    if future_dates:
         group = 0  # 오늘·미래 방문예정
-    elif scheduled_date is None:
+    elif sort_date is None:
         group = 1  # 미정(신규접수/일정 미확정)
     elif is_overdue_unpaid_order(order, today):
         group = 2  # 과거 일정 중 잔금 미완납
     else:
         group = 3  # 과거 완납
 
-    ordinal = scheduled_date.toordinal() if scheduled_date else 0
-    if group == 0 and reverse_visit and scheduled_date is not None:
-        ordinal = -ordinal
-    if group in {2, 3} and scheduled_date is not None:
+    ordinal = sort_date.toordinal() if sort_date else 0
+    if reverse_visit and sort_date is not None:
         ordinal = -ordinal
     return (group, ordinal, order.id)
 

@@ -148,6 +148,7 @@ def import_orders_from_xlsx(
                 status=OrderStatus.NEW,
                 received_date=received_date,
                 scheduled_date=entry["data"]["scheduled_date"],
+                visit_dates=entry["data"]["visit_dates"],
                 service_name=entry["data"]["service_name"],
                 total_amount=float(entry["data"]["total_amount"]),
             )
@@ -223,6 +224,11 @@ def _parse_row(raw: tuple[Any, ...], header_to_idx: dict[str, int]) -> dict[str,
         "customer_phone": phone,
         "customer_address": customer_address,
         "scheduled_date": _coerce_date(cell("scheduled_date")),
+        "visit_dates": _coerce_visit_dates(
+            raw[header_to_idx["visit_dates"]]
+            if "visit_dates" in header_to_idx
+            else cell("scheduled_date")
+        ),
         "service_name": service_name,
         "total_amount": total_amount,
     }
@@ -241,10 +247,28 @@ def _coerce_date(value: Any) -> date:
     raise ValueError("invalid_scheduled_date")
 
 
+def _coerce_visit_dates(value: Any) -> list[date]:
+    if isinstance(value, (date, datetime)):
+        return [_coerce_date(value)]
+    if not isinstance(value, str):
+        raise ValueError("invalid_visit_dates")
+    parts = [part.strip() for part in value.replace("\n", ",").replace(";", ",").split(",")]
+    try:
+        dates = sorted({_coerce_date(part) for part in parts if part})
+    except ValueError as exc:
+        raise ValueError(f"invalid_visit_dates:{value}") from exc
+    if not dates:
+        raise ValueError("invalid_visit_dates")
+    return dates
+
+
 def _coerce_decimal(value: Any) -> Decimal:
     if value is None or value == "":
         return Decimal("0")
     try:
-        return Decimal(str(value))
+        amount = Decimal(str(value))
     except (InvalidOperation, ValueError) as exc:
         raise ValueError(f"invalid_total_amount:{value}") from exc
+    if not amount.is_finite():
+        raise ValueError(f"invalid_total_amount:{value}")
+    return amount

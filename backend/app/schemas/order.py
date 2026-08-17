@@ -45,6 +45,7 @@ class OrderLineBase(ApiModel):
     status: OrderStatus = OrderStatus.NEW
     received_date: date
     scheduled_date: date | None = None
+    visit_dates: list[date] = Field(default_factory=list)
     requested_time: str | None = None
     partner_id: str | None = None
     team_name: str | None = None
@@ -72,6 +73,11 @@ class OrderLineBase(ApiModel):
     broker_payment_amount: float | None = Field(default=None, ge=0)
     broker_payment_status: str | None = None
 
+    @field_validator("visit_dates")
+    @classmethod
+    def _normalize_visit_dates(cls, value: list[date]) -> list[date]:
+        return sorted(set(value))
+
 
 class OrderLineCreate(OrderLineBase):
     pass
@@ -92,6 +98,7 @@ class OrderUpdate(ApiModel):
     status: OrderStatus | None = None
     received_date: date | None = None
     scheduled_date: date | None = None
+    visit_dates: list[date] | None = None
     requested_time: str | None = None
     partner_id: str | None = None
     team_name: str | None = None
@@ -118,6 +125,11 @@ class OrderUpdate(ApiModel):
     partner_payment_status: str | None = None
     broker_payment_amount: float | None = Field(default=None, ge=0)
     broker_payment_status: str | None = None
+
+    @field_validator("visit_dates")
+    @classmethod
+    def _normalize_visit_dates(cls, value: list[date] | None) -> list[date]:
+        return sorted(set(value or []))
 
 
 class AdminOrderEditUpdate(ApiModel):
@@ -206,8 +218,10 @@ class AdminOrderDetailRead(AdminOrderRead):
 
 class AdminCalendarOrderRead(ApiModel):
     id: str
+    visit_id: str
     status: OrderStatus
     scheduled_date: date
+    visit_dates: list[date] = Field(default_factory=list)
     requested_time: str | None = None
     partner_id: str | None = None
     team_name: str | None = None
@@ -246,6 +260,7 @@ class PartnerJobRead(ApiModel):
     id: str
     status: OrderStatus
     scheduled_date: date | None
+    visit_dates: list[date] = Field(default_factory=list)
     requested_time: str | None
     service_name: str
     size_or_quantity: str | None = None
@@ -279,6 +294,7 @@ class CustomerOrderLineRead(ApiModel):
     id: str
     status: OrderStatus
     scheduled_date: date | None
+    visit_dates: list[date] = Field(default_factory=list)
     requested_time: str | None
     service_name: str
     size_or_quantity: str | None = None

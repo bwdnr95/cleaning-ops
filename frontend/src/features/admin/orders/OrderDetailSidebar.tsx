@@ -17,7 +17,7 @@ interface OrderDetailSidebarProps {
   readonly partners: readonly AdminPartnerOption[];
   readonly selectedStatus: string;
   readonly selectedPartnerId: string;
-  readonly selectedScheduledDate: string;
+  readonly selectedVisitDates: readonly string[];
   readonly selectedRequestedTime: string;
   readonly selectedPaymentStatus: string;
   readonly selectedPartnerPaymentStatus: string;
@@ -46,7 +46,7 @@ interface OrderDetailSidebarProps {
   readonly asRequestBlockedText?: string;
   readonly onSelectedStatusChange: (value: string) => void;
   readonly onSelectedPartnerIdChange: (value: string) => void;
-  readonly onSelectedScheduledDateChange: (value: string) => void;
+  readonly onSelectedVisitDatesChange: (value: string[]) => void;
   readonly onSelectedRequestedTimeChange: (value: string) => void;
   readonly onSelectedPaymentStatusChange: (value: string) => void;
   readonly onSelectedPartnerPaymentStatusChange: (value: string) => void;
@@ -78,7 +78,7 @@ export function OrderDetailSidebar({
   partners,
   selectedStatus,
   selectedPartnerId,
-  selectedScheduledDate,
+  selectedVisitDates,
   selectedRequestedTime,
   selectedPaymentStatus,
   selectedPartnerPaymentStatus,
@@ -107,7 +107,7 @@ export function OrderDetailSidebar({
   asRequestBlockedText,
   onSelectedStatusChange,
   onSelectedPartnerIdChange,
-  onSelectedScheduledDateChange,
+  onSelectedVisitDatesChange,
   onSelectedRequestedTimeChange,
   onSelectedPaymentStatusChange,
   onSelectedPartnerPaymentStatusChange,
@@ -130,7 +130,7 @@ export function OrderDetailSidebar({
         workflowStatus={order.status || ''}
         displayStatus={displayStatus}
         hasPartner={Boolean(order.partner_id)}
-        hasSchedule={Boolean(order.scheduled_date)}
+        hasSchedule={Boolean(order.visit_dates?.length || order.scheduled_date)}
         hasUnsavedChanges={hasUnsavedChanges}
         isStatusDirty={isStatusDirty}
         isPartnerDirty={isPartnerDirty}
@@ -164,11 +164,11 @@ export function OrderDetailSidebar({
       />
 
       <SchedulePanel
-        selectedScheduledDate={selectedScheduledDate}
+        selectedVisitDates={selectedVisitDates}
         selectedRequestedTime={selectedRequestedTime}
         isSaving={isSaving}
         hasScheduleChanges={hasScheduleChanges}
-        onSelectedScheduledDateChange={onSelectedScheduledDateChange}
+        onSelectedVisitDatesChange={onSelectedVisitDatesChange}
         onSelectedRequestedTimeChange={onSelectedRequestedTimeChange}
         onScheduleSave={onScheduleSave}
       />

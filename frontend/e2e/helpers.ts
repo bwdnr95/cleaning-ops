@@ -38,7 +38,7 @@ type CreatedOrderGroup = {
   id: string;
   customer_token: string;
   notes?: string | null;
-  lines: Array<{ id: string }>;
+  lines: Array<{ id: string; visit_dates?: string[] }>;
 };
 
 export async function adminLogin(page: Page) {
@@ -69,7 +69,7 @@ export async function partnerUploadPhoto(
     await page.getByTestId(`partner-job-row-${orderId}`).click();
     await expect(page.getByTestId('partner-job-detail-page')).toBeVisible();
 
-    await page.getByTestId('partner-before-photo-input').setInputFiles({
+    await page.getByTestId('partner-before-photo-album-input').setInputFiles({
       name: 'before-e2e.png',
       mimeType: 'image/png',
       buffer: ONE_PIXEL_PNG,
@@ -77,13 +77,13 @@ export async function partnerUploadPhoto(
     await expect(page.getByText('비포 사진 1장이 업로드되었습니다.')).toBeVisible({ timeout: 5_000 });
 
     const startButton = page.getByTestId('partner-start-job');
-    if ((await startButton.count()) > 0) {
-      await startButton.click();
-      await expect(page.getByText('작업 중')).toBeVisible();
-    }
+    await expect(startButton).toBeVisible();
+    await expect(startButton).toBeEnabled();
+    await startButton.click();
+    await expect(page.getByText('작업 중')).toBeVisible();
 
     if (photoType !== 'before') {
-      await page.getByTestId(`partner-${photoType}-photo-input`).setInputFiles({
+      await page.getByTestId(`partner-${photoType}-photo-album-input`).setInputFiles({
         name: `${photoType}-e2e.png`,
         mimeType: 'image/png',
         buffer: ONE_PIXEL_PNG,
@@ -96,7 +96,7 @@ export async function partnerUploadPhoto(
 
     await expect(page.getByTestId('partner-complete-job')).toBeVisible();
     if (photoType !== 'after') {
-      await page.getByTestId('partner-after-photo-input').setInputFiles({
+      await page.getByTestId('partner-after-photo-album-input').setInputFiles({
         name: 'after-e2e.png',
         mimeType: 'image/png',
         buffer: ONE_PIXEL_PNG,
@@ -113,7 +113,7 @@ export async function partnerUploadPhoto(
 
 export async function createAssignedOrder(
   request: APIRequestContext,
-  options: { status?: string } = {},
+  options: { status?: string; visitDates?: string[] } = {},
 ) {
   const adminSession = await loginViaApi(request, 'admin');
   const created = await checkedJson<CreatedOrderGroup>(await request.post(`${backendUrl}/api/admin/orders/groups`, {
@@ -128,7 +128,8 @@ export async function createAssignedOrder(
         {
           status: options.status ?? '일정확정',
           received_date: HELPER_RECEIVED_DATE,
-          scheduled_date: HELPER_SCHEDULED_DATE,
+          scheduled_date: options.visitDates?.[0] ?? HELPER_SCHEDULED_DATE,
+          ...(options.visitDates ? { visit_dates: options.visitDates } : {}),
           requested_time: '09:30',
           partner_id: SEED_PARTNER_ID,
           team_name: 'R6 Photo Review E2E Team',
@@ -155,6 +156,25 @@ export async function createAssignedOrder(
   };
 }
 
+export async function confirmPartnerJob(request: APIRequestContext, orderId: string) {
+  const partnerSession = await loginViaApi(request, 'partner');
+  await checkedJson(await request.post(`${backendUrl}/api/partner/jobs/${orderId}/confirm`, {
+    headers: authHeaders(partnerSession.access_token),
+  }));
+}
+
+export async function updateAdminOrder(
+  request: APIRequestContext,
+  orderId: string,
+  data: Record<string, unknown>,
+) {
+  const adminSession = await loginViaApi(request, 'admin');
+  return checkedJson(await request.patch(`${backendUrl}/api/admin/orders/${orderId}`, {
+    headers: authHeaders(adminSession.access_token),
+    data,
+  }));
+}
+
 export async function createMultiLineOrder(
   request: APIRequestContext,
   lines: Array<{
@@ -162,6 +182,7 @@ export async function createMultiLineOrder(
     partner_id?: string | null;
     total_amount?: number;
     scheduled_date?: string;
+    visit_dates?: string[];
     requested_time?: string;
     size_or_quantity?: string;
   }>,
@@ -180,7 +201,8 @@ export async function createMultiLineOrder(
       lines: lines.map((line) => ({
         status: '일정확정',
         received_date: HELPER_RECEIVED_DATE,
-        scheduled_date: line.scheduled_date ?? HELPER_SCHEDULED_DATE,
+        scheduled_date: line.scheduled_date ?? line.visit_dates?.[0] ?? HELPER_SCHEDULED_DATE,
+        ...(line.visit_dates ? { visit_dates: line.visit_dates } : {}),
         requested_time: line.requested_time ?? '09:30',
         partner_id: line.partner_id ?? null,
         team_name: line.partner_id ? 'R7 Multi-line E2E Team' : null,

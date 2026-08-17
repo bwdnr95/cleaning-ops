@@ -61,7 +61,13 @@ export const MESSAGE_ACTIONS = {
 export const WORK_DONE_STATUS = '고객전달필요';
 
 const BALANCE_NOTICE_ALLOWED_STATUSES = ['고객전달필요', '고객전달완료', '서비스완료'];
-const DAY_BEFORE_NOTICE_ALLOWED_STATUSES = ['일정확정', '전날안내필요', '작업예정'];
+const DAY_BEFORE_NOTICE_ALLOWED_STATUSES = [
+  '일정확정',
+  '전날안내필요',
+  '전날안내완료',
+  '작업예정',
+  '작업진행',
+];
 const AS_REQUEST_ALLOWED_STATUSES = ['고객전달필요', '고객전달완료', '고객확인필요', '서비스완료'];
 
 export function isBalanceNoticeAllowedStatus(status: string | null | undefined): boolean {
