@@ -9,7 +9,7 @@ import { isAsRequestAllowedStatus, isBalanceNoticeAllowedStatus } from './OrderD
 export function useOrderDetailFormState(order: AdminOrderDetail | null) {
   const [selectedStatus, setSelectedStatus] = React.useState('');
   const [selectedPartnerId, setSelectedPartnerId] = React.useState('');
-  const [selectedScheduledDate, setSelectedScheduledDate] = React.useState('');
+  const [selectedVisitDates, setSelectedVisitDates] = React.useState<readonly string[]>([]);
   const [selectedRequestedTime, setSelectedRequestedTime] = React.useState('');
   const [selectedPaymentStatus, setSelectedPaymentStatus] = React.useState('');
   const [selectedPartnerPaymentStatus, setSelectedPartnerPaymentStatus] = React.useState('');
@@ -23,7 +23,7 @@ export function useOrderDetailFormState(order: AdminOrderDetail | null) {
     }
     setSelectedStatus(orderWorkflowStatusValue(order.status, order.payment_status));
     setSelectedPartnerId(order.partner_id || '');
-    setSelectedScheduledDate(order.scheduled_date || '');
+    setSelectedVisitDates(order.visit_dates || (order.scheduled_date ? [order.scheduled_date] : []));
     setSelectedRequestedTime(order.requested_time || '');
     setSelectedPaymentStatus(order.payment_status || '');
     setSelectedPartnerPaymentStatus(order.partner_payment_status || '');
@@ -33,10 +33,12 @@ export function useOrderDetailFormState(order: AdminOrderDetail | null) {
   }, [order]);
 
   const displayStatus = order ? orderWorkflowStatusValue(order.status, order.payment_status) : '';
+  const savedVisitDates = order?.visit_dates || (order?.scheduled_date ? [order.scheduled_date] : []);
+  const hasVisitDateChanges = !sameStringList(selectedVisitDates, savedVisitDates);
   const hasUnsavedChanges = Boolean(order) && (
     selectedStatus !== displayStatus
     || selectedPartnerId !== (order?.partner_id || '')
-    || selectedScheduledDate !== (order?.scheduled_date || '')
+    || hasVisitDateChanges
     || selectedRequestedTime !== (order?.requested_time || '')
     || selectedPaymentStatus !== (order?.payment_status || '')
     || selectedPartnerPaymentStatus !== (order?.partner_payment_status || '')
@@ -45,7 +47,7 @@ export function useOrderDetailFormState(order: AdminOrderDetail | null) {
     || Number(selectedOnsiteExtra || 0) !== Number(order?.onsite_extra_amount || 0)
   );
   const hasScheduleChanges = Boolean(order) && (
-    selectedScheduledDate !== (order?.scheduled_date || '')
+    hasVisitDateChanges
     || selectedRequestedTime !== (order?.requested_time || '')
   );
   const isStatusDirty = Boolean(order) && selectedStatus !== displayStatus;
@@ -100,7 +102,7 @@ export function useOrderDetailFormState(order: AdminOrderDetail | null) {
   return {
     selectedStatus,
     selectedPartnerId,
-    selectedScheduledDate,
+    selectedVisitDates,
     selectedRequestedTime,
     selectedPaymentStatus,
     selectedPartnerPaymentStatus,
@@ -109,7 +111,7 @@ export function useOrderDetailFormState(order: AdminOrderDetail | null) {
     selectedOnsiteExtra,
     setSelectedStatus,
     setSelectedPartnerId,
-    setSelectedScheduledDate,
+    setSelectedVisitDates,
     setSelectedRequestedTime,
     setSelectedPaymentStatus,
     setSelectedPartnerPaymentStatus,
@@ -135,4 +137,8 @@ export function useOrderDetailFormState(order: AdminOrderDetail | null) {
     messageLogs: order?.message_logs || [],
     timeline: order?.timeline || [],
   };
+}
+
+function sameStringList(left: readonly string[], right: readonly string[]): boolean {
+  return left.length === right.length && left.every((value, index) => value === right[index]);
 }

@@ -25,11 +25,9 @@ test('partner uploads job photos and customer sees auto-published photos except 
   await expect(partnerPage.getByText('Internal payment memo')).toHaveCount(0);
   await expect(partnerPage.getByText('010-8899-7766')).toBeVisible();
 
-  await partnerPage.getByTestId('partner-confirm-job').click();
-  await expect(partnerPage.getByTestId('partner-confirm-job')).toHaveCount(0);
-  await expect(partnerPage.getByTestId('partner-before-photo-input')).toBeEnabled();
+  await expect(partnerPage.getByTestId('partner-before-photo-album-input')).toBeEnabled();
 
-  await partnerPage.getByTestId('partner-before-photo-input').setInputFiles([
+  await partnerPage.getByTestId('partner-before-photo-album-input').setInputFiles([
     {
       name: 'before-partner-r2.png',
       mimeType: 'image/png',
@@ -44,9 +42,16 @@ test('partner uploads job photos and customer sees auto-published photos except 
   await expect(partnerPage.getByText('비포 사진 2장이 업로드되었습니다.')).toBeVisible();
   await expect(partnerPage.getByRole('img', { name: 'before-partner-r2.png' })).toBeVisible();
   await expect(partnerPage.getByRole('img', { name: 'before-extra-partner-r2.png' })).toBeVisible();
+  await expect(partnerPage.getByTestId('partner-start-job')).toBeEnabled();
   await partnerPage.getByTestId('partner-start-job').click();
   await expect(partnerPage.getByText('작업 중')).toBeVisible();
-  await partnerPage.getByTestId('partner-after-photo-input').setInputFiles({
+  await partnerPage.getByTestId('partner-etc-photo-album-input').setInputFiles({
+    name: 'field-note.txt',
+    mimeType: 'text/plain',
+    buffer: Buffer.from('not an image'),
+  });
+  await expect(partnerPage.getByText('JPG/PNG/WebP만 업로드 가능합니다.')).toBeVisible();
+  await partnerPage.getByTestId('partner-after-photo-album-input').setInputFiles({
     name: 'after-partner-r2.png',
     mimeType: 'image/png',
     buffer: ONE_PIXEL_PNG,
@@ -66,13 +71,6 @@ test('partner uploads job photos and customer sees auto-published photos except 
   await partnerPage.getByTestId(`partner-job-row-${flow.orderId}`).click();
   await expect(partnerPage.getByRole('img', { name: 'before-partner-r2.png' })).toBeVisible();
   await expect(partnerPage.getByRole('img', { name: 'after-partner-r2.png' })).toBeVisible();
-
-  await partnerPage.getByTestId('partner-etc-photo-input').setInputFiles({
-    name: 'field-note.txt',
-    mimeType: 'text/plain',
-    buffer: Buffer.from('not an image'),
-  });
-  await expect(partnerPage.getByText('JPG/PNG/WebP만 업로드 가능합니다.')).toBeVisible();
   await expect(partnerPage.getByTestId('partner-status-locked')).toContainText('작업 완료 처리됨');
   await expect(partnerPage.getByTestId('partner-start-job')).toHaveCount(0);
   await expect(partnerPage.getByTestId('partner-complete-job')).toHaveCount(0);

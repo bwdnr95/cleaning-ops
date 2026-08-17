@@ -22,6 +22,7 @@ Cleaning Ops Control Center is a quiet operations command center. It should feel
 | Text/quaternary | `--text-quaternary` | `#94a3b8` | Placeholder, quiet icons |
 | Brand | `--brand` | `#4f46e5` | Primary actions, active nav |
 | Brand/background | `--brand-bg` | `#eef2ff` | Brand chips, active row tint |
+| On brand | `--on-brand` | `#ffffff` | Text/icons on solid brand controls |
 | Info | `--info-fg` / `--info-bg` | `#1d4ed8` / `#eff6ff` | In progress, operational info |
 | Warning | `--warn-fg` / `--warn-bg` | `#b45309` / `#fffbeb` | Waiting, attention |
 | Success | `--success-fg` / `--success-bg` | `#047857` / `#ecfdf5` | Complete, visible, sent |
@@ -70,6 +71,19 @@ All spacing follows a 4px base.
 | `--space-5` | 20px | Page padding |
 | `--space-6` | 24px | Empty states, modal padding |
 
+### Shared Control Tokens
+
+| Role | Token | Value | Usage |
+|------|-------|-------|-------|
+| Compact control height | `--control-h-sm` | 34px | Dense desktop inputs and date cells |
+| Touch target | `--touch-target` | 44px | Mobile buttons and interactive calendar cells |
+| Pill radius | `--radius-pill` | 999px | Removable selected-date chips |
+| Focus ring | `--focus-ring-width` / `--focus-ring-offset` | 2px / 2px | Keyboard focus on selected controls |
+| Caption type | `--font-size-caption` | 10.5px | Weekday labels and compact metadata |
+| Small body type | `--font-size-body-sm` | 11.5px | Chips and helper text |
+| Body type | `--font-size-body` | 12.5px | Dense form controls |
+| Section type | `--font-size-section` | 13px | Popover headings |
+
 ### Grid
 
 - Admin content uses `.page-shell` and auto-fit grids.
@@ -111,6 +125,15 @@ Dense admin layouts should remain scannable. Avoid nested cards and avoid page s
 - States: visible text must use customer/partner-safe wording outside admin-only pages.
 - Accessibility: color never carries meaning alone.
 - Motion: none.
+
+### Multi Date Picker
+
+- Structure: one compact trigger, a month grid that keeps the popover open while dates are toggled, selected-date chips, and explicit clear/today/done actions.
+- Selection: consecutive and non-consecutive dates use the same toggle interaction; values are shown and submitted in ascending order.
+- States: empty, one date, multiple dates, keyboard focus, selected day, and outside-month day.
+- Spacing: 34px desktop trigger and day cells; all controls grow to the 44px touch target on mobile.
+- Accessibility: the trigger exposes dialog state, every day uses `aria-pressed`, selected chips have named remove buttons, and changes are announced through `aria-live`.
+- Motion: none. Month changes and selection are immediate so dense order entry remains predictable.
 
 ### Brand Logo Lockup
 

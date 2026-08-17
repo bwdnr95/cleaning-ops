@@ -87,6 +87,7 @@ _PAST_PAID_VISIBLE_TABS = frozenset(
         "final_payment_complete",
         "done",
         "monthly_done",
+        "monthly_contract",
         "monthly_revenue",
     }
 )
@@ -163,6 +164,7 @@ class OrderPageService:
                 visit_from=visit_from,
                 visit_to=visit_to,
                 include_archived_for_search=include_archived,
+                status_key=status,
             )
         ]
         # 2) 접수일 필터
@@ -248,7 +250,7 @@ class OrderPageService:
             if not (order.team_name or "").strip():
                 unassigned += 1
             # '오늘 작업'은 대시보드 today_jobs와 동일하게 오늘 방문 + '일정 및 작업 확정'(작업예정 워크플로)만.
-            if order.scheduled_date == today and workflow == "작업예정":
+            if today in order.visit_dates and workflow == "작업예정":
                 today_jobs += 1
             if workflow == "작업예정":
                 schedule_confirmed += 1
@@ -287,18 +289,33 @@ class OrderPageService:
         visit_from: date | None,
         visit_to: date | None,
         include_archived_for_search: bool,
+        status_key: str | None,
     ) -> bool:
-        value = order.scheduled_date
+        if status_key == "monthly_done":
+            visit_dates = order.visit_dates[-1:] if order.visit_dates else []
+        elif status_key in {"monthly_contract", "monthly_revenue"}:
+            visit_dates = [order.scheduled_date] if order.scheduled_date else []
+        else:
+            visit_dates = order.visit_dates
 
         if preset == "upcoming":
             if include_archived_for_search:
                 return True
             # 오늘부터: 미정/오늘·미래/과거 잔금 미완납을 노출, 과거 완납은 제외.
-            return value is None or value >= today or has_past_incomplete_balance(order, today)
+            return (
+                not visit_dates
+                or any(visit_date >= today for visit_date in visit_dates)
+                or has_past_incomplete_balance(order, today)
+            )
 
         # 명시적 프리셋이 날짜 경계를 정하면 그 경계를 사용한다.
         start, end = self._resolve_date_range(preset, today, visit_from, visit_to)
-        return self._matches_date_range(value, start, end)
+        if start is None and end is None:
+            return True
+        return any(
+            self._matches_date_range(visit_date, start, end)
+            for visit_date in visit_dates
+        )
 
     def _matches_received_filter(
         self,
@@ -425,6 +442,8 @@ class OrderPageService:
                 order.status in WORK_DONE_STATUSES
                 and order.payment_status in _PAYMENT_CHECK_STATUSES
             )
+        if status_key == "monthly_contract":
+            return order.status != OrderStatus.CANCELLED
         if status_key in {"customer_check", "customer_check_needed"}:
             return (
                 order.status == OrderStatus.CUSTOMER_CHECK_NEEDED
@@ -436,7 +455,10 @@ class OrderPageService:
             return (
                 order.status != OrderStatus.CANCELLED
                 and order.payment_status in _PAYMENT_CHECK_STATUSES
-                and (order.scheduled_date is None or order.scheduled_date <= today)
+                and (
+                    not order.visit_dates
+                    or order.visit_dates[-1] <= today
+                )
             )
         if status_key in cls._RAW_STATUS_TAB:
             return order.status in cls._RAW_STATUS_TAB[status_key]

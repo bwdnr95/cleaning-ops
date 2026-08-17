@@ -4,6 +4,7 @@ from app.models.broker import Broker
 from app.models.message import MessageLog
 from app.models.order import Order
 from app.models.order_group import OrderGroup
+from app.models.order_visit import OrderVisit
 from app.models.partner import Partner, PartnerCategory
 from app.models.photo import OrderPhoto
 from app.models.recurring_contract import RecurringContract
@@ -22,6 +23,7 @@ __all__ = [
     "MessageLog",
     "Order",
     "OrderGroup",
+    "OrderVisit",
     "OrderPhoto",
     "OrderTimeline",
     "Partner",

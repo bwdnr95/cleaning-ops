@@ -13,6 +13,7 @@ from app.domain.order_metrics import (
 from app.domain.payment_status import PAYMENT_CHECK_STATUSES, PaymentStatus
 from app.models.message import MessageLog
 from app.models.order import Order
+from app.models.order_visit import OrderVisit
 from app.models.photo import OrderPhoto
 from app.schemas.dashboard import (
     DashboardRecentActivity,
@@ -33,6 +34,17 @@ class DashboardService:
             extract("year", Order.scheduled_date) == current.year,
             extract("month", Order.scheduled_date) == current.month,
         )
+        last_visit_date = (
+            select(func.max(OrderVisit.visit_date))
+            .where(OrderVisit.order_id == Order.id)
+            .correlate(Order)
+            .scalar_subquery()
+        )
+        completion_date = func.coalesce(last_visit_date, Order.scheduled_date)
+        completion_month_filter = (
+            extract("year", completion_date) == current.year,
+            extract("month", completion_date) == current.month,
+        )
 
         # 소비자가(총액) = total_amount + onsite_extra. 계약금/잔금(deposit/balance)은 import·정기 주문에서
         # 비어 있을 수 있어(₩0로 샘) 금액 지표는 항상 채워지는 total 기반으로 계산한다(매출·인사이트와 동일 기준).
@@ -49,11 +61,17 @@ class DashboardService:
         return DashboardSummary(
             # 오늘/내일 '일정 및 작업 확정'(작업예정 워크플로) 방문 — 주문목록 today/tomorrow_notice 탭과 일치.
             today_jobs=self._count(
-                Order.scheduled_date == current,
+                or_(
+                    Order.scheduled_date == current,
+                    Order.visits.any(OrderVisit.visit_date == current),
+                ),
                 Order.status.in_(SCHEDULED_WORKFLOW_STATUSES),
             ),
             tomorrow_notice_targets=self._count(
-                Order.scheduled_date == tomorrow,
+                or_(
+                    Order.scheduled_date == tomorrow,
+                    Order.visits.any(OrderVisit.visit_date == tomorrow),
+                ),
                 Order.status.in_(SCHEDULED_WORKFLOW_STATUSES),
             ),
             partner_pending=self._count(Order.status == OrderStatus.PARTNER_CONFIRMING),
@@ -68,8 +86,10 @@ class DashboardService:
                     Order.as_intake_pending.is_(True),
                 )
             ),
-            # 이번 달 완료 = 당월 방문 + 작업완료 상태.
-            monthly_completed=self._count(Order.status.in_(WORK_DONE_STATUSES), *month_filter),
+            monthly_completed=self._count(
+                Order.status.in_(WORK_DONE_STATUSES),
+                *completion_month_filter,
+            ),
             # 이번 달 계약금액 = 일반 주문 화면의 당월 방문건(취소 제외) 소비자가 합.
             monthly_contract_amount=self._sum(
                 consumer_total,
@@ -91,7 +111,13 @@ class DashboardService:
             payment_check_needed=self._count(
                 Order.payment_status.in_(PAYMENT_CHECK_STATUSES),
                 Order.status != OrderStatus.CANCELLED,
-                (Order.scheduled_date <= current) | Order.scheduled_date.is_(None),
+                or_(
+                    Order.scheduled_date.is_(None),
+                    (
+                        (Order.scheduled_date <= current)
+                        & ~Order.visits.any(OrderVisit.visit_date > current)
+                    ),
+                ),
             ),
             monthly_revenue=self._sum(
                 func.coalesce(Order.total_amount, 0) + func.coalesce(Order.onsite_extra_amount, 0),

@@ -1,6 +1,6 @@
-from datetime import datetime
+from datetime import date, datetime
 
-from sqlalchemy import JSON, DateTime, ForeignKey, String, Text
+from sqlalchemy import JSON, Date, DateTime, ForeignKey, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.domain.constants import MessageChannel, MessageStatus, MessageType, RecipientType
@@ -19,6 +19,7 @@ class MessageLog(CreatedAtMixin, Base):
     # 전화번호 대신 이 값으로 스코프해 공유 전화번호/재배정 시 협력사 간 누출을 막는다.
     recipient_partner_id: Mapped[str | None] = mapped_column(String(36), index=True)
     message_type: Mapped[MessageType] = mapped_column(String(80), index=True)
+    target_visit_date: Mapped[date | None] = mapped_column(Date)
     channel: Mapped[MessageChannel] = mapped_column(String(20))
     content: Mapped[str] = mapped_column(Text)
     status: Mapped[MessageStatus] = mapped_column(String(20), index=True)

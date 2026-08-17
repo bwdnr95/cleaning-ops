@@ -28,6 +28,7 @@ export interface OrderLineForm {
   readonly status: string;
   readonly received_date: string;
   readonly scheduled_date: string;
+  readonly visit_dates: readonly string[];
   readonly requested_time: string;
   readonly partner_id: string;
   readonly team_name: string;
@@ -101,4 +102,9 @@ export type OrderFormLineFieldChange = <K extends OrderLineField>(
   lineIndex: number,
   key: K,
   value: OrderLineForm[K],
+) => void;
+
+export type OrderFormVisitDatesChange = (
+  lineIndex: number,
+  value: readonly string[],
 ) => void;

@@ -59,7 +59,7 @@ export function OrderDetailPage({ orderId, onBack, onEdit, onDuplicate, onNav, o
     partners: partnersResource.data || [],
     selectedStatus: detailForm.selectedStatus,
     selectedPartnerId: detailForm.selectedPartnerId,
-    selectedScheduledDate: detailForm.selectedScheduledDate,
+    selectedVisitDates: detailForm.selectedVisitDates,
     selectedRequestedTime: detailForm.selectedRequestedTime,
     selectedPaymentStatus: detailForm.selectedPaymentStatus,
     selectedPartnerPaymentStatus: detailForm.selectedPartnerPaymentStatus,
@@ -149,7 +149,7 @@ export function OrderDetailPage({ orderId, onBack, onEdit, onDuplicate, onNav, o
             partners={partnersResource.data || []}
             selectedStatus={detailForm.selectedStatus}
             selectedPartnerId={detailForm.selectedPartnerId}
-            selectedScheduledDate={detailForm.selectedScheduledDate}
+            selectedVisitDates={detailForm.selectedVisitDates}
             selectedRequestedTime={detailForm.selectedRequestedTime}
             selectedPaymentStatus={detailForm.selectedPaymentStatus}
             selectedPartnerPaymentStatus={detailForm.selectedPartnerPaymentStatus}
@@ -178,7 +178,7 @@ export function OrderDetailPage({ orderId, onBack, onEdit, onDuplicate, onNav, o
             asRequestBlockedText={detailForm.asRequestBlockedText}
             onSelectedStatusChange={detailForm.setSelectedStatus}
             onSelectedPartnerIdChange={detailForm.setSelectedPartnerId}
-            onSelectedScheduledDateChange={detailForm.setSelectedScheduledDate}
+            onSelectedVisitDatesChange={detailForm.setSelectedVisitDates}
             onSelectedRequestedTimeChange={detailForm.setSelectedRequestedTime}
             onSelectedPaymentStatusChange={detailForm.setSelectedPaymentStatus}
             onSelectedPartnerPaymentStatusChange={detailForm.setSelectedPartnerPaymentStatus}

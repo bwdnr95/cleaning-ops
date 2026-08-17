@@ -24,18 +24,25 @@ def list_calendar_orders(
     start_date = date(year, month, 1)
     end_date = date(year, month, last_day)
     group_repo = OrderGroupRepository(db)
-    rows: list[AdminCalendarOrderRead] = []
-    for order in OrderRepository(db).list_scheduled_between(
+    occurrences = OrderRepository(db).list_scheduled_between(
         start_date,
         end_date,
         partner_id=partner_id,
-    ):
-        group = group_repo.get(order.group_id) if order.group_id else None
+    )
+    groups_by_id = group_repo.list_by_ids(
+        occurrence.order.group_id for occurrence in occurrences
+    )
+    rows: list[AdminCalendarOrderRead] = []
+    for occurrence in occurrences:
+        order = occurrence.order
+        group = groups_by_id.get(order.group_id)
         rows.append(
             AdminCalendarOrderRead(
                 id=order.id,
+                visit_id=occurrence.visit_id,
                 status=order.status,
-                scheduled_date=order.scheduled_date,
+                scheduled_date=occurrence.visit_date,
+                visit_dates=order.visit_dates,
                 requested_time=order.requested_time,
                 partner_id=order.partner_id,
                 team_name=order.team_name,

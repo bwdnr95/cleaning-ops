@@ -31,6 +31,7 @@ from app.domain.payment_status import (
 from app.domain.phone import normalize_phone
 from app.models.order import Order
 from app.models.order_group import OrderGroup
+from app.models.order_visit import OrderVisit
 from app.models.photo import OrderPhoto
 from app.models.timeline import OrderTimeline
 from app.repositories.messages import MessageRepository
@@ -140,7 +141,7 @@ def is_customer_as_request_pending(order: Order) -> bool:
 def is_schedule_confirmed_message_target(order: Order) -> bool:
     return (
         order.status == OrderStatus.SCHEDULE_CONFIRMED.value
-        and order.scheduled_date is not None
+        and bool(order.visit_dates)
     )
 
 
@@ -166,6 +167,11 @@ class OrderService:
         self.timeline = TimelineService(db)
 
     def create(self, payload: OrderCreate, *, actor_user_id: str | None = None) -> Order:
+        visit_dates = (
+            payload.visit_dates
+            if "visit_dates" in payload.model_fields_set
+            else ([payload.scheduled_date] if payload.scheduled_date is not None else [])
+        )
         group = self.create_group(
             OrderGroupCreate(
                 customer_name=payload.customer_name,
@@ -180,6 +186,7 @@ class OrderService:
                         status=payload.status,
                         received_date=payload.received_date,
                         scheduled_date=payload.scheduled_date,
+                        visit_dates=visit_dates,
                         requested_time=payload.requested_time,
                         partner_id=payload.partner_id,
                         team_name=payload.team_name,
@@ -335,6 +342,13 @@ class OrderService:
         apply_catalog_price_defaults: bool = True,
     ) -> Order:
         values = payload.model_dump()
+        visit_dates = (
+            payload.visit_dates
+            if "visit_dates" in payload.model_fields_set
+            else ([payload.scheduled_date] if payload.scheduled_date is not None else [])
+        )
+        values.pop("visit_dates", None)
+        values["scheduled_date"] = visit_dates[0] if visit_dates else None
         self._apply_service_catalog(
             values,
             apply_price_defaults=apply_catalog_price_defaults,
@@ -351,6 +365,10 @@ class OrderService:
             customer_visible_payment=group.customer_visible_payment,
             **values,
         )
+        order.visits = [
+            OrderVisit(id=str(uuid4()), order_id=order.id, visit_date=visit_date)
+            for visit_date in visit_dates
+        ]
         self.orders.add(order)
         self.timeline.record(
             order_id=order.id,
@@ -379,6 +397,22 @@ class OrderService:
         if order is None:
             raise ValueError("order_not_found")
         changes = payload.model_dump(exclude_unset=True)
+        legacy_scheduled_date_change = (
+            "scheduled_date" in changes and "visit_dates" not in changes
+        )
+        has_visit_date_change = "visit_dates" in changes
+        replacement_visit_dates = changes.pop("visit_dates", None)
+        if has_visit_date_change:
+            changes["scheduled_date"] = (
+                replacement_visit_dates[0] if replacement_visit_dates else None
+            )
+        elif "scheduled_date" in changes:
+            replacement_visit_dates = (
+                [changes["scheduled_date"]]
+                if changes["scheduled_date"] is not None
+                else []
+            )
+            has_visit_date_change = True
         partner_ids = [order.partner_id] if order.partner_id is not None else []
         if changes.get("partner_id") is not None:
             partner_ids.append(changes["partner_id"])
@@ -394,6 +428,10 @@ class OrderService:
                 include_deleted=True,
             )
         self.db.refresh(order, with_for_update=True)
+        self.db.expire(order, ["visits"])
+        old_visit_dates = order.visit_dates
+        if legacy_scheduled_date_change and len(old_visit_dates) > 1:
+            raise ValueError("visit_dates_required_for_multi_visit_order")
         if order.partner_id is not None and order.partner_id not in locked_partners:
             raise ValueError("order_partner_changed_concurrently")
         is_partner_change = (
@@ -588,11 +626,25 @@ class OrderService:
                     raise ValueError("partner_not_found")
                 if not target_partner.is_active:
                     raise ValueError("partner_inactive")
-        schedule_changes = collect_schedule_changes(order, changes)
+        schedule_changes = collect_schedule_changes(
+            order,
+            changes,
+            old_visit_dates=old_visit_dates,
+            new_visit_dates=(
+                replacement_visit_dates if has_visit_date_change else old_visit_dates
+            ),
+        )
         for key, value in changes.items():
             if key == "customer_phone" and value is not None:
                 value = normalize_phone(value)
             setattr(order, key, value)
+        if has_visit_date_change:
+            existing_visits = {visit.visit_date: visit for visit in order.visits}
+            order.visits = [
+                existing_visits.get(visit_date)
+                or OrderVisit(id=str(uuid4()), order_id=order.id, visit_date=visit_date)
+                for visit_date in replacement_visit_dates or []
+            ]
 
         # 방문일 미배정(미정) 주문에 방문일을 새로 지정하면 자동으로 '일정확정'으로 전환한다.
         # (운영자가 같은 요청에서 상태를 직접 지정했으면 그 값을 존중하여 건드리지 않음)
@@ -721,7 +773,7 @@ class OrderService:
                 )
             elif settings.automation_send_partner_assignment:
                 self._send_partner_assignment_if_needed(order, actor_user_id=actor_user_id)
-        if should_send_schedule_confirmed or "status" in changes or "scheduled_date" in changes:
+        if should_send_schedule_confirmed or "status" in changes or has_visit_date_change:
             self._send_schedule_confirmed_if_needed(order, actor_user_id=actor_user_id)
         self.db.refresh(order)
         return order
@@ -1571,6 +1623,7 @@ def to_admin_order_dto(
         status=order.status,
         received_date=order.received_date,
         scheduled_date=order.scheduled_date,
+        visit_dates=order.visit_dates,
         requested_time=order.requested_time,
         partner_id=order.partner_id,
         team_name=order.team_name,
@@ -1745,6 +1798,7 @@ def to_partner_job_dto(
         id=order.id,
         status=order.status,
         scheduled_date=order.scheduled_date,
+        visit_dates=order.visit_dates,
         requested_time=order.requested_time,
         service_name=order.service_name,
         size_or_quantity=order.size_or_quantity,
@@ -1836,6 +1890,7 @@ def _to_customer_line_dto(
         id=line.id,
         status=line.status,
         scheduled_date=line.scheduled_date,
+        visit_dates=line.visit_dates,
         requested_time=line.requested_time,
         service_name=line.service_name,
         size_or_quantity=line.size_or_quantity,
@@ -1887,8 +1942,19 @@ def collect_payment_changes(order: Order, changes: dict) -> dict[str, dict[str, 
     return payment_changes
 
 
-def collect_schedule_changes(order: Order, changes: dict) -> dict[str, dict[str, object | None]]:
+def collect_schedule_changes(
+    order: Order,
+    changes: dict,
+    *,
+    old_visit_dates: list,
+    new_visit_dates: list,
+) -> dict[str, dict[str, object | None]]:
     schedule_changes: dict[str, dict[str, object | None]] = {}
+    if old_visit_dates != new_visit_dates:
+        schedule_changes["visit_dates"] = {
+            "from": [value.isoformat() for value in old_visit_dates],
+            "to": [value.isoformat() for value in new_visit_dates],
+        }
     for field in ("scheduled_date", "requested_time"):
         if field not in changes:
             continue

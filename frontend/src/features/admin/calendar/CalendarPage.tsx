@@ -8,7 +8,7 @@ import { formatPhone } from '../../../domain/phone';
 import { getAppTodayDate } from '../../../domain/time';
 
 export function CalendarPage({ onOpenOrder, onCreateOrder }) {
-  const [siteOpen, setSiteOpen] = React.useState(true);
+  const [siteOpen, setSiteOpen] = React.useState(() => window.innerWidth > 1024);
   const [selectedPartnerId, setSelectedPartnerId] = React.useState('');
   const [partnerQuery, setPartnerQuery] = React.useState('');
   const [currentMonth, setCurrentMonth] = React.useState(() => startOfMonth(getAppTodayDate()));
@@ -63,9 +63,9 @@ export function CalendarPage({ onOpenOrder, onCreateOrder }) {
   };
 
   return (
-    <div data-testid="admin-calendar-page" className="page-shell" style={{ flex: 1, display: 'flex', minHeight: 0, overflow: 'hidden', background: 'var(--bg)' }}>
+    <div data-testid="admin-calendar-page" className="page-shell calendar-page" style={{ flex: 1, display: 'flex', minHeight: 0, overflow: 'hidden', background: 'var(--bg)' }}>
       {siteOpen && (
-        <aside style={{
+        <aside className="calendar-site-sidebar" style={{
           width: 220,
           flexShrink: 0,
           background: 'var(--surface)',
@@ -77,7 +77,7 @@ export function CalendarPage({ onOpenOrder, onCreateOrder }) {
           <div style={{ padding: '10px 14px', borderBottom: '1px solid var(--divider)', display: 'flex', alignItems: 'center' }}>
             <span style={{ fontSize: 12, fontWeight: 600 }}>협력사 선택</span>
             <div style={{ flex: 1 }}/>
-            <button onClick={() => setSiteOpen(false)} className="btn btn--ghost btn--sm" style={{ padding: '0 4px' }}>
+            <button aria-label="협력사 목록 닫기" onClick={() => setSiteOpen(false)} className="btn btn--ghost btn--sm" style={{ padding: '0 4px' }}>
               <Icon name="x" size={12}/>
             </button>
           </div>
@@ -141,8 +141,8 @@ export function CalendarPage({ onOpenOrder, onCreateOrder }) {
         </aside>
       )}
 
-      <main style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, minHeight: 0, overflow: 'hidden' }}>
-        <div style={{
+      <main className="calendar-main" style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, minHeight: 0, overflow: 'hidden' }}>
+        <div className="calendar-toolbar" style={{
           padding: '10px 20px',
           background: 'var(--surface)',
           borderBottom: '1px solid var(--border)',
@@ -152,36 +152,38 @@ export function CalendarPage({ onOpenOrder, onCreateOrder }) {
           flexShrink: 0,
         }}>
           {!siteOpen && (
-            <button onClick={() => setSiteOpen(true)} className="btn btn--ghost btn--sm" style={{ padding: '0 6px' }}>
+            <button aria-label="협력사 목록 열기" onClick={() => setSiteOpen(true)} className="btn btn--ghost btn--sm" style={{ padding: '0 6px' }}>
               <Icon name="list" size={13}/>
             </button>
           )}
           <button className="btn btn--secondary btn--sm" onClick={handleToday}>오늘</button>
           <div style={{ display: 'flex' }}>
-            <button className="btn btn--ghost btn--sm" style={{ padding: '0 4px' }} onClick={() => moveMonth(-1)}><Icon name="chevronLeft" size={13}/></button>
-            <button className="btn btn--ghost btn--sm" style={{ padding: '0 4px' }} onClick={() => moveMonth(1)}><Icon name="chevronRight" size={13}/></button>
+            <button aria-label="이전 달" className="btn btn--ghost btn--sm" style={{ padding: '0 4px' }} onClick={() => moveMonth(-1)}><Icon name="chevronLeft" size={13}/></button>
+            <button aria-label="다음 달" className="btn btn--ghost btn--sm" style={{ padding: '0 4px' }} onClick={() => moveMonth(1)}><Icon name="chevronRight" size={13}/></button>
           </div>
           <h2 style={{ margin: 0, fontSize: 15, fontWeight: 700 }}>{year}년 {month}월</h2>
-          <span style={{ fontSize: 11.5, color: 'var(--text-tertiary)' }}>
+          <span className="calendar-toolbar-summary" style={{ fontSize: 11.5, color: 'var(--text-tertiary)' }}>
             {selectedPartnerId ? sites.find((site) => site.id === selectedPartnerId)?.name : '전체 협력사'} · 총 {orders.length}건
           </span>
           <div style={{ flex: 1 }}/>
-          <Legend tone="warn" label="대기"/>
-          <Legend tone="info" label="진행"/>
-          <Legend tone="success" label="완료"/>
-          <Legend tone="purple" label="작업중"/>
-          <div style={{ width: 1, height: 18, background: 'var(--border)' }}/>
+          <div className="calendar-toolbar-legends">
+            <Legend tone="warn" label="대기"/>
+            <Legend tone="info" label="진행"/>
+            <Legend tone="success" label="완료"/>
+            <Legend tone="purple" label="작업중"/>
+          </div>
+          <div className="calendar-toolbar-divider" style={{ width: 1, height: 18, background: 'var(--border)' }}/>
           <button className="btn btn--primary btn--sm" onClick={onCreateOrder}>
             <Icon name="plus" size={12}/> 일정 추가
           </button>
         </div>
 
-        <div style={{ flex: 1, display: 'flex', minHeight: 0, overflow: 'hidden', background: 'var(--bg)' }}>
+        <div className="calendar-content" style={{ flex: 1, display: 'flex', minHeight: 0, overflow: 'hidden', background: 'var(--bg)' }}>
           {calendar.isLoading && <CalendarState text="일정을 불러오는 중입니다." />}
           {!calendar.isLoading && calendar.error && <CalendarState text="일정을 불러오지 못했습니다." tone="danger" />}
           {!calendar.isLoading && !calendar.error && (
             <>
-              <div style={{ flex: '1 1 0', minWidth: 0, minHeight: 0, overflow: 'hidden', padding: 12, display: 'flex' }}>
+              <div className="calendar-grid-pane" style={{ flex: '1 1 0', minWidth: 0, minHeight: 0, overflow: 'hidden', padding: 12, display: 'flex' }}>
                 <div data-testid="calendar-grid-shell" style={{
                   flex: 1,
                   display: 'flex',
@@ -234,16 +236,8 @@ export function CalendarPage({ onOpenOrder, onCreateOrder }) {
                       return (
                         <div
                           key={index}
+                          className="calendar-day-cell"
                           data-testid={`calendar-day-${cell.day}`}
-                          role="button"
-                          tabIndex={0}
-                          onClick={() => selectDay(cell.day)}
-                          onKeyDown={(event) => {
-                            if (event.key === 'Enter' || event.key === ' ') {
-                              event.preventDefault();
-                              selectDay(cell.day);
-                            }
-                          }}
                           style={{
                             minHeight: 0,
                             padding: 6,
@@ -255,12 +249,28 @@ export function CalendarPage({ onOpenOrder, onCreateOrder }) {
                             flexDirection: 'column',
                             gap: 2,
                             overflow: 'hidden',
-                            cursor: 'pointer',
-                            outline: 'none',
                           }}
-                          title={`${year}-${String(month).padStart(2, '0')}-${String(cell.day).padStart(2, '0')} 일정 보기`}
                         >
-                          <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginBottom: 2 }}>
+                          <button
+                            type="button"
+                            className="calendar-day-select-button"
+                            data-testid={`calendar-day-select-${cell.day}`}
+                            aria-label={`${year}-${String(month).padStart(2, '0')}-${String(cell.day).padStart(2, '0')} 일정 보기`}
+                            aria-pressed={isSelected}
+                            onClick={() => selectDay(cell.day)}
+                            style={{
+                              display: 'flex',
+                              width: '100%',
+                              alignItems: 'center',
+                              gap: 'var(--space-1)',
+                              marginBottom: 'var(--space-0-5)',
+                              padding: 0,
+                              border: 0,
+                              borderRadius: 'var(--radius-sm)',
+                              background: 'transparent',
+                              cursor: 'pointer',
+                            }}
+                          >
                             {isToday ? (
                               <span style={{
                                 display: 'inline-flex',
@@ -285,10 +295,12 @@ export function CalendarPage({ onOpenOrder, onCreateOrder }) {
                             {cell.events.length > 0 && (
                               <span style={{ fontSize: 9.5, color: isSelected ? 'var(--brand)' : 'var(--text-quaternary)' }}>· {cell.events.length}건</span>
                             )}
-                          </div>
+                          </button>
                           {cell.events.slice(0, 3).map((eventItem) => (
                             <button
-                              key={eventItem.id}
+                              key={eventItem.visitId}
+                              className="calendar-event-button"
+                              aria-label={`${eventItem.time} ${eventItem.title} 주문 열기`}
                               onClick={(event) => {
                                 event.stopPropagation();
                                 onOpenOrder && onOpenOrder(eventItem.id);
@@ -311,7 +323,7 @@ export function CalendarPage({ onOpenOrder, onCreateOrder }) {
                                 textAlign: 'left',
                               }}>
                               <span style={{ color: 'var(--text-tertiary)', fontSize: 9.5, flexShrink: 0 }}>{eventItem.time}</span>
-                              <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{eventItem.title}</span>
+                              <span className="calendar-event-title">{eventItem.title}</span>
                             </button>
                           ))}
                           {cell.events.length > 3 && (
@@ -385,6 +397,7 @@ function DaySchedulePanel({ year, month, day, events, siteName, onOpenOrder }) {
   return (
     <aside
       data-testid="calendar-day-panel"
+      className="calendar-day-panel"
       style={{
         width: 340,
         flex: '0 0 340px',
@@ -414,9 +427,10 @@ function DaySchedulePanel({ year, month, day, events, siteName, onOpenOrder }) {
         ) : (
           events.map((eventItem) => (
             <button
-              key={eventItem.id}
+              key={eventItem.visitId}
               type="button"
               data-testid={`calendar-panel-order-${eventItem.id}`}
+              data-visit-id={eventItem.visitId}
               onClick={() => onOpenOrder && onOpenOrder(eventItem.id)}
               style={{
                 width: '100%',
@@ -492,6 +506,7 @@ function groupOrdersByDay(orders) {
     const team = order.team_name || '미배정';
     const event = {
       id: order.id,
+      visitId: order.visit_id,
       time: order.requested_time || '-',
       title: `${serviceTitle} | ${team}`,
       status: order.status,

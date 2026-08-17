@@ -10,6 +10,7 @@ from datetime import date, datetime, time
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 from zoneinfo import ZoneInfo
 
 from openpyxl import load_workbook
@@ -27,7 +28,7 @@ from app.domain.partner_category import DEFAULT_PARTNER_CATEGORIES, infer_partne
 from app.domain.partner_vat import gross_up_partner_vat_amount, should_gross_up_partner_vat_amount
 from app.domain.payment_status import PartnerPaymentStatus, PaymentStatus
 from app.domain.phone import normalize_phone
-from app.models import Order, OrderGroup, OrderTimeline, Partner, PartnerCategory, User
+from app.models import Order, OrderGroup, OrderTimeline, OrderVisit, Partner, PartnerCategory, User
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 IMPORT_ID = "legacy260526"
@@ -530,6 +531,17 @@ def apply_order_fields(
     order.status = row.status
     order.received_date = row.received_date
     order.scheduled_date = row.scheduled_date
+    order.visits = (
+        [
+            OrderVisit(
+                id=str(uuid4()),
+                order_id=order.id,
+                visit_date=row.scheduled_date,
+            )
+        ]
+        if row.scheduled_date is not None
+        else []
+    )
     order.requested_time = row.requested_time
     order.partner_id = partner_id
     order.team_name = row.team_name or row.partner_name

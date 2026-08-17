@@ -38,7 +38,7 @@ export function createEmptyGroupForm(): OrderGroupForm {
 export function createEmptyLineForm(): OrderLineForm {
   return {
     local_id: crypto.randomUUID(), status: ORDER_STATUSES[0], received_date: todayString(),
-    scheduled_date: '', requested_time: '', partner_id: '', team_name: '', broker_id: '',
+    scheduled_date: '', visit_dates: [], requested_time: '', partner_id: '', team_name: '', broker_id: '',
     service_category_id: '', service_item_id: '', service_name: '', size_or_quantity: '',
     service_detail: '', special_request: '', total_amount: '', discount_amount: '',
     deposit_amount: '', balance_amount: '', onsite_extra_amount: '', vat_type: 'included',
@@ -76,6 +76,7 @@ function toLineForm(order: OrderFormSource): OrderLineForm {
     ...createEmptyLineForm(),
     status: orderWorkflowStatusValue(order.status, order.payment_status) || ORDER_STATUSES[0],
     received_date: order.received_date || todayString(), scheduled_date: order.scheduled_date || '',
+    visit_dates: order.visit_dates || (order.scheduled_date ? [order.scheduled_date] : []),
     requested_time: order.requested_time || '', partner_id: order.partner_id || '',
     team_name: order.team_name || '', broker_id: order.broker_id || '',
     service_category_id: order.service_category_id || '', service_item_id: order.service_item_id || '',
@@ -117,7 +118,9 @@ export function toGroupMetadataPayload(form: OrderGroupForm): OrderGroupUpdateIn
 export function toLinePayload(line: OrderLineForm): AdminOrderLineInput {
   return {
     status: line.status, received_date: line.received_date,
-    scheduled_date: emptyToNull(line.scheduled_date), requested_time: emptyToNull(line.requested_time),
+    scheduled_date: emptyToNull(line.visit_dates[0] || line.scheduled_date),
+    visit_dates: line.visit_dates,
+    requested_time: emptyToNull(line.requested_time),
     partner_id: emptyToNull(line.partner_id), team_name: emptyToNull(line.team_name),
     broker_id: emptyToNull(line.broker_id), service_category_id: emptyToNull(line.service_category_id),
     service_item_id: emptyToNull(line.service_item_id), service_name: line.service_name.trim(),
@@ -138,7 +141,13 @@ export function toLinePayload(line: OrderLineForm): AdminOrderLineInput {
 export function changedPayload<T extends object>(nextPayload: T, previousPayload: Partial<T>): Partial<T> {
   const result: Partial<T> = {};
   for (const key in nextPayload) {
-    if (nextPayload[key] !== previousPayload[key]) {
+    const nextValue = nextPayload[key];
+    const previousValue = previousPayload[key];
+    const isEqual = Array.isArray(nextValue) && Array.isArray(previousValue)
+      ? nextValue.length === previousValue.length
+        && nextValue.every((value, index) => value === previousValue[index])
+      : nextValue === previousValue;
+    if (!isEqual) {
       result[key] = nextPayload[key];
     }
   }

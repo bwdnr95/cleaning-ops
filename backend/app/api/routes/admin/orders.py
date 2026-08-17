@@ -455,6 +455,8 @@ def order_http_error(exc: ValueError) -> HTTPException:
         return HTTPException(status_code=404, detail=detail)
     if detail == "as_request_already_accepted":
         return HTTPException(status_code=409, detail=detail)
+    if detail == "visit_dates_required_for_multi_visit_order":
+        return HTTPException(status_code=409, detail=detail)
     status_code = 400
     return HTTPException(status_code=status_code, detail=detail)
 

@@ -9,7 +9,7 @@ interface UseOrderDetailMutationsInput {
   readonly partners: readonly AdminPartnerOption[];
   readonly selectedStatus: string;
   readonly selectedPartnerId: string;
-  readonly selectedScheduledDate: string;
+  readonly selectedVisitDates: readonly string[];
   readonly selectedRequestedTime: string;
   readonly selectedPaymentStatus: string;
   readonly selectedPartnerPaymentStatus: string;
@@ -34,7 +34,7 @@ export function useOrderDetailMutations({
   partners,
   selectedStatus,
   selectedPartnerId,
-  selectedScheduledDate,
+  selectedVisitDates,
   selectedRequestedTime,
   selectedPaymentStatus,
   selectedPartnerPaymentStatus,
@@ -93,7 +93,7 @@ export function useOrderDetailMutations({
     if (!order) return;
     await runAction(async () => {
       await updateAdminOrder(order.id, {
-        scheduled_date: selectedScheduledDate || null,
+        visit_dates: selectedVisitDates,
         requested_time: selectedRequestedTime || null,
       });
       setNotice('방문 일정 변경을 타임라인에 기록했습니다.');

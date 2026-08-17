@@ -338,7 +338,14 @@ export function PartnerJobDetail({ onDetailOpenChange = undefined } = {}) {
               <Icon name="calendar" size={16}/>
             </span>
             <div style={{ flex: 1 }}>
-              <div style={{ fontSize: 14, fontWeight: 700 }}>{formatKoreanDate(job.scheduled_date)}</div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+                {visitDatesOf(job).map((visitDate, index) => (
+                  <div key={visitDate} style={{ fontSize: 14, fontWeight: index === 0 ? 700 : 600 }}>
+                    {index + 1}차 · {formatKoreanDate(visitDate)}
+                  </div>
+                ))}
+                {visitDatesOf(job).length === 0 && <div style={{ fontSize: 14, fontWeight: 700 }}>일정 확인 중</div>}
+              </div>
               <div style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>{job.requested_time || '시간 협의'}</div>
             </div>
           </div>
@@ -663,7 +670,7 @@ function PartnerJobList({ jobs, onSelect, onReload = undefined }) {
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
                 <PartnerStatusBadge status={job.status}/>
                 {job.is_recurring && <span data-testid="partner-recurring-badge"><Badge tone="brand">정기</Badge></span>}
-                <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--text-tertiary)' }}>{formatKoreanDate(job.scheduled_date)}</span>
+                <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--text-tertiary)' }}>{formatVisitDateSummary(job)}</span>
               </div>
               <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 4 }}>{job.service_name}</div>
               <div style={{ fontSize: 12.5, color: 'var(--text-secondary)', lineHeight: 1.45 }}>{formatJobAddress(job)}</div>
@@ -757,7 +764,8 @@ function jobBucket(status) {
 }
 
 function scheduledSortValue(job) {
-  const date = parseDateValue(job?.scheduled_date);
+  const dates = visitDatesOf(job);
+  const date = parseDateValue(dates[dates.length - 1]);
   return date ? date.getTime() : -Infinity;
 }
 
@@ -776,7 +784,7 @@ function heroHeadline(jobs, summary) {
   if (summary.inProgress > 0) {
     return `진행 중인 작업 ${summary.inProgress}건`;
   }
-  const todayCount = jobs.filter((job) => isToday(job.scheduled_date)).length;
+  const todayCount = jobs.filter((job) => visitDatesOf(job).some(isToday)).length;
   if (todayCount > 0) {
     return `오늘 방문 예정 ${todayCount}건`;
   }
@@ -790,6 +798,20 @@ function isToday(value) {
   }
   const now = new Date();
   return date.getFullYear() === now.getFullYear() && date.getMonth() === now.getMonth() && date.getDate() === now.getDate();
+}
+
+function visitDatesOf(job) {
+  if (Array.isArray(job?.visit_dates) && job.visit_dates.length > 0) {
+    return job.visit_dates;
+  }
+  return job?.scheduled_date ? [job.scheduled_date] : [];
+}
+
+function formatVisitDateSummary(job) {
+  const dates = visitDatesOf(job);
+  if (dates.length === 0) return '일정 확인 중';
+  if (dates.length === 1) return formatKoreanDate(dates[0]);
+  return `${formatKoreanDate(dates[0])} 외 ${dates.length - 1}일`;
 }
 
 function greetingPrefix() {
@@ -1009,7 +1031,7 @@ function InfoRow({ icon, children }) {
 
 function ActionButton({ icon, label, href }) {
   const commonStyle = {
-    height: 36,
+    minHeight: 44,
     border: '1px solid var(--border)',
     borderRadius: 8,
     background: '#fff',
