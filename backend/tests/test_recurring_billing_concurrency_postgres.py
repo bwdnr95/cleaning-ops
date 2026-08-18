@@ -52,6 +52,22 @@ from app.services.recurring_partner_billing import BASELINE_EFFECTIVE_MONTH, bil
 from app.services.reports import ReportService
 
 POSTGRES_URL = os.getenv("POSTGRES_CONCURRENCY_DATABASE_URL")
+
+# 이 테스트들은 대상 DB에 시드 데이터를 커밋하고 정리하지 않는다.
+# 2026-08-17 실운영 DB(cleaning_ops)를 향해 실행되어 '동시성 계약' 36건이
+# 운영 화면에 노출된 사고가 있었다 → DB 이름에 test/rehearsal/throwaway가
+# 없으면 일회용 DB가 아니라고 보고 실행을 거부한다.
+_DISPOSABLE_DB_MARKERS = ("test", "rehearsal", "throwaway", "scratch")
+if POSTGRES_URL:
+    _db_name = (make_url(POSTGRES_URL).database or "").lower()
+    if not any(marker in _db_name for marker in _DISPOSABLE_DB_MARKERS):
+        raise RuntimeError(
+            "POSTGRES_CONCURRENCY_DATABASE_URL must point to a disposable database "
+            f"(name containing one of {_DISPOSABLE_DB_MARKERS}), got: {_db_name!r}. "
+            "These tests commit seed rows without cleanup — never run them against "
+            "an operational database."
+        )
+
 pytestmark = pytest.mark.skipif(
     not POSTGRES_URL,
     reason="POSTGRES_CONCURRENCY_DATABASE_URL is required for row-lock tests",
