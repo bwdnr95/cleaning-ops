@@ -35,6 +35,7 @@ def _create_line_order(
     status: str = "신규접수",
     broker_payment_amount: float | None = None,
     customer_name: str = "고객",
+    scheduled_date: str | None = None,
 ) -> dict:
     payload = {
         "customer_name": customer_name,
@@ -44,6 +45,7 @@ def _create_line_order(
             {
                 "status": status,
                 "received_date": "2026-07-01",
+                "scheduled_date": scheduled_date,
                 "service_name": "입주청소",
                 "broker_id": broker_id,
                 "total_amount": total_amount,
@@ -119,6 +121,48 @@ def test_broker_aggregation_counts_and_unpaid_commission() -> None:
     detail = client.get(f"/api/admin/brokers/{broker_id}", headers=headers).json()
     assert detail["order_count"] == 4
     assert detail["unpaid_broker_amount_total"] == 15000
+
+
+def test_broker_settlement_all_status_and_date_filter() -> None:
+    """'전체'는 수수료 미입력 건까지 소개 건수와 동일하게 보여주고, from/to는 방문일로 거른다.
+
+    운영 사례(260819): 목록의 소개 건수는 4건인데 정산 섹션 기본 필터(미정산)가 수수료
+    미입력 건을 숨겨 2건만 보였다 → 프론트 기본을 '전체'+전체 기간으로 바꾸고 날짜
+    필터 UI를 추가했다. 이 테스트는 그 화면이 쓰는 API 조합을 고정한다.
+    """
+    client = make_test_client()
+    headers = admin_headers(client)
+    broker_id = _create_broker(client, headers)
+
+    _create_line_order(client, headers, broker_id=broker_id, total_amount=100000, scheduled_date="2026-07-30")
+    _create_line_order(client, headers, broker_id=broker_id, total_amount=50000, scheduled_date="2026-08-11")
+    _create_line_order(
+        client, headers, broker_id=broker_id, total_amount=70000,
+        broker_payment_amount=10000, scheduled_date="2026-08-25",
+    )
+
+    # 전체: 수수료 미입력(None) 건 포함 3건 — 소개 건수와 일치.
+    all_response = client.get(
+        f"/api/admin/brokers/{broker_id}/settlements", headers=headers, params={"status": "all"}
+    )
+    assert all_response.status_code == 200, all_response.text
+    assert len(all_response.json()["items"]) == 3
+
+    # 날짜 필터: 8월 범위 → 8/11·8/25 2건.
+    august = client.get(
+        f"/api/admin/brokers/{broker_id}/settlements",
+        headers=headers,
+        params={"status": "all", "from": "2026-08-01", "to": "2026-08-31"},
+    )
+    assert august.status_code == 200, august.text
+    assert {item["scheduled_date"] for item in august.json()["items"]} == {"2026-08-11", "2026-08-25"}
+
+    # 미정산: 수수료가 입력된 8/25 1건만.
+    unpaid = client.get(
+        f"/api/admin/brokers/{broker_id}/settlements", headers=headers, params={"status": "unpaid"}
+    )
+    assert unpaid.status_code == 200, unpaid.text
+    assert [item["scheduled_date"] for item in unpaid.json()["items"]] == ["2026-08-25"]
 
 
 def test_broker_delete_guard_when_in_use() -> None:

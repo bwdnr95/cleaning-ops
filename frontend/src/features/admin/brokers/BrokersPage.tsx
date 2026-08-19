@@ -13,6 +13,7 @@ import {
   type BrokerSettlementListResponse,
 } from '../../../api/admin';
 import { useApiResource } from '../../../api/useApiResource';
+import { DatePicker } from '../../../components/common/DatePicker';
 import { Icon } from '../../../components/common/ui';
 import { formatPhone } from '../../../domain/phone';
 
@@ -74,26 +75,42 @@ export function BrokersPage() {
   const [query, setQuery] = React.useState('');
 
   // 정산 상태
-  const [settleStatus, setSettleStatus] = React.useState<SettlementFilter>('unpaid');
+  // 기본은 '전체'+전체 기간 — 목록의 소개 건수와 정산 섹션 표시 건수가 처음부터 일치하도록
+  // (미정산·기간 기본값으로 일부만 보이면 운영자가 "소개 건은 4건인데 2건만 뜬다"로 읽는다).
+  const [settleStatus, setSettleStatus] = React.useState<SettlementFilter>('all');
+  const [settleDateRange, setSettleDateRange] = React.useState({ from: '', to: '' });
   const [settlements, setSettlements] = React.useState<BrokerSettlementListResponse | null>(null);
   const [settleLoading, setSettleLoading] = React.useState(false);
   const [settleError, setSettleError] = React.useState(false);
   const [settleMemo, setSettleMemo] = React.useState('');
   const [isSettling, setIsSettling] = React.useState(false);
 
-  const loadSettlements = React.useCallback(async (brokerId: string, status: SettlementFilter) => {
-    setSettleLoading(true);
-    setSettleError(false);
-    try {
-      setSettlements(await listBrokerSettlements(brokerId, { status }));
-    } catch {
-      // 실패를 삼켜 '없음'으로 오표시하지 않도록 에러 상태를 세운다(로딩/에러/빈 3종 분리).
-      setSettlements(null);
-      setSettleError(true);
-    } finally {
-      setSettleLoading(false);
-    }
-  }, []);
+  const loadSettlements = React.useCallback(
+    async (
+      brokerId: string,
+      status: SettlementFilter,
+      dateRange: { from: string; to: string },
+    ) => {
+      setSettleLoading(true);
+      setSettleError(false);
+      try {
+        setSettlements(
+          await listBrokerSettlements(brokerId, {
+            status,
+            from: dateRange.from,
+            to: dateRange.to,
+          }),
+        );
+      } catch {
+        // 실패를 삼켜 '없음'으로 오표시하지 않도록 에러 상태를 세운다(로딩/에러/빈 3종 분리).
+        setSettlements(null);
+        setSettleError(true);
+      } finally {
+        setSettleLoading(false);
+      }
+    },
+    [],
+  );
 
   const selectBroker = React.useCallback((brokerId) => {
     setSelectedId(brokerId);
@@ -119,12 +136,12 @@ export function BrokersPage() {
       setSettlements(null);
       return;
     }
-    void loadSettlements(selectedId, settleStatus);
-  }, [selectedId, settleStatus, loadSettlements]);
+    void loadSettlements(selectedId, settleStatus, settleDateRange);
+  }, [selectedId, settleStatus, settleDateRange, loadSettlements]);
 
   const refreshAfterSettle = () => {
     if (selectedId) {
-      void loadSettlements(selectedId, settleStatus);
+      void loadSettlements(selectedId, settleStatus, settleDateRange);
       selectBroker(selectedId);
     }
     brokersResource.reload();
@@ -413,17 +430,34 @@ export function BrokersPage() {
               미정산 {detail?.unpaid_broker_order_count ?? 0}건 · {won(detail?.unpaid_broker_amount_total)}
             </span>
             <div style={{ flex: 1 }} />
-            <select
-              className="input"
-              data-testid="broker-settlement-status"
-              value={settleStatus}
-              onChange={(event) => setSettleStatus(event.target.value as SettlementFilter)}
-              style={{ height: 28, width: 120 }}
-            >
-              <option value="unpaid">미정산</option>
-              <option value="paid">정산완료</option>
-              <option value="all">전체</option>
-            </select>
+            <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+              <DatePicker
+                compact
+                style={{ minWidth: 0 }}
+                testId="broker-settlement-from"
+                value={settleDateRange.from}
+                onChange={(value) => setSettleDateRange((current) => ({ ...current, from: value }))}
+              />
+              <span style={{ color: 'var(--text-quaternary)', fontSize: 12 }}>~</span>
+              <DatePicker
+                compact
+                style={{ minWidth: 0 }}
+                testId="broker-settlement-to"
+                value={settleDateRange.to}
+                onChange={(value) => setSettleDateRange((current) => ({ ...current, to: value }))}
+              />
+              <select
+                className="input"
+                data-testid="broker-settlement-status"
+                value={settleStatus}
+                onChange={(event) => setSettleStatus(event.target.value as SettlementFilter)}
+                style={{ height: 28, width: 120 }}
+              >
+                <option value="all">전체</option>
+                <option value="unpaid">미정산</option>
+                <option value="paid">정산완료</option>
+              </select>
+            </div>
           </div>
 
           {settleLoading ? (
@@ -433,7 +467,7 @@ export function BrokersPage() {
               정산 목록을 불러오지 못했습니다.{' '}
               <button
                 className="btn btn--ghost btn--sm"
-                onClick={() => selectedId && void loadSettlements(selectedId, settleStatus)}
+                onClick={() => selectedId && void loadSettlements(selectedId, settleStatus, settleDateRange)}
               >
                 다시 시도
               </button>
