@@ -282,6 +282,7 @@ export function BrokersPage() {
           padding: 10,
           borderRadius: 6,
           fontSize: 12,
+          flexShrink: 0,
           background: error ? 'var(--danger-bg)' : 'var(--success-bg)',
           color: error ? 'var(--danger-fg)' : 'var(--success-fg)',
         }}>
@@ -289,7 +290,7 @@ export function BrokersPage() {
         </div>
       )}
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1.4fr) minmax(0, 1fr)', gap: 12, alignItems: 'start' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1.4fr) minmax(0, 1fr)', gap: 12, alignItems: 'start', flexShrink: 0 }}>
         {/* 목록 */}
         <section className="card" style={{ padding: 0, overflow: 'hidden' }}>
           <div style={headerRow}>
@@ -420,9 +421,12 @@ export function BrokersPage() {
         </div>
       </div>
 
-      {/* 정산 섹션 (전체폭) — 선택한 중개사가 소개한 주문의 중개 수수료 정산 */}
+      {/* 정산 섹션 (전체폭) — 선택한 중개사가 소개한 주문의 중개 수수료 정산.
+          flexShrink: 0 필수 — 없으면 flex 컬럼에서 이 카드가 내용보다 작게 눌리고
+          overflow: hidden에 잘려 뒷 행이 사라진다(운영자 체감: "4건 중 2건만 보임").
+          바깥 컨테이너가 대신 스크롤해야 전체 행을 볼 수 있다. */}
       {selectedId && (
-        <section className="card" style={{ padding: 0, overflow: 'hidden' }}>
+        <section className="card" style={{ padding: 0, overflow: 'hidden', flexShrink: 0 }}>
           <div style={headerRow}>
             <Icon name="list" size={14} color="var(--text-tertiary)" />
             <strong style={{ fontSize: 13 }}>배정 주문 / 정산</strong>
