@@ -156,5 +156,11 @@ export function toActionErrorMessage(error: { readonly message?: string } | null
   if (error?.message === 'invalid_as_request_status') {
     return 'AS 요청은 작업완료 이후 또는 고객확인필요 상태에서 보낼 수 있습니다.';
   }
+  if (error?.message === 'recurring_customer_payment_not_per_visit') {
+    return '월 청구 정기계약 주문이라 주문별 금액을 입력할 수 없습니다. 금액은 정기청소 > 계약에서 수정하세요.';
+  }
+  if (error?.message === 'recurring_partner_payment_not_per_visit') {
+    return '월 정산 정기계약 주문이라 주문별 도급가·정산상태를 바꿀 수 없습니다. 정산은 정기청소 > 월 트래커에서 처리하세요.';
+  }
   return '요청을 처리하지 못했습니다. 잠시 후 다시 시도해 주세요.';
 }

@@ -68,26 +68,31 @@ interface TextFieldProps {
   readonly multiline?: boolean;
   readonly placeholder?: string;
   readonly testId?: string;
+  readonly disabled?: boolean;
+  readonly hint?: string;
 }
 
 export function TextField({
   label, value, onChange, type = 'text', inputMode, required = false, span = 1,
-  multiline = false, placeholder = '', testId,
+  multiline = false, placeholder = '', testId, disabled = false, hint,
 }: TextFieldProps) {
   return (
     <Field label={`${label}${required ? ' *' : ''}`} span={span}>
       {multiline ? (
         <textarea
           className="input" data-testid={testId} value={value} placeholder={placeholder}
+          disabled={disabled}
           onChange={(event) => onChange(event.target.value)}
           style={{ minHeight: 70, resize: 'vertical', lineHeight: 1.45 }}
         />
       ) : (
         <input
           className="input" data-testid={testId} type={type} inputMode={inputMode}
-          value={value} placeholder={placeholder} onChange={(event) => onChange(event.target.value)}
+          value={value} placeholder={placeholder} disabled={disabled}
+          onChange={(event) => onChange(event.target.value)}
         />
       )}
+      {hint && <span style={{ fontSize: 10.5, color: 'var(--text-tertiary)', lineHeight: 1.4 }}>{hint}</span>}
     </Field>
   );
 }

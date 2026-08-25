@@ -62,6 +62,23 @@ export interface OrderLineForm {
   readonly partner_payment_amount_touched: boolean;
 }
 
+/**
+ * 정기계약(월 청구) 주문의 금액 잠금.
+ *
+ * 월 청구 계약은 금액을 계약에서 관리하므로 주문별 금액은 서버가 항상 비운다.
+ * 잠긴 필드는 입력을 막고, 상세상품 선택 등으로 자동 계산되지도 않게 하고,
+ * 저장 payload 에서도 뺀다(넣으면 서버가 400 으로 저장 전체를 거부한다).
+ */
+export interface OrderFormAmountLock {
+  readonly customerAmount: boolean;
+  readonly partnerAmount: boolean;
+}
+
+export const NO_AMOUNT_LOCK: OrderFormAmountLock = {
+  customerAmount: false,
+  partnerAmount: false,
+};
+
 export interface OrderGroupForm {
   readonly group_id: string;
   readonly customer_name: string;

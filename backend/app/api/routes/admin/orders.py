@@ -406,6 +406,7 @@ def get_order(
         for line in group_repo.list_lines(order.group_id)
         if line.id != order.id
     ]
+    billing_mode, partner_billing_mode = OrderService(db).recurring_billing_modes(order)
     return to_admin_order_detail_dto(
         order,
         group=group,
@@ -413,6 +414,8 @@ def get_order(
         photos=PhotoRepository(db).list_for_order(order_id),
         message_logs=MessageRepository(db).list_for_order(order_id),
         sibling_lines=sibling_lines,
+        recurring_billing_mode=billing_mode,
+        recurring_partner_billing_mode=partner_billing_mode,
     )
 
 

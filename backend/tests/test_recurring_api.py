@@ -3,7 +3,7 @@ from datetime import date, timedelta
 import pytest
 from sqlalchemy import select
 
-from app.core.time import business_today
+from app.core.time import business_today, utc_now
 from app.db.seed import DEV_PARTNER_ID, DEV_SERVICE_ITEM_ID
 from app.domain.constants import OrderStatus
 from app.models.order import Order
@@ -310,6 +310,172 @@ def test_monthly_recurring_order_catalog_change_does_not_restore_per_visit_amoun
     assert patched.json()["total_amount"] is None
     assert patched.json()["partner_payment_amount"] is None
     assert patched.json()["partner_payment_status"] is None
+
+
+def _monthly_contract_order(client, token, **over):
+    """월 청구 정기계약 1건 + 이번 달 생성 주문 1건."""
+    created = client.post(
+        "/api/admin/recurring/contracts",
+        json=_contract_body(
+            default_partner_id=DEV_PARTNER_ID,
+            start_date=_cur_month_start(),
+            day_of_month=15,
+            billing_mode="monthly",
+            **over,
+        ),
+        headers=_auth(token),
+    )
+    assert created.status_code == 201, created.text
+    contract_id = created.json()["id"]
+    generated = client.get(
+        f"/api/admin/recurring/orders?month={_cur_month()}",
+        headers=_auth(token),
+    )
+    assert generated.status_code == 200, generated.text
+    order = next(
+        item
+        for item in generated.json()
+        if item["recurring_contract_id"] == contract_id
+    )
+    return contract_id, order
+
+
+def test_monthly_recurring_order_edit_allows_untouched_amount_fields(
+    client,
+    seed_admin_token,
+):
+    """월 청구 주문 수정: 금액 필드가 빈 값(no-op)으로 실려와도 나머지 수정은 저장돼야 한다.
+
+    주문 수정 화면은 라인 전체를 보내므로 금액을 건드리지 않아도 null 이 payload 에 실린다.
+    이걸 거부하면 주소/특이사항/일정 같은 무관한 수정까지 통째로 막힌다.
+    """
+    _contract_id, order = _monthly_contract_order(
+        client,
+        seed_admin_token,
+        partner_payment_amount=300000,
+        partner_billing_mode="monthly",
+    )
+
+    patched = client.patch(
+        f"/api/admin/orders/{order['id']}/edit",
+        json={
+            "line": {
+                "special_request": "출입 카드 수령 필요",
+                "total_amount": None,
+                "partner_payment_amount": None,
+                "partner_payment_status": None,
+            },
+            "group": {},
+        },
+        headers=_auth(seed_admin_token),
+    )
+
+    assert patched.status_code == 200, patched.text
+    body = patched.json()
+    assert body["special_request"] == "출입 카드 수령 필요"
+    assert body["total_amount"] is None
+    assert body["partner_payment_amount"] is None
+
+
+def test_monthly_recurring_order_rejects_explicit_customer_amount(
+    client,
+    seed_admin_token,
+):
+    """실제 금액 입력은 계속 거부한다(계약 월 청구액이 진실이므로 조용히 삼키면 안 된다)."""
+    _contract_id, order = _monthly_contract_order(client, seed_admin_token)
+
+    patched = client.patch(
+        f"/api/admin/orders/{order['id']}/edit",
+        json={"line": {"total_amount": 250000}, "group": {}},
+        headers=_auth(seed_admin_token),
+    )
+
+    assert patched.status_code == 400, patched.text
+    assert patched.json()["detail"] == "recurring_customer_payment_not_per_visit"
+
+
+def test_recurring_order_detail_exposes_billing_modes(client, seed_admin_token):
+    """주문 상세는 계약의 청구방식을 노출한다 — 수정 화면이 금액 입력을 잠글 근거."""
+    _contract_id, order = _monthly_contract_order(
+        client,
+        seed_admin_token,
+        partner_payment_amount=300000,
+        partner_billing_mode="monthly",
+    )
+
+    detail = client.get(
+        f"/api/admin/orders/{order['id']}",
+        headers=_auth(seed_admin_token),
+    )
+
+    assert detail.status_code == 200, detail.text
+    assert detail.json()["recurring_billing_mode"] == "monthly"
+    assert detail.json()["recurring_partner_billing_mode"] == "monthly"
+
+
+def test_non_recurring_order_detail_has_no_billing_modes(client, seed_order_id, seed_admin_token):
+    detail = client.get(
+        f"/api/admin/orders/{seed_order_id}",
+        headers=_auth(seed_admin_token),
+    )
+
+    assert detail.status_code == 200, detail.text
+    assert detail.json()["recurring_billing_mode"] is None
+    assert detail.json()["recurring_partner_billing_mode"] is None
+
+
+def test_dateless_recurring_order_keeps_settlement_on_noop_partner_fields(db_session):
+    """방문일 없는 정기주문: 빈/동일 값 요청은 무시하고, 실제 정산 변경은 계속 막는다.
+
+    도급비는 정산 월이 있어야 확정할 수 있어 날짜 없는 주문에서는 변경을 거부한다.
+    다만 no-op 까지 거부하면 주소 수정이 막히고, 반대로 그냥 통과시키면 payload 의
+    null 이 기존 '지급완료'와 정산일을 지운다 — 둘 다 안 된다.
+    """
+    recurring = RecurringService(db_session)
+    contract = recurring.create_contract(
+        RecurringContractCreate(**_contract_body(
+            default_partner_id=DEV_PARTNER_ID,
+            start_date=_cur_month_start(),
+            day_of_month=15,
+            partner_payment_amount=70000,
+            partner_billing_mode="per_visit",
+        )),
+        actor_user_id=None,
+    )
+    order = db_session.scalar(
+        select(Order).where(Order.recurring_contract_id == contract.id)
+    )
+    assert order is not None
+    order.recurring_planned_date = None
+    order.scheduled_date = None
+    order.partner_payment_amount = 70000
+    order.partner_payment_status = "paid"
+    order.partner_settled_at = utc_now()
+    db_session.commit()
+    settled_at = order.partner_settled_at
+
+    OrderService(db_session).update(
+        order.id,
+        OrderUpdate(
+            special_request="출입 카드 수령 필요",
+            partner_payment_amount=70000,
+            partner_payment_status="paid",
+        ),
+    )
+    db_session.refresh(order)
+    assert order.special_request == "출입 카드 수령 필요"
+    assert order.partner_payment_status == "paid"
+    assert order.partner_settled_at == settled_at
+
+    with pytest.raises(ValueError, match="recurring_partner_payment_date_required"):
+        OrderService(db_session).update(
+            order.id,
+            OrderUpdate(partner_payment_status=None),
+        )
+    db_session.rollback()
+    db_session.refresh(order)
+    assert order.partner_payment_status == "paid"
+    assert order.partner_settled_at == settled_at
 
 
 def test_legacy_order_month_move_normalizes_destination_monthly_terms(

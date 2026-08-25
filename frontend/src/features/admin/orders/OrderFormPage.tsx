@@ -11,12 +11,14 @@ import {
 import { useApiResource } from '../../../api/useApiResource';
 import { createEmptyGroupForm, toDuplicateForm, toForm } from './OrderFormModel';
 import {
+  orderSaveErrorMessage,
   persistOrderForm,
   validateOrderForm,
 } from './OrderFormPersistence';
 import { FormState } from './OrderFormPrimitives';
 import {
   addOrderLine,
+  enforceAmountLock,
   hasPartnerPriceWarning,
   removeOrderLine,
   updateGroupField,
@@ -28,11 +30,13 @@ import {
   updateServiceItem,
   updateVisitDates,
 } from './OrderFormState';
-import type {
-  OrderFormGroupFieldChange,
-  OrderFormLineFieldChange,
-  OrderGroupForm,
-  OrderMoneyField,
+import {
+  NO_AMOUNT_LOCK,
+  type OrderFormAmountLock,
+  type OrderFormGroupFieldChange,
+  type OrderFormLineFieldChange,
+  type OrderGroupForm,
+  type OrderMoneyField,
 } from './OrderFormTypes';
 import {
   OrderFormView,
@@ -70,7 +74,20 @@ export function OrderFormPage({
   const [asRequested, setAsRequested] = React.useState(false);
   const [asBusy, setAsBusy] = React.useState(false);
   const initialFormRef = React.useRef<OrderGroupForm | null>(null);
+  const [amountLock, setAmountLock] = React.useState<OrderFormAmountLock>(NO_AMOUNT_LOCK);
+  const amountLockRef = React.useRef<OrderFormAmountLock>(NO_AMOUNT_LOCK);
   const draft = useOrderFormDraft(form, { enabled: mode === 'create' && !isDuplicate });
+  // 잠긴 금액 필드는 어떤 편집 경로로도 바뀌지 않게 상태 갱신마다 원본 값으로 되돌린다.
+  const applyFormUpdate = React.useCallback(
+    (updater: (current: OrderGroupForm) => OrderGroupForm) => {
+      setForm((current) => enforceAmountLock(
+        updater(current),
+        amountLockRef.current,
+        initialFormRef.current?.lines[0] || null,
+      ));
+    },
+    [],
+  );
   const activeServiceCategories = React.useMemo(
     () => (serviceCatalog.data || []).filter((category) => category.is_active),
     [serviceCatalog.data],
@@ -82,6 +99,8 @@ export function OrderFormPage({
     if (!loadId) {
       setForm(createEmptyGroupForm());
       initialFormRef.current = null;
+      amountLockRef.current = NO_AMOUNT_LOCK;
+      setAmountLock(NO_AMOUNT_LOCK);
       setIsLoadingOrder(false);
       return () => { isCurrent = false; };
     }
@@ -93,6 +112,13 @@ export function OrderFormPage({
         const loadedForm = isDuplicate ? toDuplicateForm(order) : toForm(order);
         setForm(loadedForm);
         initialFormRef.current = isDuplicate ? null : loadedForm;
+        // 복제는 새 주문이라 계약 청구방식과 무관하다. 수정일 때만 금액을 잠근다.
+        const nextLock: OrderFormAmountLock = isDuplicate ? NO_AMOUNT_LOCK : {
+          customerAmount: order.recurring_billing_mode === 'monthly',
+          partnerAmount: order.recurring_partner_billing_mode === 'monthly',
+        };
+        amountLockRef.current = nextLock;
+        setAmountLock(nextLock);
         if (!isDuplicate) {
           setAsRequested(Boolean(order.as_requested));
           setAsMemo(order.as_memo || '');
@@ -128,36 +154,36 @@ export function OrderFormPage({
   }, [draft, onCancel]);
 
   const setGroupField = React.useCallback<OrderFormGroupFieldChange>((key, value) => {
-    setForm((current) => updateGroupField(current, key, value));
-  }, []);
+    applyFormUpdate((current) => updateGroupField(current, key, value));
+  }, [applyFormUpdate]);
 
   const setLineField = React.useCallback<OrderFormLineFieldChange>((lineIndex, key, value) => {
-    setForm((current) => updateLineField(current, lineIndex, key, value));
-  }, []);
+    applyFormUpdate((current) => updateLineField(current, lineIndex, key, value));
+  }, [applyFormUpdate]);
 
   const handleMoneyChange = React.useCallback((lineIndex: number, key: OrderMoneyField, value: string) => {
-    setForm((current) => updateMoneyField(current, lineIndex, key, value));
-  }, []);
+    applyFormUpdate((current) => updateMoneyField(current, lineIndex, key, value));
+  }, [applyFormUpdate]);
 
   const handleVisitDatesChange = React.useCallback((lineIndex: number, value: readonly string[]) => {
-    setForm((current) => updateVisitDates(current, lineIndex, value));
-  }, []);
+    applyFormUpdate((current) => updateVisitDates(current, lineIndex, value));
+  }, [applyFormUpdate]);
 
   const handlePartnerChange = React.useCallback((lineIndex: number, partnerId: string) => {
-    setForm((current) => updatePartner(current, lineIndex, partnerId, partners.data || []));
-  }, [partners.data]);
+    applyFormUpdate((current) => updatePartner(current, lineIndex, partnerId, partners.data || []));
+  }, [applyFormUpdate, partners.data]);
 
   const handleServiceCategoryChange = React.useCallback((lineIndex: number, categoryId: string) => {
-    setForm((current) => updateServiceCategory(current, lineIndex, categoryId));
-  }, []);
+    applyFormUpdate((current) => updateServiceCategory(current, lineIndex, categoryId));
+  }, [applyFormUpdate]);
 
   const handleServiceItemChange = React.useCallback((lineIndex: number, serviceItemId: string) => {
-    setForm((current) => updateServiceItem(current, lineIndex, serviceItemId, activeServiceCategories));
-  }, [activeServiceCategories]);
+    applyFormUpdate((current) => updateServiceItem(current, lineIndex, serviceItemId, activeServiceCategories));
+  }, [applyFormUpdate, activeServiceCategories]);
 
   const handleReceiptTypeChange = React.useCallback((lineIndex: number, receiptType: string) => {
-    setForm((current) => updateReceiptType(current, lineIndex, receiptType));
-  }, []);
+    applyFormUpdate((current) => updateReceiptType(current, lineIndex, receiptType));
+  }, [applyFormUpdate]);
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -171,13 +197,17 @@ export function OrderFormPage({
 
     setIsSaving(true);
     try {
-      const saved = await persistOrderForm({ mode, orderId, form, initialForm: initialFormRef.current });
+      const saved = await persistOrderForm({
+        mode,
+        orderId,
+        form,
+        initialForm: initialFormRef.current,
+        amountLock,
+      });
       draft.clearDraft();
       onSaved?.(saved);
     } catch (requestError) {
-      setError(requestError instanceof Error && requestError.message
-        ? requestError.message
-        : '주문을 저장하지 못했습니다.');
+      setError(orderSaveErrorMessage(requestError));
     } finally {
       setIsSaving(false);
     }
@@ -247,6 +277,7 @@ export function OrderFormPage({
       asState={{ isOpen: asOpen, memo: asMemo, isRequested: asRequested, isBusy: asBusy }}
       resources={{ serviceCategories: activeServiceCategories, partners: partners.data || [], brokers: brokers.data || [] }}
       actions={actions}
+      amountLock={amountLock}
     />
   );
 }

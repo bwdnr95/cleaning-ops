@@ -8,6 +8,7 @@ import { formatWon } from './OrderFormMoney';
 import { OrderFormPaymentFields } from './OrderFormPaymentFields';
 import { Field, FieldGrid, TextField } from './OrderFormPrimitives';
 import type {
+  OrderFormAmountLock,
   OrderFormBroker,
   OrderFormPartner,
   OrderFormServiceCategory,
@@ -20,6 +21,7 @@ interface OrderFormLineEditorProps {
   readonly line: OrderLineForm;
   readonly lineIndex: number;
   readonly canRemove: boolean;
+  readonly amountLock?: OrderFormAmountLock;
   readonly activeServiceCategories: readonly OrderFormServiceCategory[];
   readonly partners: readonly OrderFormPartner[];
   readonly brokers: readonly OrderFormBroker[];
@@ -45,6 +47,7 @@ export function OrderFormLineEditor({
   line,
   lineIndex,
   canRemove,
+  amountLock,
   activeServiceCategories,
   partners,
   brokers,
@@ -137,7 +140,7 @@ export function OrderFormLineEditor({
         {showAs && (
           <OrderFormAsFields isOpen={asOpen} memo={asMemo} isRequested={asRequested} isBusy={asBusy} onToggle={onAsToggle} onMemoChange={onAsMemoChange} onSend={onSendAs} />
         )}
-        <OrderFormPaymentFields line={line} lineIndex={lineIndex} onFieldChange={onFieldChange} onMoneyChange={onMoneyChange} onReceiptTypeChange={onReceiptTypeChange} />
+        <OrderFormPaymentFields line={line} lineIndex={lineIndex} onFieldChange={onFieldChange} onMoneyChange={onMoneyChange} onReceiptTypeChange={onReceiptTypeChange} amountLock={amountLock} />
       </div>
     </div>
   );

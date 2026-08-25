@@ -2,6 +2,7 @@ import { receiptStatusAfterTypeChange } from '../../../domain/receiptType';
 import { createEmptyLineForm, getServiceItems } from './OrderFormModel';
 import { applyMoneyTouch, formatMoneyInput, parseMoneyInput, recalculateLine } from './OrderFormMoney';
 import type {
+  OrderFormAmountLock,
   OrderFormGroupField,
   OrderFormPartner,
   OrderFormServiceCategory,
@@ -133,6 +134,43 @@ export function updateReceiptType(
     receipt_type: receiptType,
     receipt_status: receiptStatusAfterTypeChange(receiptType, currentLine.receipt_status),
   });
+}
+
+/**
+ * 잠긴 금액 필드를 불러온 값(baseline)으로 되돌린다.
+ *
+ * 상세상품 선택·수량 변경은 단가 기준으로 금액을 자동 계산하는데, 월 청구 정기 주문에서는
+ * 그 값이 저장될 수 없다(서버가 거부). 계산 결과를 화면에 보여주고 저장만 막으면 운영자가
+ * 저장된 줄 알기 때문에, 자동 계산 자체를 되돌려 화면과 저장 결과를 일치시킨다.
+ */
+export function enforceAmountLock(
+  form: OrderGroupForm,
+  lock: OrderFormAmountLock,
+  baseline: OrderLineForm | null,
+): OrderGroupForm {
+  if (!baseline || (!lock.customerAmount && !lock.partnerAmount)) return form;
+  return {
+    ...form,
+    lines: form.lines.map((line) => ({
+      ...line,
+      // 계약금·잔금은 소비자가에서 파생되므로 함께 되돌린다. 그러지 않으면 상세상품 선택 때
+      // 자동 계산된 계약금(소비자가 30%)만 남아 월 청구 주문에 엉뚱한 금액이 저장된다.
+      ...(lock.customerAmount ? {
+        total_amount: baseline.total_amount,
+        discount_amount: baseline.discount_amount,
+        deposit_amount: baseline.deposit_amount,
+        balance_amount: baseline.balance_amount,
+        total_amount_touched: baseline.total_amount_touched,
+        deposit_amount_touched: baseline.deposit_amount_touched,
+        balance_amount_touched: baseline.balance_amount_touched,
+      } : {}),
+      ...(lock.partnerAmount ? {
+        partner_payment_amount: baseline.partner_payment_amount,
+        partner_payment_status: baseline.partner_payment_status,
+        partner_payment_amount_touched: baseline.partner_payment_amount_touched,
+      } : {}),
+    })),
+  };
 }
 
 export function hasPartnerPriceWarning(form: OrderGroupForm): boolean {

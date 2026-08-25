@@ -3,6 +3,7 @@ import { apiBlobRequest, apiRequest } from './client';
 export type MessageChannelInput = 'kakao' | 'sms' | 'lms';
 export type SettlementStatusFilter = 'unpaid' | 'paid' | 'all';
 export type AdminOrderSort = 'visit_asc' | 'visit_desc' | 'received_asc' | 'received_desc';
+export type RecurringBillingMode = 'per_visit' | 'monthly';
 
 export interface AdminOrderLineInput {
   status?: string;
@@ -87,6 +88,10 @@ export interface AdminOrder extends AdminOrderLineInput {
   partner_settled_at?: string | null;
   broker_settled_at?: string | null;
   recurring_contract_id?: string | null;
+  // 정기계약 청구방식(주문 상세 응답에만 실린다). monthly = 금액을 계약에서 관리하므로
+  // 주문별 금액 입력을 잠근다. 고객은 계약 단위, 협력사는 이 주문의 정산 월 기준.
+  recurring_billing_mode?: RecurringBillingMode | null;
+  recurring_partner_billing_mode?: RecurringBillingMode | null;
   // AS(사후관리) 요청 상태. 저장 페이로드가 아니라 AS 전송 액션으로만 세팅되는 읽기 필드.
   as_requested?: boolean;
   as_intake_pending?: boolean;

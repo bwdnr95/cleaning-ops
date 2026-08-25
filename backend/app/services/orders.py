@@ -386,6 +386,29 @@ class OrderService:
             )
         return order
 
+    def recurring_billing_modes(self, order: Order) -> tuple[str | None, str | None]:
+        """주문이 속한 정기계약의 청구방식(고객, 협력사)을 돌려준다.
+
+        고객 청구방식은 계약 단위지만 협력사 청구방식은 월별 조건(billing period)으로
+        바뀔 수 있어 이 주문의 정산 월 기준으로 해석한다. 정기 주문이 아니면 (None, None).
+        """
+        if order.recurring_contract_id is None:
+            return None, None
+        contract = RecurringContractRepository(self.db).get(
+            order.recurring_contract_id,
+            include_deleted=True,
+        )
+        if contract is None:
+            return None, None
+        settlement_date = order.recurring_planned_date or order.scheduled_date
+        if settlement_date is None:
+            return contract.billing_mode, contract.partner_billing_mode
+        terms = RecurringPartnerBillingService(self.db).resolve(
+            contract,
+            billing_month(settlement_date),
+        )
+        return contract.billing_mode, terms.billing_mode
+
     def update(
         self,
         order_id: str,
@@ -494,7 +517,13 @@ class OrderService:
 
         partner_payment_fields = {"partner_payment_amount", "partner_payment_status"}
         requested_partner_payment_fields = partner_payment_fields.intersection(changes)
-        requested_total_amount = "total_amount" in changes
+        # 값이 실린 요청만 "계약 조건과 충돌하는 입력"으로 본다. 주문 수정 화면은 라인 전체를
+        # 보내므로 금액을 건드리지 않아도 빈 값이 payload 에 실리는데, 이것까지 거부하면
+        # 주소·일정·특이사항 같은 무관한 수정이 통째로 막힌다(월 청구 주문 수정 불가 버그).
+        has_partner_payment_input = any(
+            changes[field] is not None for field in requested_partner_payment_fields
+        )
+        has_total_amount_input = changes.get("total_amount") is not None
         preserve_service_name = (
             changes.get("service_item_id") is not None
             and changes.get("service_item_id") == order.service_item_id
@@ -503,7 +532,7 @@ class OrderService:
         _normalize_receipt_fields(changes)
         if recurring_contract is not None:
             if recurring_contract.billing_mode == RecurringBillingMode.MONTHLY:
-                if requested_total_amount:
+                if has_total_amount_input:
                     raise ValueError("recurring_customer_payment_not_per_visit")
                 changes["total_amount"] = None
             destination_date = order.recurring_planned_date or changes.get(
@@ -528,7 +557,7 @@ class OrderService:
                     else None
                 )
                 if terms.billing_mode == RecurringBillingMode.MONTHLY:
-                    if requested_partner_payment_fields:
+                    if has_partner_payment_input:
                         raise ValueError("recurring_partner_payment_not_per_visit")
                     has_retained_per_visit_settlement = (
                         order.recurring_partner_settlement_retained
@@ -603,8 +632,17 @@ class OrderService:
                         if terms.partner_payment_amount is not None
                         else None
                     )
-            elif partner_payment_fields.intersection(changes):
-                raise ValueError("recurring_partner_payment_date_required")
+            elif requested_partner_payment_fields:
+                # 정산 월이 없으면 도급비를 확정할 수 없다. 다만 "지금 값과 같은" 요청은 아무것도
+                # 바꾸지 않으므로 무시한다 — 거부하면 주소·요청사항 수정까지 막히고, 반대로 그냥
+                # 통과시키면 payload 의 null 이 기존 정산 상태·정산일(partner_settled_at)을 지운다.
+                if any(
+                    changes[field] != getattr(order, field)
+                    for field in requested_partner_payment_fields
+                ):
+                    raise ValueError("recurring_partner_payment_date_required")
+                for field in requested_partner_payment_fields:
+                    changes.pop(field, None)
         if "partner_payment_status" in changes:
             changes["partner_settled_at"] = (
                 order.partner_settled_at or utc_now()
@@ -1682,6 +1720,8 @@ def to_admin_order_detail_dto(
     photos: list[OrderPhoto] | None = None,
     message_logs: list | None = None,
     sibling_lines: list[AdminOrderSiblingRead] | None = None,
+    recurring_billing_mode: str | None = None,
+    recurring_partner_billing_mode: str | None = None,
 ) -> AdminOrderDetailRead:
     base = to_admin_order_dto(order, group=group, timeline=timeline)
     customer_as_photo_ids = customer_as_photo_ids_from_events(timeline or [])
@@ -1693,6 +1733,8 @@ def to_admin_order_detail_dto(
         ],
         message_logs=[MessageLogRead.model_validate(log) for log in message_logs or []],
         sibling_lines=sibling_lines or [],
+        recurring_billing_mode=recurring_billing_mode,
+        recurring_partner_billing_mode=recurring_partner_billing_mode,
     )
 
 

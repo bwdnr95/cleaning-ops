@@ -6,6 +6,7 @@ import { OrderFormLineEditor } from './OrderFormLineEditor';
 import { Field, FieldGrid, Section, TextField } from './OrderFormPrimitives';
 import { SourceChannelSelect } from './SourceChannelSelect';
 import type {
+  OrderFormAmountLock,
   OrderFormBroker,
   OrderFormGroupFieldChange,
   OrderFormLineFieldChange,
@@ -64,6 +65,7 @@ interface OrderFormViewProps {
   readonly asState: OrderFormAsState;
   readonly resources: OrderFormResources;
   readonly actions: OrderFormViewActions;
+  readonly amountLock: OrderFormAmountLock;
 }
 
 export function OrderFormView({
@@ -75,6 +77,7 @@ export function OrderFormView({
   asState,
   resources,
   actions,
+  amountLock,
 }: OrderFormViewProps) {
   return (
     <form className="order-form" data-testid="admin-order-form" onSubmit={actions.onSubmit} style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0, background: 'var(--bg)' }}>
@@ -130,6 +133,7 @@ export function OrderFormView({
                     line={line}
                     lineIndex={lineIndex}
                     canRemove={mode === 'create' && form.lines.length > 1}
+                    amountLock={amountLock}
                     activeServiceCategories={resources.serviceCategories}
                     partners={resources.partners}
                     brokers={resources.brokers}

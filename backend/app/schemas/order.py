@@ -214,6 +214,10 @@ class AdminOrderDetailRead(AdminOrderRead):
     photos: list[PhotoRead] = Field(default_factory=list)
     message_logs: list[MessageLogRead] = Field(default_factory=list)
     sibling_lines: list[AdminOrderSiblingRead] = Field(default_factory=list)
+    # 정기계약 청구방식. 고객(billing_mode)은 계약 단위, 협력사는 이 주문의 정산 월 기준으로
+    # 해석한 값이다. monthly 면 주문별 금액을 쓰지 않으므로 수정 화면이 해당 입력을 잠근다.
+    recurring_billing_mode: str | None = None
+    recurring_partner_billing_mode: str | None = None
 
 
 class AdminCalendarOrderRead(ApiModel):
