@@ -276,6 +276,7 @@ class RecurringMonthlyService:
         tax_invoice_issued: bool | None = None,
         balance_paid: bool | None = None,
         partner_payment_paid: bool | None = None,
+        expected_partner_id: str | None = None,
     ) -> RecurringMonthlyRowRead:
         if month > billing_month(business_today()):
             raise ValueError("recurring_month_not_editable")
@@ -334,6 +335,17 @@ class RecurringMonthlyService:
         )
         if current_retained != observed_retained:
             raise ValueError("recurring_partner_changed_concurrently")
+        if expected_partner_id is not None:
+            # 협력사관리 정산 화면에서 온 요청: 호출자가 본 협력사와 락 획득 후의
+            # 지급 대상이 다르면 거부한다. 락 밖 사전 검사만으로는 그 사이에 계약
+            # 담당이 바뀐 경우(TOCTOU) 엉뚱한 협력사의 월에 지급이 찍힐 수 있다.
+            locked_payable_partner_id = (
+                status.retained_partner_id
+                if status.retained_partner_payment_amount is not None
+                else terms.partner_id
+            )
+            if locked_payable_partner_id != expected_partner_id:
+                raise ValueError("settlement_month_partner_mismatch")
         if tax_invoice_issued is not None:
             status.tax_invoice_issued = tax_invoice_issued
         if balance_paid is not None:

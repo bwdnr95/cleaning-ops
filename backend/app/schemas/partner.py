@@ -87,8 +87,27 @@ class PartnerSettlementItemRead(ApiModel):
     group_partner_total: float = 0
 
 
+class PartnerRecurringMonthlySettlementRead(ApiModel):
+    """월 청구 정기계약의 계약×월 도급 지급 행(관리자 전용).
+
+    월 트래커(정기청소 탭)의 지급 체크와 같은 DB 행을 보여준다 — 협력사관리에서도
+    월 도급비 지급/이력이 보이고 실행 가능해야 배지·목록·트래커가 일치한다.
+    """
+
+    contract_id: str
+    contract_label: str
+    month: str  # "YYYY-MM"
+    month_start: date
+    partner_price: float
+    paid: bool
+
+
 class PartnerSettlementListRead(ApiModel):
     items: list[PartnerSettlementItemRead]
+    # 월 청구 정기계약의 월정산 행. 주문(items)과 별개 축(계약×월)이라 분리한다.
+    monthly_items: list[PartnerRecurringMonthlySettlementRead] = Field(
+        default_factory=list
+    )
     total_partner_price: float
     total_consumer_price: float
     count: int
@@ -102,6 +121,11 @@ class PartnerSettlementActionRequest(ApiModel):
 class PartnerSettlementActionResult(ApiModel):
     updated_order_ids: list[str]
     skipped_order_ids: list[str] = Field(default_factory=list)
+
+
+class PartnerRecurringMonthlySettlementActionRequest(ApiModel):
+    contract_id: str
+    month: str = Field(pattern=r"^\d{4}-(0[1-9]|1[0-2])$")
 
 
 class PartnerDetailRead(PartnerAdminRead):

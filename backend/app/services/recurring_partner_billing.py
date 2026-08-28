@@ -23,6 +23,19 @@ class RecurringPartnerBillingTerms:
     partner_payment_amount: Decimal | None
 
 
+@dataclass(frozen=True, slots=True)
+class RecurringMonthlySettlementRow:
+    """월정산(계약×월) 도급 지급 단위. 협력사관리 배지·정산 목록 공용 표현."""
+
+    contract_id: str
+    contract_label: str
+    month: str  # "YYYY-MM"
+    month_start: date
+    partner_id: str
+    amount: Decimal
+    paid: bool
+
+
 def billing_month(value: date) -> str:
     return f"{value.year:04d}-{value.month:02d}"
 
@@ -160,6 +173,74 @@ class RecurringPartnerBillingService:
             period.billing_mode = billing_mode
             period.partner_payment_amount = partner_payment_amount
         return period
+
+    def list_monthly_settlement_rows(
+        self,
+        *,
+        partner_ids: set[str] | None = None,
+        today: date | None = None,
+    ) -> list[RecurringMonthlySettlementRow]:
+        """월정산 지급 대상 행(계약×월)을 지급/미지급 포함해 나열한다.
+
+        협력사관리의 미정산 배지와 정산 목록이 **모두 이 헬퍼에서 파생**되어야 한다.
+        따로 계산하면 "배지에는 미정산이 보이는데 목록에는 정산할 행이 없는" 모순이
+        생긴다(2026-08 김해푸르지오하이엔드1차/치움 사례).
+
+        포함 기준(기존 미정산 배지와 동일):
+        - 대상 월 = 발생 월(incurred, 활성 계약 시작~오늘) ∪ 이미 status 행이 있는
+          현재 월 이하의 월(계약 종료/삭제 후에도 남은 미지급 이력 보존).
+        - 그 월의 조건이 월정산(monthly)이거나, 조건 변경 시점에 남긴 지급 스냅샷
+          (retained_*)이 있는 경우만.
+        - 지급 금액 > 0, 지급 대상 협력사 존재.
+        """
+        today = today or business_today()
+        current_month = billing_month(today)
+        statuses_by_contract: dict[str, dict[str, RecurringMonthlyStatus]] = {}
+        for status in self.db.scalars(select(RecurringMonthlyStatus)):
+            statuses_by_contract.setdefault(status.contract_id, {})[
+                status.billing_month
+            ] = status
+
+        rows: list[RecurringMonthlySettlementRow] = []
+        for contract in self.db.scalars(select(RecurringContract)):
+            statuses = statuses_by_contract.get(contract.id, {})
+            months = {month for month in statuses if month <= current_month}
+            months.update(incurred_billing_months(contract, through_date=today))
+            for month in sorted(months):
+                status = statuses.get(month)
+                retained_amount = (
+                    status.retained_partner_payment_amount
+                    if status is not None
+                    else None
+                )
+                has_retained = retained_amount is not None
+                terms = self.resolve(contract, month)
+                if not has_retained and terms.billing_mode != RecurringBillingMode.MONTHLY:
+                    continue
+                payable_partner_id = (
+                    status.retained_partner_id if has_retained else terms.partner_id
+                )
+                payable_amount = (
+                    retained_amount if has_retained else terms.partner_payment_amount
+                )
+                if payable_partner_id is None:
+                    continue
+                if payable_amount is None or payable_amount <= 0:
+                    continue
+                if partner_ids is not None and payable_partner_id not in partner_ids:
+                    continue
+                rows.append(
+                    RecurringMonthlySettlementRow(
+                        contract_id=contract.id,
+                        contract_label=contract.label,
+                        month=month,
+                        month_start=date(int(month[:4]), int(month[5:7]), 1),
+                        partner_id=payable_partner_id,
+                        amount=Decimal(str(payable_amount)),
+                        paid=bool(status.partner_payment_paid) if status is not None else False,
+                    )
+                )
+        return rows
 
     def materialize_incurred_statuses(
         self,

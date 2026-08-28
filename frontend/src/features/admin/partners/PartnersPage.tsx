@@ -10,9 +10,12 @@ import {
   listPartnerCategories,
   listPartnerSettlements,
   notifyPartnerUnpaid,
+  type PartnerRecurringMonthlySettlementItem,
   revertPartnerOrders,
+  revertPartnerRecurringMonthly,
   resetAdminPartnerPassword,
   settlePartnerOrders,
+  settlePartnerRecurringMonthly,
   type SettlementStatusFilter,
   updateAdminPartner,
   updatePartnerCategory,
@@ -501,6 +504,43 @@ export function PartnersPage() {
     }
   };
 
+  // 월 청구 정기계약의 월 도급비 지급/되돌리기 — 정기청소 월 트래커의 지급 체크와 같은 데이터를 토글한다.
+  const handleSettleMonthly = async (row: PartnerRecurringMonthlySettlementItem) => {
+    if (!detail) {
+      return;
+    }
+    if (!window.confirm(`${row.contract_label} ${row.month}월분 도급비 ${formatWon(row.partner_price)}을(를) 지급 완료로 처리합니까?\n(정기청소 월 트래커의 '지급' 체크와 연동됩니다.)`)) {
+      return;
+    }
+    setError('');
+    setNotice('');
+    try {
+      await settlePartnerRecurringMonthly(detail.id, row.contract_id, row.month);
+      setNotice(`${row.month}월분 도급비를 지급 완료로 처리했습니다.`);
+      reloadSelectedPartner();
+    } catch (requestError) {
+      setError(partnerErrorMessage(requestError, '월 도급비 지급 처리에 실패했습니다.'));
+    }
+  };
+
+  const handleRevertMonthly = async (row: PartnerRecurringMonthlySettlementItem) => {
+    if (!detail) {
+      return;
+    }
+    if (!window.confirm(`${row.contract_label} ${row.month}월분 도급비 지급을 미지급으로 되돌릴까요?`)) {
+      return;
+    }
+    setError('');
+    setNotice('');
+    try {
+      await revertPartnerRecurringMonthly(detail.id, row.contract_id, row.month);
+      setNotice(`${row.month}월분 도급비 지급을 되돌렸습니다.`);
+      reloadSelectedPartner();
+    } catch (requestError) {
+      setError(partnerErrorMessage(requestError, '월 도급비 지급 되돌리기에 실패했습니다.'));
+    }
+  };
+
   // 협력사 고객정보 전송 모달이 열리면 실제 발송 문구를 미리 불러와 보여준다(확인 후 발송).
   React.useEffect(() => {
     if (!notifyTarget) {
@@ -903,13 +943,47 @@ export function PartnersPage() {
                 />
                 {settlementsLoading ? (
                   <StateLine text="정산 목록을 불러오는 중입니다." />
-                ) : !settlements || settlements.items.length === 0 ? (
+                ) : !settlements || (settlements.items.length === 0 && (settlements.monthly_items || []).length === 0) ? (
                   <StateLine text="조건에 맞는 배정 작업이 없습니다." />
                 ) : (
                   <div className="scroll" style={{ overflowX: 'auto' }}>
                     <div style={{ display: 'grid', gridTemplateColumns: '34px 100px 110px 1fr 90px 110px 110px 120px 210px', minWidth: 1090, fontSize: 12 }}>
                     <GridHead><input data-testid="partner-settlement-select-all" type="checkbox" checked={allSettlementsSelected} onChange={toggleAllSettlements} /></GridHead>
                     {['방문일', '상태', '작업', '고객', '소비자가', '도급가(VAT 포함)', '정산상태', '액션'].map((header) => <GridHead key={header}>{header}</GridHead>)}
+                    {(settlements.monthly_items || []).map((row) => (
+                      // 월 청구 정기계약의 계약×월 도급비. 회차 주문에는 도급가가 없으므로
+                      // (계약의 월 금액이 진실) 주문 행이 아니라 월 단위 행으로 정산한다.
+                      <React.Fragment key={`rm-${row.contract_id}-${row.month}`}>
+                        <GridCell testId={`partner-settlement-monthly-row-${row.contract_id}-${row.month}`}>{null}</GridCell>
+                        <GridCell mono>{row.month}</GridCell>
+                        <GridCell>
+                          <span style={{ color: 'var(--info-fg, var(--text-secondary))', fontSize: 11.5, fontWeight: 700 }}>월정산</span>
+                        </GridCell>
+                        <GridCell>
+                          <div style={{ minWidth: 0 }}>
+                            <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{row.contract_label}</div>
+                            <div style={{ marginTop: 2, color: 'var(--text-tertiary)', whiteSpace: 'normal', lineHeight: 1.4 }}>
+                              정기계약 월 도급비 — 정기청소 월 트래커와 연동
+                            </div>
+                          </div>
+                        </GridCell>
+                        <GridCell>-</GridCell>
+                        <GridCell mono>-</GridCell>
+                        <GridCell mono>{formatWon(row.partner_price)}</GridCell>
+                        <GridCell>
+                          <SettlementPill paid={row.paid} settledAt={null} />
+                        </GridCell>
+                        <GridCell>
+                          <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                            {row.paid ? (
+                              <button type="button" data-testid={`partner-settlement-monthly-revert-${row.contract_id}-${row.month}`} className="btn btn--secondary btn--sm" onClick={() => void handleRevertMonthly(row)}>되돌리기</button>
+                            ) : (
+                              <button type="button" data-testid={`partner-settlement-monthly-settle-${row.contract_id}-${row.month}`} className="btn btn--secondary btn--sm" onClick={() => void handleSettleMonthly(row)}>지급 처리</button>
+                            )}
+                          </div>
+                        </GridCell>
+                      </React.Fragment>
+                    ))}
                     {settlements.items.map((job) => {
                       const isPaid = job.partner_payment_status === 'paid';
                       // 취소건은 기록 보존을 위해 목록엔 남기되 정산 건수/금액에선 제외된다.
@@ -1464,6 +1538,11 @@ function partnerErrorMessage(error, fallback) {
     partner_category_not_found: '협력사 대분류를 찾을 수 없습니다.',
     login_phone_already_in_use: '이미 다른 계정이 사용 중인 로그인 연락처입니다. 다른 번호를 입력하세요.',
     partner_inactive: '비활성화된 협력사입니다. 먼저 활성화해주세요.',
+    recurring_contract_not_found: '정기계약을 찾을 수 없습니다.',
+    settlement_month_partner_mismatch: '이 협력사에 지급할 월정산 건이 아닙니다. 화면을 새로고침한 뒤 다시 확인하세요.',
+    recurring_partner_payment_not_monthly: '해당 월은 도급비 월정산 조건이 아니거나 계약에 도급비가 없습니다. 정기청소 탭에서 계약 조건을 확인하세요.',
+    recurring_month_not_editable: '아직 지급 처리할 수 없는 월입니다(미래 월이거나 비활성 계약).',
+    recurring_partner_changed_concurrently: '다른 관리자가 방금 계약 조건을 변경했습니다. 새로고침 후 다시 시도하세요.',
   };
   if (messages[code]) {
     return messages[code];

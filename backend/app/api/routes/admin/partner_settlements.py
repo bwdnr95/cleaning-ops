@@ -5,6 +5,8 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import CurrentUser, get_session, require_admin
 from app.schemas.partner import (
+    PartnerRecurringMonthlySettlementActionRequest,
+    PartnerRecurringMonthlySettlementRead,
     PartnerSettlementActionRequest,
     PartnerSettlementActionResult,
     PartnerSettlementListRead,
@@ -81,14 +83,76 @@ def revert_partner_orders(
         raise
 
 
+@router.post(
+    "/{partner_id}/settlements/recurring-monthly/settle",
+    response_model=PartnerRecurringMonthlySettlementRead,
+)
+def settle_partner_recurring_monthly(
+    partner_id: str,
+    payload: PartnerRecurringMonthlySettlementActionRequest,
+    db: Session = Depends(get_session),
+    _: CurrentUser = Depends(require_admin),
+) -> PartnerRecurringMonthlySettlementRead:
+    return _set_partner_recurring_monthly(
+        db, partner_id=partner_id, payload=payload, paid=True
+    )
+
+
+@router.post(
+    "/{partner_id}/settlements/recurring-monthly/revert",
+    response_model=PartnerRecurringMonthlySettlementRead,
+)
+def revert_partner_recurring_monthly(
+    partner_id: str,
+    payload: PartnerRecurringMonthlySettlementActionRequest,
+    db: Session = Depends(get_session),
+    _: CurrentUser = Depends(require_admin),
+) -> PartnerRecurringMonthlySettlementRead:
+    return _set_partner_recurring_monthly(
+        db, partner_id=partner_id, payload=payload, paid=False
+    )
+
+
+def _set_partner_recurring_monthly(
+    db: Session,
+    *,
+    partner_id: str,
+    payload: PartnerRecurringMonthlySettlementActionRequest,
+    paid: bool,
+) -> PartnerRecurringMonthlySettlementRead:
+    try:
+        # set_status가 자체 락/동시성 가드와 함께 commit까지 수행한다.
+        return PartnerSettlementService(db).set_recurring_monthly_paid(
+            partner_id=partner_id,
+            contract_id=payload.contract_id,
+            month=payload.month,
+            paid=paid,
+        )
+    except ValueError as exc:
+        db.rollback()
+        raise settlement_http_error(exc) from exc
+    except Exception:
+        db.rollback()
+        raise
+
+
 def settlement_http_error(exc: ValueError) -> HTTPException:
     detail = str(exc)
-    if detail in {"partner_not_found", "settlement_order_not_found"}:
+    if detail in {
+        "partner_not_found",
+        "settlement_order_not_found",
+        "recurring_contract_not_found",
+    }:
         return HTTPException(status_code=404, detail=detail)
     if detail in {
         "invalid_settlement_order",
         "invalid_settlement_action",
         "settlement_order_partner_mismatch",
+        "settlement_month_partner_mismatch",
+        "recurring_partner_payment_not_monthly",
+        "recurring_month_not_editable",
     }:
         return HTTPException(status_code=422, detail=detail)
+    if detail == "recurring_partner_changed_concurrently":
+        return HTTPException(status_code=409, detail=detail)
     return HTTPException(status_code=400, detail=detail)

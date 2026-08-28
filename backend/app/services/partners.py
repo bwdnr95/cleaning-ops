@@ -12,7 +12,6 @@ from app.domain.constants import (
     AuditEventType,
     AuditSeverity,
     OrderStatus,
-    RecurringBillingMode,
     RecurringContractStatus,
     UserRole,
 )
@@ -27,7 +26,6 @@ from app.domain.phone import normalize_phone
 from app.models.order import Order
 from app.models.partner import Partner, PartnerCategory
 from app.models.recurring_contract import RecurringContract
-from app.models.recurring_monthly_status import RecurringMonthlyStatus
 from app.models.user import User
 from app.repositories.partners import PartnerCategoryRepository, PartnerRepository
 from app.repositories.refresh_tokens import RefreshTokenRepository
@@ -44,11 +42,7 @@ from app.schemas.partner import (
 )
 from app.services.audit import AuditService
 from app.services.partner_settlements import unpaid_partner_condition
-from app.services.recurring_partner_billing import (
-    RecurringPartnerBillingService,
-    billing_month,
-    incurred_billing_months,
-)
+from app.services.recurring_partner_billing import RecurringPartnerBillingService
 
 
 @dataclass(frozen=True)
@@ -286,66 +280,23 @@ class PartnerService:
         self,
         partner_ids: set[str],
     ) -> dict[str, dict[str, float | int]]:
+        # 배지와 정산 목록(monthly_items)이 같은 행 빌더에서 파생돼야
+        # "배지에는 미정산인데 목록에는 정산할 행이 없는" 모순이 안 생긴다.
         if not partner_ids:
             return {}
 
         summaries: dict[str, dict[str, float | int]] = {}
         billing = RecurringPartnerBillingService(self.db)
-        today = business_today()
-        current_month = billing_month(today)
-        statuses_by_contract: dict[str, dict[str, RecurringMonthlyStatus]] = {}
-        for monthly_status in self.db.scalars(select(RecurringMonthlyStatus)):
-            statuses_by_contract.setdefault(monthly_status.contract_id, {})[
-                monthly_status.billing_month
-            ] = monthly_status
-        for contract in self.db.scalars(select(RecurringContract)):
-            statuses = statuses_by_contract.get(contract.id, {})
-            months = {month for month in statuses if month <= current_month}
-            months.update(incurred_billing_months(contract, through_date=today))
-            for month in months:
-                monthly_status = statuses.get(month)
-                if monthly_status is not None and monthly_status.partner_payment_paid:
-                    continue
-                terms = billing.resolve(contract, month)
-                retained_partner_id = (
-                    monthly_status.retained_partner_id if monthly_status is not None else None
-                )
-                retained_amount = (
-                    monthly_status.retained_partner_payment_amount
-                    if monthly_status is not None
-                    else None
-                )
-                has_retained_monthly_settlement = retained_amount is not None
-                payable_partner_id = (
-                    retained_partner_id
-                    if has_retained_monthly_settlement
-                    else terms.partner_id
-                )
-                payable_amount = (
-                    retained_amount
-                    if has_retained_monthly_settlement
-                    else terms.partner_payment_amount
-                )
-                if (
-                    payable_partner_id in partner_ids
-                    and (
-                        retained_amount is not None
-                        or terms.billing_mode == RecurringBillingMode.MONTHLY
-                    )
-                    and payable_amount is not None
-                    and payable_amount > 0
-                ):
-                    partner_id = payable_partner_id
-                    if partner_id is None:
-                        continue
-                    summary = summaries.setdefault(
-                        partner_id,
-                        empty_settlement_summary(),
-                    )
-                    summary["amount"] = float(summary["amount"]) + float(
-                        payable_amount
-                    )
-                    summary["count"] = int(summary["count"]) + 1
+        # today는 이 모듈의 business_today로 주입한다(테스트 monkeypatch 경계 유지).
+        rows = billing.list_monthly_settlement_rows(
+            partner_ids=set(partner_ids), today=business_today()
+        )
+        for row in rows:
+            if row.paid:
+                continue
+            summary = summaries.setdefault(row.partner_id, empty_settlement_summary())
+            summary["amount"] = float(summary["amount"]) + float(row.amount)
+            summary["count"] = int(summary["count"]) + 1
         return summaries
 
     def reset_password(

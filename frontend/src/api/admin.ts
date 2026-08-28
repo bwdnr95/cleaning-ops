@@ -157,8 +157,19 @@ export interface PartnerSettlementListParams {
   to?: string;
 }
 
+// 월 청구 정기계약의 계약×월 도급 지급 행. 월 트래커(정기청소 탭) 지급 체크와 같은 데이터.
+export interface PartnerRecurringMonthlySettlementItem {
+  contract_id: string;
+  contract_label: string;
+  month: string; // "YYYY-MM"
+  month_start: string;
+  partner_price: number;
+  paid: boolean;
+}
+
 export interface PartnerSettlementListResponse {
   items: PartnerSettlementItem[];
+  monthly_items: PartnerRecurringMonthlySettlementItem[];
   total_partner_price: number;
   total_consumer_price: number;
   count: number;
@@ -475,6 +486,28 @@ export function revertPartnerOrders(
     method: 'POST',
     body: input,
   }) as Promise<PartnerSettlementActionResult>;
+}
+
+export function settlePartnerRecurringMonthly(
+  partnerId: string,
+  contractId: string,
+  month: string,
+): Promise<PartnerRecurringMonthlySettlementItem> {
+  return apiRequest(
+    `/admin/partners/${encodeURIComponent(partnerId)}/settlements/recurring-monthly/settle`,
+    { method: 'POST', body: { contract_id: contractId, month } },
+  ) as Promise<PartnerRecurringMonthlySettlementItem>;
+}
+
+export function revertPartnerRecurringMonthly(
+  partnerId: string,
+  contractId: string,
+  month: string,
+): Promise<PartnerRecurringMonthlySettlementItem> {
+  return apiRequest(
+    `/admin/partners/${encodeURIComponent(partnerId)}/settlements/recurring-monthly/revert`,
+    { method: 'POST', body: { contract_id: contractId, month } },
+  ) as Promise<PartnerRecurringMonthlySettlementItem>;
 }
 
 export function listPartnerCategories({ includeInactive = true } = {}) {
