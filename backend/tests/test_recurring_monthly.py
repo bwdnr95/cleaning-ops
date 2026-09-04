@@ -501,9 +501,10 @@ def test_deleted_contract_paid_status_remains_visible_and_editable(db_session):
     assert row.partner_amount == 90000
     assert row.partner_payment_paid is True
     assert updated.partner_payment_paid is False
-    assert all(
-        item.contract_id != c.id for item in service.list_month("2026-06")
+    reopened = next(
+        item for item in service.list_month("2026-06") if item.contract_id == c.id
     )
+    assert reopened.partner_amount == 90000
 
 
 def test_set_status_toggles(db_session):

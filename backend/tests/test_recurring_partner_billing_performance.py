@@ -218,7 +218,7 @@ def test_settle_response_uses_terms_refreshed_inside_status_lock(
     )
     db_session.commit()
 
-    original_set_status = RecurringMonthlyService.set_status
+    original_set_status = RecurringMonthlyService._set_status
 
     def change_terms_before_lock(
         self: RecurringMonthlyService,
@@ -229,7 +229,7 @@ def test_settle_response_uses_terms_refreshed_inside_status_lock(
         balance_paid: bool | None = None,
         partner_payment_paid: bool | None = None,
         expected_partner_id: str | None = None,
-    ) -> RecurringMonthlyRowRead:
+    ) -> tuple[RecurringMonthlyRowRead, Decimal | None]:
         current = self.contracts.get(contract_id, include_deleted=True)
         assert current is not None
         current.partner_payment_amount = Decimal("200000")
@@ -244,14 +244,35 @@ def test_settle_response_uses_terms_refreshed_inside_status_lock(
             expected_partner_id=expected_partner_id,
         )
 
-    monkeypatch.setattr(RecurringMonthlyService, "set_status", change_terms_before_lock)
+    monkeypatch.setattr(RecurringMonthlyService, "_set_status", change_terms_before_lock)
 
-    settled = PartnerSettlementService(db_session).set_recurring_monthly_paid(
-        partner_id=partner_id,
-        contract_id=contract.id,
-        month=month,
-        paid=True,
-    )
+    did_commit = False
+    post_commit_selects: list[str] = []
+
+    def mark_committed(session: Session) -> None:
+        nonlocal did_commit
+        if session is db_session:
+            did_commit = True
+
+    def record_post_commit_selects(*args) -> None:
+        statement = args[2]
+        if did_commit and statement.lstrip().upper().startswith("SELECT"):
+            post_commit_selects.append(statement)
+
+    bind = db_session.get_bind()
+    event.listen(db_session, "after_commit", mark_committed)
+    event.listen(bind, "before_cursor_execute", record_post_commit_selects)
+    try:
+        settled = PartnerSettlementService(db_session).set_recurring_monthly_paid(
+            partner_id=partner_id,
+            contract_id=contract.id,
+            month=month,
+            paid=True,
+        )
+    finally:
+        event.remove(db_session, "after_commit", mark_committed)
+        event.remove(bind, "before_cursor_execute", record_post_commit_selects)
+
     listed = next(
         row
         for row in RecurringPartnerBillingService(
@@ -261,4 +282,5 @@ def test_settle_response_uses_terms_refreshed_inside_status_lock(
     )
 
     assert settled.partner_price == 200000
+    assert post_commit_selects == []
     assert listed.amount == Decimal("200000")

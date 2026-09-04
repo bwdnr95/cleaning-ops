@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from calendar import monthrange
 from datetime import date
+from decimal import Decimal
 from uuid import uuid4
 
 from sqlalchemy import func, or_, select
@@ -24,6 +25,7 @@ from app.services.recurring_partner_billing import (
     RecurringPartnerBillingTerms,
     billing_month,
     has_recurring_monthly_partner_history,
+    recurring_monthly_settlement_amount,
 )
 
 
@@ -322,6 +324,38 @@ class RecurringMonthlyService:
         partner_payment_paid: bool | None = None,
         expected_partner_id: str | None = None,
     ) -> RecurringMonthlyRowRead:
+        row, _ = self._set_status(
+            contract_id,
+            month,
+            tax_invoice_issued=tax_invoice_issued,
+            balance_paid=balance_paid,
+            partner_payment_paid=partner_payment_paid,
+            expected_partner_id=expected_partner_id,
+        )
+        return row
+
+    def set_partner_payment_status(
+        self,
+        contract_id: str,
+        month: str,
+        *,
+        paid: bool,
+        expected_partner_id: str,
+    ) -> tuple[RecurringMonthlyRowRead, Decimal | None]:
+        return self._set_status(
+            contract_id,
+            month,
+            partner_payment_paid=paid,
+            expected_partner_id=expected_partner_id,
+        )
+
+    def _set_status(
+        self, contract_id: str, month: str, *,
+        tax_invoice_issued: bool | None = None,
+        balance_paid: bool | None = None,
+        partner_payment_paid: bool | None = None,
+        expected_partner_id: str | None = None,
+    ) -> tuple[RecurringMonthlyRowRead, Decimal | None]:
         if month > billing_month(business_today()):
             raise ValueError("recurring_month_not_editable")
         observed = self.contracts.get(contract_id, include_deleted=True)
@@ -395,6 +429,21 @@ class RecurringMonthlyService:
         if balance_paid is not None:
             status.balance_paid = balance_paid
         if partner_payment_paid is not None:
+            if (
+                not partner_payment_paid
+                and bool(status.partner_payment_paid)
+                and contract.deleted_at is not None
+                and status.retained_partner_payment_amount is None
+            ):
+                if (
+                    terms.partner_payment_amount is None
+                    or terms.partner_payment_amount <= 0
+                ):
+                    raise ValueError("recurring_partner_payment_not_monthly")
+                if terms.partner_id is None:
+                    raise ValueError("recurring_partner_required")
+                status.retained_partner_id = terms.partner_id
+                status.retained_partner_payment_amount = terms.partner_payment_amount
             if partner_payment_paid:
                 if (
                     status.retained_partner_payment_amount is None
@@ -424,5 +473,7 @@ class RecurringMonthlyService:
                 if not partner.is_active:
                     raise ValueError("partner_inactive")
             status.partner_payment_paid = partner_payment_paid
+        row = self._to_row(contract, month, status)
+        settlement_amount = recurring_monthly_settlement_amount(status, terms)
         self.db.commit()
-        return self._to_row(contract, month, status)
+        return row, settlement_amount

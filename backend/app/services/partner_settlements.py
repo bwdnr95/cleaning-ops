@@ -183,6 +183,7 @@ class PartnerSettlementService:
         contract = self.recurring_contracts.get(contract_id, include_deleted=True)
         if contract is None:
             raise ValueError("recurring_contract_not_found")
+        contract_label = contract.label
         status_repo = RecurringMonthlyStatusRepository(self.db)
         status_row = status_repo.get_by_contract_and_month(contract_id, month)
         has_retained = (
@@ -203,7 +204,7 @@ class PartnerSettlementService:
             # 되돌릴 지급이 없으면 빈 status 행을 만들지 않고 그대로 반환(멱등 no-op).
             return PartnerRecurringMonthlySettlementRead(
                 contract_id=contract_id,
-                contract_label=contract.label,
+                contract_label=contract_label,
                 month=month,
                 month_start=month_start,
                 partner_price=float(settlement_amount or 0),
@@ -211,21 +212,17 @@ class PartnerSettlementService:
             )
         # expected_partner_id: 락 획득 후 지급 대상을 재검증한다(위 사전 검사만으로는
         # 그 사이 담당 협력사가 바뀌는 TOCTOU를 못 막는다).
-        row = RecurringMonthlyService(self.db).set_status(
+        row, settlement_amount = RecurringMonthlyService(
+            self.db
+        ).set_partner_payment_status(
             contract_id,
             month,
-            partner_payment_paid=paid,
+            paid=paid,
             expected_partner_id=partner_id,
-        )
-        refreshed_status = status_repo.get_by_contract_and_month(contract_id, month)
-        refreshed_terms = self.partner_billing.resolve(contract, month, refresh=True)
-        settlement_amount = recurring_monthly_settlement_amount(
-            refreshed_status,
-            refreshed_terms,
         )
         return PartnerRecurringMonthlySettlementRead(
             contract_id=contract_id,
-            contract_label=contract.label,
+            contract_label=contract_label,
             month=month,
             month_start=month_start,
             partner_price=float(settlement_amount or 0),

@@ -113,21 +113,20 @@ def test_deleted_contract_without_partner_history_is_hidden_from_all_monthly_sur
     )
 
 
-def test_deleted_contract_paid_history_remains_visible_without_reopening_backlog(
+def test_deleted_contract_paid_history_revert_preserves_retained_unpaid_debt(
     db_session: Session,
 ) -> None:
     partner_id = _partner(db_session)
     contract = _monthly_contract(db_session, partner_id, label="삭제 지급 계약")
     month = billing_month(business_today())
     contract.deleted_at = datetime.now(UTC)
-    db_session.add(
-        RecurringMonthlyStatus(
-            id=str(uuid4()),
-            contract_id=contract.id,
-            billing_month=month,
-            partner_payment_paid=True,
-        )
+    status = RecurringMonthlyStatus(
+        id=str(uuid4()),
+        contract_id=contract.id,
+        billing_month=month,
+        partner_payment_paid=True,
     )
+    db_session.add(status)
     db_session.commit()
 
     tracker = RecurringMonthlyService(db_session).list_month(month)
@@ -149,6 +148,38 @@ def test_deleted_contract_paid_history_remains_visible_without_reopening_backlog
     assert any(row.contract_id == contract.id for row in paid_list.monthly_items)
     assert all(
         row.order_id != f"recurring-monthly:{contract.id}:{month}" for row in backlog
+    )
+
+    reverted = PartnerSettlementService(db_session).set_recurring_monthly_paid(
+        partner_id=partner_id,
+        contract_id=contract.id,
+        month=month,
+        paid=False,
+    )
+    db_session.refresh(status)
+    tracker = RecurringMonthlyService(db_session).list_month(month)
+    settlement_rows = RecurringPartnerBillingService(
+        db_session
+    ).list_monthly_settlement_rows()
+    unpaid_list = PartnerSettlementService(db_session).list_settlements(
+        partner_id=partner_id,
+        status="unpaid",
+    )
+    backlog = ReportService(db_session).settlements().rows
+
+    assert reverted.paid is False
+    assert reverted.partner_price == 660000
+    assert status.retained_partner_id == partner_id
+    assert status.retained_partner_payment_amount == Decimal("660000")
+    assert any(row.contract_id == contract.id for row in tracker)
+    assert any(
+        row.contract_id == contract.id and row.paid is False for row in settlement_rows
+    )
+    assert any(row.contract_id == contract.id for row in unpaid_list.monthly_items)
+    assert any(
+        row.order_id == f"recurring-monthly:{contract.id}:{month}"
+        and row.expected_settlement_amount == Decimal("660000")
+        for row in backlog
     )
 
 
