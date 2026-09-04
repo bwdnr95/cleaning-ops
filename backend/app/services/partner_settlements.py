@@ -183,9 +183,8 @@ class PartnerSettlementService:
         contract = self.recurring_contracts.get(contract_id, include_deleted=True)
         if contract is None:
             raise ValueError("recurring_contract_not_found")
-        status_row = RecurringMonthlyStatusRepository(self.db).get_by_contract_and_month(
-            contract_id, month
-        )
+        status_repo = RecurringMonthlyStatusRepository(self.db)
+        status_row = status_repo.get_by_contract_and_month(contract_id, month)
         has_retained = (
             status_row is not None
             and status_row.retained_partner_payment_amount is not None
@@ -217,6 +216,12 @@ class PartnerSettlementService:
             month,
             partner_payment_paid=paid,
             expected_partner_id=partner_id,
+        )
+        refreshed_status = status_repo.get_by_contract_and_month(contract_id, month)
+        refreshed_terms = self.partner_billing.resolve(contract, month, refresh=True)
+        settlement_amount = recurring_monthly_settlement_amount(
+            refreshed_status,
+            refreshed_terms,
         )
         return PartnerRecurringMonthlySettlementRead(
             contract_id=contract_id,

@@ -12,6 +12,7 @@ from app.models.recurring_contract import RecurringContract
 from app.models.recurring_monthly_status import RecurringMonthlyStatus
 from app.models.recurring_partner_billing_period import RecurringPartnerBillingPeriod
 from app.schemas.partner import PartnerCreate
+from app.schemas.recurring_monthly import RecurringMonthlyRowRead
 from app.services.partner_settlements import PartnerSettlementService
 from app.services.partners import PartnerService
 from app.services.recurring_monthly import RecurringMonthlyService
@@ -193,3 +194,71 @@ def test_revert_response_uses_monthly_row_amount_not_per_visit_projection(
 
     assert reverted.paid is False
     assert reverted.partner_price == 660000
+
+
+def test_settle_response_uses_terms_refreshed_inside_status_lock(
+    db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    partner_id = _partner(db_session)
+    contract = _contract(
+        db_session,
+        partner_id,
+        label="동시변경 응답 금액",
+        partner_payment_amount=100000,
+    )
+    month = "2026-09"
+    db_session.add(
+        RecurringMonthlyStatus(
+            id=str(uuid4()),
+            contract_id=contract.id,
+            billing_month=month,
+            partner_payment_paid=False,
+        )
+    )
+    db_session.commit()
+
+    original_set_status = RecurringMonthlyService.set_status
+
+    def change_terms_before_lock(
+        self: RecurringMonthlyService,
+        contract_id: str,
+        billing_month: str,
+        *,
+        tax_invoice_issued: bool | None = None,
+        balance_paid: bool | None = None,
+        partner_payment_paid: bool | None = None,
+        expected_partner_id: str | None = None,
+    ) -> RecurringMonthlyRowRead:
+        current = self.contracts.get(contract_id, include_deleted=True)
+        assert current is not None
+        current.partner_payment_amount = Decimal("200000")
+        self.db.flush()
+        return original_set_status(
+            self,
+            contract_id,
+            billing_month,
+            tax_invoice_issued=tax_invoice_issued,
+            balance_paid=balance_paid,
+            partner_payment_paid=partner_payment_paid,
+            expected_partner_id=expected_partner_id,
+        )
+
+    monkeypatch.setattr(RecurringMonthlyService, "set_status", change_terms_before_lock)
+
+    settled = PartnerSettlementService(db_session).set_recurring_monthly_paid(
+        partner_id=partner_id,
+        contract_id=contract.id,
+        month=month,
+        paid=True,
+    )
+    listed = next(
+        row
+        for row in RecurringPartnerBillingService(
+            db_session
+        ).list_monthly_settlement_rows(today=date(2026, 9, 4))
+        if row.contract_id == contract.id and row.month == month
+    )
+
+    assert settled.partner_price == 200000
+    assert listed.amount == Decimal("200000")
