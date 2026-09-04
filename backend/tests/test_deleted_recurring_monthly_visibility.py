@@ -117,7 +117,12 @@ def test_deleted_contract_paid_history_revert_preserves_retained_unpaid_debt(
     db_session: Session,
 ) -> None:
     partner_id = _partner(db_session)
-    contract = _monthly_contract(db_session, partner_id, label="삭제 지급 계약")
+    contract = _monthly_contract(
+        db_session,
+        partner_id,
+        label="삭제 지급 계약",
+        partner_billing_mode="per_visit",
+    )
     month = billing_month(business_today())
     contract.deleted_at = datetime.now(UTC)
     status = RecurringMonthlyStatus(

@@ -202,12 +202,21 @@ class RecurringPartnerBillingService:
                     else None
                 )
                 has_retained = retained_amount is not None
+                has_deleted_paid_history = (
+                    contract.deleted_at is not None
+                    and status is not None
+                    and bool(status.partner_payment_paid)
+                )
                 terms = resolve_terms_from_periods(
                     contract,
                     month,
                     periods_by_contract.get(contract.id, []),
                 )
-                if not has_retained and terms.billing_mode != RecurringBillingMode.MONTHLY:
+                if (
+                    not has_retained
+                    and not has_deleted_paid_history
+                    and terms.billing_mode != RecurringBillingMode.MONTHLY
+                ):
                     continue
                 payable_partner_id = (
                     status.retained_partner_id if has_retained else terms.partner_id
