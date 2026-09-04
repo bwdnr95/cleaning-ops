@@ -478,7 +478,7 @@ def test_list_month_preserves_ended_history_but_hides_empty_end_month(db_session
     assert visible_months == {"2026-06", "2026-07", "2026-08"}
 
 
-def test_deleted_contract_existing_status_remains_visible_and_editable(db_session):
+def test_deleted_contract_paid_status_remains_visible_and_editable(db_session):
     c = _contract(db_session)
     c.default_partner_id = DEV_PARTNER_ID
     c.partner_payment_amount = 90000
@@ -489,17 +489,21 @@ def test_deleted_contract_existing_status_remains_visible_and_editable(db_sessio
             id=str(uuid4()),
             contract_id=c.id,
             billing_month="2026-06",
-            partner_payment_paid=False,
+            partner_payment_paid=True,
         )
     )
     db_session.commit()
     service = RecurringMonthlyService(db_session)
 
     row = next(item for item in service.list_month("2026-06") if item.contract_id == c.id)
-    updated = service.set_status(c.id, "2026-06", partner_payment_paid=True)
+    updated = service.set_status(c.id, "2026-06", partner_payment_paid=False)
 
     assert row.partner_amount == 90000
-    assert updated.partner_payment_paid is True
+    assert row.partner_payment_paid is True
+    assert updated.partner_payment_paid is False
+    assert all(
+        item.contract_id != c.id for item in service.list_month("2026-06")
+    )
 
 
 def test_set_status_toggles(db_session):

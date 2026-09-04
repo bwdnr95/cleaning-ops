@@ -31,6 +31,7 @@ from app.services.recurring_partner_billing import (
     RecurringMonthlySettlementRow,
     RecurringPartnerBillingService,
     billing_month,
+    recurring_monthly_settlement_amount,
 )
 from app.services.timeline import TimelineService
 
@@ -190,6 +191,7 @@ class PartnerSettlementService:
             and status_row.retained_partner_payment_amount is not None
         )
         terms = self.partner_billing.resolve(contract, month)
+        settlement_amount = recurring_monthly_settlement_amount(status_row, terms)
         payable_partner_id = (
             status_row.retained_partner_id
             if has_retained and status_row is not None
@@ -200,17 +202,12 @@ class PartnerSettlementService:
         month_start = date(int(month[:4]), int(month[5:7]), 1)
         if not paid and (status_row is None or not status_row.partner_payment_paid):
             # 되돌릴 지급이 없으면 빈 status 행을 만들지 않고 그대로 반환(멱등 no-op).
-            amount = (
-                status_row.retained_partner_payment_amount
-                if has_retained and status_row is not None
-                else terms.partner_payment_amount
-            )
             return PartnerRecurringMonthlySettlementRead(
                 contract_id=contract_id,
                 contract_label=contract.label,
                 month=month,
                 month_start=month_start,
-                partner_price=float(amount or 0),
+                partner_price=float(settlement_amount or 0),
                 paid=False,
             )
         # expected_partner_id: 락 획득 후 지급 대상을 재검증한다(위 사전 검사만으로는
@@ -226,7 +223,7 @@ class PartnerSettlementService:
             contract_label=contract.label,
             month=month,
             month_start=month_start,
-            partner_price=float(row.partner_amount or 0),
+            partner_price=float(settlement_amount or 0),
             paid=bool(row.partner_payment_paid),
         )
 

@@ -460,7 +460,7 @@ def test_historical_monthly_settlement_keeps_original_partner_after_reassignment
         PartnerService(db_session).delete(original.id)
 
 
-def test_settlement_backlog_keeps_deleted_contract_historical_status(
+def test_settlement_backlog_keeps_deleted_contract_retained_history(
     db_session,
     monkeypatch,
 ):
@@ -473,6 +473,8 @@ def test_settlement_backlog_keeps_deleted_contract_historical_status(
             contract_id=contract.id,
             billing_month="2026-07",
             partner_payment_paid=False,
+            retained_partner_id=contract.default_partner_id,
+            retained_partner_payment_amount=Decimal("250000"),
         )
     )
     db_session.flush()

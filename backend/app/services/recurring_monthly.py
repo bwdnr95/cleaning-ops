@@ -23,6 +23,7 @@ from app.services.recurring_partner_billing import (
     RecurringPartnerBillingService,
     RecurringPartnerBillingTerms,
     billing_month,
+    has_recurring_monthly_partner_history,
 )
 
 
@@ -245,6 +246,8 @@ class RecurringMonthlyService:
         first: date,
         last: date,
     ) -> bool:
+        if contract.deleted_at is not None:
+            return has_recurring_monthly_partner_history(status)
         has_recorded_history = (
             bool(status.tax_invoice_issued)
             or bool(status.balance_paid)
@@ -268,8 +271,7 @@ class RecurringMonthlyService:
         if has_recorded_history or has_fixed_monthly_obligation:
             return True
         is_inactive = (
-            contract.deleted_at is not None
-            or contract.status != RecurringContractStatus.ACTIVE
+            contract.status != RecurringContractStatus.ACTIVE
             or not self._active_in_month(contract, first, last)
         )
         return not is_inactive or self._billable_generated_count(contract, first, last) > 0

@@ -32,6 +32,7 @@ from app.services.partner_settlements import unpaid_partner_condition
 from app.services.recurring_monthly import RecurringMonthlyService
 from app.services.recurring_partner_billing import (
     RecurringPartnerBillingService,
+    has_recurring_monthly_partner_history,
     incurred_billing_months,
 )
 
@@ -295,6 +296,11 @@ class ReportService:
                 if end_month is not None and month > end_month:
                     continue
                 monthly_status = statuses.get(month)
+                if (
+                    contract.deleted_at is not None
+                    and not has_recurring_monthly_partner_history(monthly_status)
+                ):
+                    continue
                 if monthly_status is not None and monthly_status.partner_payment_paid:
                     continue
                 terms = monthly_service.partner_billing.resolve(contract, month)

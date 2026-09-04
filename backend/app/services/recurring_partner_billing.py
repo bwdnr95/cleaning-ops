@@ -7,20 +7,35 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.time import business_today
-from app.domain.constants import RecurringBillingMode, RecurringContractStatus
+from app.domain.constants import RecurringBillingMode
 from app.models.order import Order
 from app.models.recurring_contract import RecurringContract
 from app.models.recurring_monthly_status import RecurringMonthlyStatus
 from app.models.recurring_partner_billing_period import RecurringPartnerBillingPeriod
+from app.services.recurring_partner_billing_rules import (
+    RecurringPartnerBillingTerms,
+    billing_month,
+    has_recurring_monthly_partner_history,
+    incurred_billing_months,
+    money_decimal,
+    recurring_monthly_settlement_amount,
+    resolve_terms_from_periods,
+    terms_from_billing_period,
+)
+
+__all__ = (
+    "BASELINE_EFFECTIVE_MONTH",
+    "RecurringMonthlySettlementRow",
+    "RecurringPartnerBillingService",
+    "RecurringPartnerBillingTerms",
+    "billing_month",
+    "has_recurring_monthly_partner_history",
+    "incurred_billing_months",
+    "money_decimal",
+    "recurring_monthly_settlement_amount",
+)
 
 BASELINE_EFFECTIVE_MONTH = "0001-01"
-
-
-@dataclass(frozen=True, slots=True)
-class RecurringPartnerBillingTerms:
-    partner_id: str | None
-    billing_mode: RecurringBillingMode
-    partner_payment_amount: Decimal | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -34,45 +49,6 @@ class RecurringMonthlySettlementRow:
     partner_id: str
     amount: Decimal
     paid: bool
-
-
-def billing_month(value: date) -> str:
-    return f"{value.year:04d}-{value.month:02d}"
-
-
-def money_decimal(value: Decimal | float | int | None) -> Decimal | None:
-    return Decimal(str(value)) if value is not None else None
-
-
-def incurred_billing_months(
-    contract: RecurringContract,
-    *,
-    through_date: date | None = None,
-) -> tuple[str, ...]:
-    through = through_date or business_today()
-    if (
-        contract.deleted_at is not None
-        or contract.status != RecurringContractStatus.ACTIVE
-    ):
-        return ()
-    first_day = max(
-        contract.start_date,
-        contract.active_segment_start_date or contract.start_date,
-    )
-    last_day = min(through, contract.end_date or through)
-    if first_day > last_day:
-        return ()
-
-    cursor = first_day.replace(day=1)
-    last_month = last_day.replace(day=1)
-    months: list[str] = []
-    while cursor <= last_month:
-        months.append(billing_month(cursor))
-        if cursor.month == 12:
-            cursor = date(cursor.year + 1, 1, 1)
-        else:
-            cursor = date(cursor.year, cursor.month + 1, 1)
-    return tuple(months)
 
 
 class RecurringPartnerBillingService:
@@ -98,19 +74,7 @@ class RecurringPartnerBillingService:
         if refresh:
             stmt = stmt.execution_options(populate_existing=True)
         period = self.db.scalar(stmt)
-        if period is None:
-            return RecurringPartnerBillingTerms(
-                partner_id=contract.default_partner_id,
-                billing_mode=RecurringBillingMode(
-                    contract.partner_billing_mode or RecurringBillingMode.PER_VISIT
-                ),
-                partner_payment_amount=money_decimal(contract.partner_payment_amount),
-            )
-        return RecurringPartnerBillingTerms(
-            partner_id=period.partner_id,
-            billing_mode=RecurringBillingMode(period.billing_mode),
-            partner_payment_amount=money_decimal(period.partner_payment_amount),
-        )
+        return terms_from_billing_period(contract, period)
 
     def allows_order_settlement(self, order: Order) -> bool:
         if order.recurring_contract_id is None:
@@ -191,6 +155,7 @@ class RecurringPartnerBillingService:
           현재 월 이하의 월(계약 종료/삭제 후에도 남은 미지급 이력 보존).
         - 그 월의 조건이 월정산(monthly)이거나, 조건 변경 시점에 남긴 지급 스냅샷
           (retained_*)이 있는 경우만.
+        - 삭제 계약은 지급완료 또는 retained_* 이력이 있는 월만 보존.
         - 지급 금액 > 0, 지급 대상 협력사 존재.
         """
         today = today or business_today()
@@ -201,28 +166,53 @@ class RecurringPartnerBillingService:
                 status.billing_month
             ] = status
 
+        contracts = list(self.db.scalars(select(RecurringContract)))
+        periods_by_contract: dict[str, list[RecurringPartnerBillingPeriod]] = {}
+        if contracts:
+            period_stmt = (
+                select(RecurringPartnerBillingPeriod)
+                .where(
+                    RecurringPartnerBillingPeriod.contract_id.in_(
+                        [contract.id for contract in contracts]
+                    )
+                )
+                .order_by(
+                    RecurringPartnerBillingPeriod.contract_id.asc(),
+                    RecurringPartnerBillingPeriod.effective_month.asc(),
+                )
+            )
+            for period in self.db.scalars(period_stmt):
+                periods_by_contract.setdefault(period.contract_id, []).append(period)
+
         rows: list[RecurringMonthlySettlementRow] = []
-        for contract in self.db.scalars(select(RecurringContract)):
+        for contract in contracts:
             statuses = statuses_by_contract.get(contract.id, {})
             months = {month for month in statuses if month <= current_month}
             months.update(incurred_billing_months(contract, through_date=today))
             for month in sorted(months):
                 status = statuses.get(month)
+                if (
+                    contract.deleted_at is not None
+                    and not has_recurring_monthly_partner_history(status)
+                ):
+                    continue
                 retained_amount = (
                     status.retained_partner_payment_amount
                     if status is not None
                     else None
                 )
                 has_retained = retained_amount is not None
-                terms = self.resolve(contract, month)
+                terms = resolve_terms_from_periods(
+                    contract,
+                    month,
+                    periods_by_contract.get(contract.id, []),
+                )
                 if not has_retained and terms.billing_mode != RecurringBillingMode.MONTHLY:
                     continue
                 payable_partner_id = (
                     status.retained_partner_id if has_retained else terms.partner_id
                 )
-                payable_amount = (
-                    retained_amount if has_retained else terms.partner_payment_amount
-                )
+                payable_amount = recurring_monthly_settlement_amount(status, terms)
                 if payable_partner_id is None:
                     continue
                 if payable_amount is None or payable_amount <= 0:
