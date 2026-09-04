@@ -232,6 +232,7 @@ def test_settle_response_uses_terms_refreshed_inside_status_lock(
     ) -> tuple[RecurringMonthlyRowRead, Decimal | None]:
         current = self.contracts.get(contract_id, include_deleted=True)
         assert current is not None
+        current.label = "동시변경 후 응답 금액"
         current.partner_payment_amount = Decimal("200000")
         self.db.flush()
         return original_set_status(
@@ -282,5 +283,7 @@ def test_settle_response_uses_terms_refreshed_inside_status_lock(
     )
 
     assert settled.partner_price == 200000
+    assert settled.contract_label == "동시변경 후 응답 금액"
     assert post_commit_selects == []
+    assert listed.contract_label == "동시변경 후 응답 금액"
     assert listed.amount == Decimal("200000")

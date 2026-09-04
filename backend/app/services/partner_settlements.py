@@ -222,7 +222,7 @@ class PartnerSettlementService:
         )
         return PartnerRecurringMonthlySettlementRead(
             contract_id=contract_id,
-            contract_label=contract_label,
+            contract_label=row.label,
             month=month,
             month_start=month_start,
             partner_price=float(settlement_amount or 0),
