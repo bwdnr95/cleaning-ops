@@ -8,6 +8,7 @@ import { useAuth } from '../store/authStore';
 import {
   ADMIN_PAGE_META,
   DEFAULT_ORDERS_VIEW,
+  type OrdersView,
   normalizeAdminRoute,
   readAdminRouteFromLocation,
   replaceAdminHistory,
@@ -44,6 +45,11 @@ export function App() {
   const isStandalonePartnerLink = isPartnerLinkRoute();
   const mode = isStandalonePartnerLink ? 'partner' : 'admin';
   const [adminRoute, setAdminRoute] = React.useState(() => readAdminRouteFromLocation());
+  const adminRouteRef = React.useRef(adminRoute);
+  const [adminNavigationRevision, setAdminNavigationRevision] = React.useState(0);
+  React.useEffect(() => {
+    adminRouteRef.current = adminRoute;
+  }, [adminRoute]);
   // 주문 상세의 '정기' 배지에서 계약으로 역링크할 때 전달할 계약 id(데모 affordance: 해시 라우트와 별개).
   const [openRecurringContractId, setOpenRecurringContractId] = React.useState<string | null>(null);
   const [recurringInitialTab, setRecurringInitialTab] = React.useState<'contracts' | 'orders'>('contracts');
@@ -77,7 +83,9 @@ export function App() {
     }
 
     const syncRouteFromHistory = () => {
-      setAdminRoute(readAdminRouteFromLocation());
+      const route = readAdminRouteFromLocation();
+      adminRouteRef.current = route;
+      setAdminRoute(route);
     };
     window.addEventListener('popstate', syncRouteFromHistory);
     window.addEventListener('hashchange', syncRouteFromHistory);
@@ -89,8 +97,19 @@ export function App() {
 
   const navigateAdmin = React.useCallback((nextRoute, options = {}) => {
     const route = normalizeAdminRoute(nextRoute);
+    adminRouteRef.current = route;
+    setAdminNavigationRevision((revision) => revision + 1);
     setAdminRoute(route);
     writeAdminHistory(route, options);
+  }, []);
+
+  const syncOrdersView = React.useCallback((nextOrdersView: OrdersView) => {
+    const route = normalizeAdminRoute({
+      ...adminRouteRef.current,
+      ordersView: nextOrdersView,
+    });
+    adminRouteRef.current = route;
+    replaceAdminHistory(route);
   }, []);
 
   const detailOrderId = adminRoute.detailOrderId;
@@ -98,12 +117,12 @@ export function App() {
   const ordersView = adminRoute.ordersView;
   const openOrder = React.useCallback((orderId: string, returnPage: 'orders' | 'recurring' = 'orders') => {
     setOrderReturnPage(returnPage);
-    navigateAdmin(toOrderDetailRoute(orderId, ordersView));
-  }, [navigateAdmin, ordersView]);
+    navigateAdmin(toOrderDetailRoute(orderId, adminRouteRef.current.ordersView));
+  }, [navigateAdmin]);
   const editOrder = React.useCallback((orderId: string, returnPage: 'orders' | 'recurring' = 'orders') => {
     setOrderReturnPage(returnPage);
-    navigateAdmin(toOrderEditRoute(orderId, ordersView));
-  }, [navigateAdmin, ordersView]);
+    navigateAdmin(toOrderEditRoute(orderId, adminRouteRef.current.ordersView));
+  }, [navigateAdmin]);
 
   if (isStandaloneCustomerLink) {
     return (
@@ -131,7 +150,10 @@ export function App() {
                   }
                   navigateAdmin(toPageRoute(nextPage));
                 }}
-                onCreateOrder={() => navigateAdmin(toOrderCreateRoute(adminRoute.page))}
+                onCreateOrder={() => navigateAdmin(toOrderCreateRoute(
+                  adminRoute.page,
+                  adminRoute.page === 'orders' ? adminRouteRef.current.ordersView : DEFAULT_ORDERS_VIEW,
+                ))}
                 showCreateOrderFab={!orderForm && adminRoute.page !== 'recurring'}
                 navBadges={navBadges}
                 user={adminSession.user}
@@ -217,11 +239,24 @@ export function App() {
                       )}
                       {page === 'orders' && (
                         <OrdersPage
+                          key={`orders-${adminNavigationRevision}`}
                           initialTab={ordersView.tab}
                           initialDatePreset={ordersView.datePreset}
+                          initialQuery={ordersView.query}
+                          initialPartnerId={ordersView.partnerId}
+                          initialBrokerId={ordersView.brokerId}
+                          initialPage={ordersView.page}
+                          initialVisitFrom={ordersView.visitFrom}
+                          initialVisitTo={ordersView.visitTo}
+                          initialReceivedDatePreset={ordersView.receivedDatePreset}
+                          initialReceivedFrom={ordersView.receivedFrom}
+                          initialReceivedTo={ordersView.receivedTo}
+                          initialSortBy={ordersView.sortBy}
+                          initialPageSize={ordersView.pageSize}
+                          onViewChange={syncOrdersView}
                           onOpenOrder={(orderId) => openOrder(orderId)}
                           onEditOrder={(orderId) => editOrder(orderId)}
-                          onCreateOrder={() => navigateAdmin(toOrderCreateRoute('orders', ordersView))}
+                          onCreateOrder={() => navigateAdmin(toOrderCreateRoute('orders', adminRouteRef.current.ordersView))}
                         />
                       )}
                       {page === 'calendar' && (

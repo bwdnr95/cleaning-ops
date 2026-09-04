@@ -360,6 +360,124 @@ def test_list_month_keeps_existing_unpaid_row_after_contract_has_ended(db_sessio
     assert row.partner_payment_paid is False
 
 
+def test_list_month_hides_empty_status_after_contract_ended(db_session):
+    c = _contract(db_session)
+    c.recurrence_mode = RecurrenceMode.MONTHLY
+    c.billing_mode = "per_visit"
+    c.status = RecurringContractStatus.ENDED
+    c.end_date = date(2026, 9, 3)
+    db_session.add(
+        RecurringMonthlyStatus(
+            id=str(uuid4()),
+            contract_id=c.id,
+            billing_month="2026-09",
+            tax_invoice_issued=False,
+            balance_paid=False,
+            partner_payment_paid=False,
+            retained_partner_id=None,
+            retained_partner_payment_amount=None,
+        )
+    )
+    db_session.commit()
+
+    rows = RecurringMonthlyService(db_session).list_month("2026-09")
+
+    assert all(row.contract_id != c.id for row in rows)
+
+
+@pytest.mark.parametrize(
+    "status_values",
+    [
+        {"tax_invoice_issued": True},
+        {
+            "retained_partner_id": DEV_PARTNER_ID,
+            "retained_partner_payment_amount": 90000,
+        },
+    ],
+)
+def test_list_month_keeps_meaningful_status_after_contract_ended(
+    db_session,
+    status_values,
+):
+    c = _contract(db_session)
+    c.status = RecurringContractStatus.ENDED
+    c.end_date = date(2026, 8, 31)
+    db_session.add(
+        RecurringMonthlyStatus(
+            id=str(uuid4()),
+            contract_id=c.id,
+            billing_month="2026-09",
+            **status_values,
+        )
+    )
+    db_session.commit()
+
+    rows = RecurringMonthlyService(db_session).list_month("2026-09")
+
+    assert any(row.contract_id == c.id for row in rows)
+
+
+def test_list_month_keeps_active_contract_empty_status(db_session):
+    c = _contract(db_session)
+    db_session.add(
+        RecurringMonthlyStatus(
+            id=str(uuid4()),
+            contract_id=c.id,
+            billing_month="2026-09",
+        )
+    )
+    db_session.commit()
+
+    rows = RecurringMonthlyService(db_session).list_month("2026-09")
+
+    assert any(row.contract_id == c.id for row in rows)
+
+
+def test_list_month_preserves_ended_history_but_hides_empty_end_month(db_session):
+    c = _contract(db_session)
+    c.default_partner_id = DEV_PARTNER_ID
+    c.status = RecurringContractStatus.ENDED
+    c.end_date = date(2026, 9, 3)
+    db_session.add_all(
+        [
+            RecurringMonthlyStatus(
+                id=str(uuid4()),
+                contract_id=c.id,
+                billing_month="2026-06",
+                tax_invoice_issued=True,
+            ),
+            RecurringMonthlyStatus(
+                id=str(uuid4()),
+                contract_id=c.id,
+                billing_month="2026-07",
+                balance_paid=True,
+            ),
+            RecurringMonthlyStatus(
+                id=str(uuid4()),
+                contract_id=c.id,
+                billing_month="2026-08",
+                retained_partner_id=DEV_PARTNER_ID,
+                retained_partner_payment_amount=90000,
+            ),
+            RecurringMonthlyStatus(
+                id=str(uuid4()),
+                contract_id=c.id,
+                billing_month="2026-09",
+            ),
+        ]
+    )
+    db_session.commit()
+    service = RecurringMonthlyService(db_session)
+
+    visible_months = {
+        month
+        for month in ("2026-06", "2026-07", "2026-08", "2026-09")
+        if any(row.contract_id == c.id for row in service.list_month(month))
+    }
+
+    assert visible_months == {"2026-06", "2026-07", "2026-08"}
+
+
 def test_deleted_contract_existing_status_remains_visible_and_editable(db_session):
     c = _contract(db_session)
     c.default_partner_id = DEV_PARTNER_ID

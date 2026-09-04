@@ -1,4 +1,4 @@
-import type { DashboardSummary } from '../api/admin';
+import type { AdminOrderSort, DashboardSummary } from '../api/admin';
 
 export const ADMIN_PAGE_META = {
   dashboard: {
@@ -56,9 +56,34 @@ export const ADMIN_PAGE_META = {
 export interface OrdersView {
   readonly tab: string;
   readonly datePreset: string;
+  readonly query: string;
+  readonly partnerId: string;
+  readonly brokerId: string;
+  readonly page: number;
+  readonly visitFrom: string;
+  readonly visitTo: string;
+  readonly receivedDatePreset: string;
+  readonly receivedFrom: string;
+  readonly receivedTo: string;
+  readonly sortBy: AdminOrderSort;
+  readonly pageSize: number;
 }
 
-export const DEFAULT_ORDERS_VIEW: OrdersView = { tab: 'all', datePreset: 'upcoming' };
+export const DEFAULT_ORDERS_VIEW: OrdersView = {
+  tab: 'all',
+  datePreset: 'upcoming',
+  query: '',
+  partnerId: 'all',
+  brokerId: 'all',
+  page: 1,
+  visitFrom: '',
+  visitTo: '',
+  receivedDatePreset: 'all',
+  receivedFrom: '',
+  receivedTo: '',
+  sortBy: 'visit_asc',
+  pageSize: 50,
+};
 
 const ADMIN_PAGE_KEYS = Object.keys(ADMIN_PAGE_META);
 
@@ -72,6 +97,17 @@ export const DEFAULT_ADMIN_ROUTE = {
 interface OrdersViewOptions {
   readonly ordersTab?: string | null;
   readonly datePreset?: string | null;
+  readonly query?: string | null;
+  readonly partnerId?: string | null;
+  readonly brokerId?: string | null;
+  readonly page?: number | string | null;
+  readonly visitFrom?: string | null;
+  readonly visitTo?: string | null;
+  readonly receivedDatePreset?: string | null;
+  readonly receivedFrom?: string | null;
+  readonly receivedTo?: string | null;
+  readonly sortBy?: string | null;
+  readonly pageSize?: number | string | null;
 }
 
 export function toOrdersView(options: OrdersViewOptions = {}) {
@@ -80,7 +116,21 @@ export function toOrdersView(options: OrdersViewOptions = {}) {
     ? options.datePreset
     : getDefaultOrdersDatePreset(tab);
 
-  return { tab, datePreset };
+  return {
+    tab,
+    datePreset,
+    query: typeof options.query === 'string' ? options.query : DEFAULT_ORDERS_VIEW.query,
+    partnerId: options.partnerId || DEFAULT_ORDERS_VIEW.partnerId,
+    brokerId: options.brokerId || DEFAULT_ORDERS_VIEW.brokerId,
+    page: normalizeOrdersPage(options.page),
+    visitFrom: options.visitFrom || DEFAULT_ORDERS_VIEW.visitFrom,
+    visitTo: options.visitTo || DEFAULT_ORDERS_VIEW.visitTo,
+    receivedDatePreset: options.receivedDatePreset || DEFAULT_ORDERS_VIEW.receivedDatePreset,
+    receivedFrom: options.receivedFrom || DEFAULT_ORDERS_VIEW.receivedFrom,
+    receivedTo: options.receivedTo || DEFAULT_ORDERS_VIEW.receivedTo,
+    sortBy: normalizeOrdersSort(options.sortBy),
+    pageSize: normalizeOrdersPageSize(options.pageSize),
+  };
 }
 
 export function toPageRoute(page: string, ordersView = DEFAULT_ORDERS_VIEW) {
@@ -145,6 +195,17 @@ export function readAdminRouteFromLocation() {
   const ordersView = toOrdersView({
     ordersTab: params.get('tab') || undefined,
     datePreset: params.get('date') || undefined,
+    query: params.get('q'),
+    partnerId: params.get('partner_id'),
+    brokerId: params.get('broker_id'),
+    page: params.get('page'),
+    visitFrom: params.get('visit_from'),
+    visitTo: params.get('visit_to'),
+    receivedDatePreset: params.get('received'),
+    receivedFrom: params.get('received_from'),
+    receivedTo: params.get('received_to'),
+    sortBy: params.get('sort'),
+    pageSize: params.get('page_size'),
   });
 
   if (page === 'orders' && segments[1] === 'new') {
@@ -169,6 +230,17 @@ export function normalizeAdminRoute(route) {
   const ordersView = toOrdersView({
     ordersTab: route?.ordersView?.tab,
     datePreset: route?.ordersView?.datePreset,
+    query: route?.ordersView?.query,
+    partnerId: route?.ordersView?.partnerId,
+    brokerId: route?.ordersView?.brokerId,
+    page: route?.ordersView?.page,
+    visitFrom: route?.ordersView?.visitFrom,
+    visitTo: route?.ordersView?.visitTo,
+    receivedDatePreset: route?.ordersView?.receivedDatePreset,
+    receivedFrom: route?.ordersView?.receivedFrom,
+    receivedTo: route?.ordersView?.receivedTo,
+    sortBy: route?.ordersView?.sortBy,
+    pageSize: route?.ordersView?.pageSize,
   });
   return {
     page,
@@ -210,6 +282,23 @@ export function getDefaultOrdersDatePreset(tab: string): string {
   return DEFAULT_ORDERS_VIEW.datePreset;
 }
 
+function normalizeOrdersPage(value: number | string | null | undefined): number {
+  const page = Number(value);
+  return Number.isInteger(page) && page > 0 ? page : DEFAULT_ORDERS_VIEW.page;
+}
+
+function normalizeOrdersSort(value: string | null | undefined): AdminOrderSort {
+  if (['visit_asc', 'visit_desc', 'received_asc', 'received_desc'].includes(value || '')) {
+    return value as AdminOrderSort;
+  }
+  return DEFAULT_ORDERS_VIEW.sortBy;
+}
+
+function normalizeOrdersPageSize(value: number | string | null | undefined): number {
+  const pageSize = Number(value);
+  return [10, 20, 50, 100].includes(pageSize) ? pageSize : DEFAULT_ORDERS_VIEW.pageSize;
+}
+
 export function toAdminNavBadges(summary: DashboardSummary | null) {
   if (!summary) {
     return {};
@@ -246,6 +335,39 @@ function adminRouteToHash(route) {
     }
     if (normalized.ordersView.datePreset !== getDefaultOrdersDatePreset(normalized.ordersView.tab)) {
       params.set('date', normalized.ordersView.datePreset);
+    }
+    if (normalized.ordersView.query !== DEFAULT_ORDERS_VIEW.query) {
+      params.set('q', normalized.ordersView.query);
+    }
+    if (normalized.ordersView.partnerId !== DEFAULT_ORDERS_VIEW.partnerId) {
+      params.set('partner_id', normalized.ordersView.partnerId);
+    }
+    if (normalized.ordersView.brokerId !== DEFAULT_ORDERS_VIEW.brokerId) {
+      params.set('broker_id', normalized.ordersView.brokerId);
+    }
+    if (normalized.ordersView.page !== DEFAULT_ORDERS_VIEW.page) {
+      params.set('page', String(normalized.ordersView.page));
+    }
+    if (normalized.ordersView.visitFrom !== DEFAULT_ORDERS_VIEW.visitFrom) {
+      params.set('visit_from', normalized.ordersView.visitFrom);
+    }
+    if (normalized.ordersView.visitTo !== DEFAULT_ORDERS_VIEW.visitTo) {
+      params.set('visit_to', normalized.ordersView.visitTo);
+    }
+    if (normalized.ordersView.receivedDatePreset !== DEFAULT_ORDERS_VIEW.receivedDatePreset) {
+      params.set('received', normalized.ordersView.receivedDatePreset);
+    }
+    if (normalized.ordersView.receivedFrom !== DEFAULT_ORDERS_VIEW.receivedFrom) {
+      params.set('received_from', normalized.ordersView.receivedFrom);
+    }
+    if (normalized.ordersView.receivedTo !== DEFAULT_ORDERS_VIEW.receivedTo) {
+      params.set('received_to', normalized.ordersView.receivedTo);
+    }
+    if (normalized.ordersView.sortBy !== DEFAULT_ORDERS_VIEW.sortBy) {
+      params.set('sort', normalized.ordersView.sortBy);
+    }
+    if (normalized.ordersView.pageSize !== DEFAULT_ORDERS_VIEW.pageSize) {
+      params.set('page_size', String(normalized.ordersView.pageSize));
     }
   }
 

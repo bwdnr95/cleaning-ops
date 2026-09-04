@@ -252,22 +252,78 @@ interface OrdersPageProps {
   readonly onEditOrder?: (orderId: string) => void;
   readonly initialTab?: string;
   readonly initialDatePreset?: string;
+  readonly initialQuery?: string;
+  readonly initialPartnerId?: string;
+  readonly initialBrokerId?: string;
+  readonly initialPage?: number;
+  readonly initialVisitFrom?: string;
+  readonly initialVisitTo?: string;
+  readonly initialReceivedDatePreset?: string;
+  readonly initialReceivedFrom?: string;
+  readonly initialReceivedTo?: string;
+  readonly initialSortBy?: AdminOrderSort;
+  readonly initialPageSize?: number;
+  readonly onViewChange?: (view: {
+    readonly tab: string;
+    readonly datePreset: string;
+    readonly query: string;
+    readonly partnerId: string;
+    readonly brokerId: string;
+    readonly page: number;
+    readonly visitFrom: string;
+    readonly visitTo: string;
+    readonly receivedDatePreset: string;
+    readonly receivedFrom: string;
+    readonly receivedTo: string;
+    readonly sortBy: AdminOrderSort;
+    readonly pageSize: number;
+  }) => void;
   readonly orderScope?: AdminOrderScope;
 }
 
-export function OrdersPage({ onOpenOrder, onCreateOrder, onEditOrder, initialTab = 'all', initialDatePreset = undefined, orderScope = 'regular' }: OrdersPageProps) {
+export function OrdersPage({
+  onOpenOrder,
+  onCreateOrder,
+  onEditOrder,
+  initialTab = 'all',
+  initialDatePreset = undefined,
+  initialQuery = '',
+  initialPartnerId = 'all',
+  initialBrokerId = 'all',
+  initialPage = 1,
+  initialVisitFrom = '',
+  initialVisitTo = '',
+  initialReceivedDatePreset = 'all',
+  initialReceivedFrom = '',
+  initialReceivedTo = '',
+  initialSortBy = 'visit_asc',
+  initialPageSize = 50,
+  onViewChange,
+  orderScope = 'regular',
+}: OrdersPageProps) {
   const tableScrollRef = React.useRef(null);
+  const knownRowsRef = React.useRef(new Map());
   const [tab, setTab] = React.useState(initialTab);
   const [selected, setSelected] = React.useState(new Set());
   const [hoverRow, setHoverRow] = React.useState(null);
-  const [sortBy, setSortBy] = React.useState<AdminOrderSort>('visit_asc');
-  const [query, setQuery] = React.useState('');
-  const [dateFilter, setDateFilter] = React.useState(() => createInitialDateFilter(initialTab, initialDatePreset));
-  const [partnerFilter, setPartnerFilter] = React.useState('all');
-  const [brokerFilter, setBrokerFilter] = React.useState('all');
-  const [receivedDateFilter, setReceivedDateFilter] = React.useState(() => createDateFilter('all'));
-  const [page, setPage] = React.useState(1);
-  const [pageSize, setPageSize] = React.useState(50);
+  const [sortBy, setSortBy] = React.useState<AdminOrderSort>(initialSortBy);
+  const [query, setQuery] = React.useState(initialQuery);
+  const [dateFilter, setDateFilter] = React.useState(() => createInitialDateFilter(
+    initialTab,
+    initialDatePreset,
+    initialVisitFrom,
+    initialVisitTo,
+  ));
+  const [partnerFilter, setPartnerFilter] = React.useState(initialPartnerId);
+  const [brokerFilter, setBrokerFilter] = React.useState(initialBrokerId);
+  const [receivedDateFilter, setReceivedDateFilter] = React.useState(() => createInitialDateFilter(
+    'all',
+    initialReceivedDatePreset,
+    initialReceivedFrom,
+    initialReceivedTo,
+  ));
+  const [page, setPage] = React.useState(initialPage);
+  const [pageSize, setPageSize] = React.useState(initialPageSize);
   const [actionError, setActionError] = React.useState('');
   const [actionNotice, setActionNotice] = React.useState(null);
   const [isSavingAction, setIsSavingAction] = React.useState(false);
@@ -284,7 +340,20 @@ export function OrdersPage({ onOpenOrder, onCreateOrder, onEditOrder, initialTab
   const [isImportOpen, setImportOpen] = React.useState(false);
   const [columnWidths, setColumnWidths] = React.useState(getInitialOrderTableColumnWidths);
   const [resizingColumn, setResizingColumn] = React.useState(null);
-  const [debouncedQuery, setDebouncedQuery] = React.useState('');
+  const [debouncedQuery, setDebouncedQuery] = React.useState(initialQuery.trim());
+  const filterResetKey = [
+    tab,
+    sortBy,
+    query,
+    dateFilter.start,
+    dateFilter.end,
+    partnerFilter,
+    brokerFilter,
+    receivedDateFilter.start,
+    receivedDateFilter.end,
+    receivedDateFilter.preset,
+  ].join('|');
+  const lastFilterResetKeyRef = React.useRef(filterResetKey);
 
   // 검색어는 디바운스하여 키 입력마다 요청이 나가지 않도록 한다(입력 자체는 query로 즉시 반영).
   React.useEffect(() => {
@@ -375,10 +444,99 @@ export function OrdersPage({ onOpenOrder, onCreateOrder, onEditOrder, initialTab
   }, [brokers]);
 
   React.useEffect(() => {
+    const nextDateFilter = createInitialDateFilter(
+      initialTab,
+      initialDatePreset,
+      initialVisitFrom,
+      initialVisitTo,
+    );
+    const nextReceivedDateFilter = createInitialDateFilter(
+      'all',
+      initialReceivedDatePreset,
+      initialReceivedFrom,
+      initialReceivedTo,
+    );
+    lastFilterResetKeyRef.current = [
+      initialTab,
+      initialSortBy,
+      initialQuery,
+      nextDateFilter.start,
+      nextDateFilter.end,
+      initialPartnerId,
+      initialBrokerId,
+      nextReceivedDateFilter.start,
+      nextReceivedDateFilter.end,
+      nextReceivedDateFilter.preset,
+    ].join('|');
     setTab(initialTab);
-    setDateFilter(createInitialDateFilter(initialTab, initialDatePreset));
-    setPage(1);
-  }, [initialDatePreset, initialTab, orderScope]);
+    setSortBy(initialSortBy);
+    setQuery(initialQuery);
+    setDebouncedQuery(initialQuery.trim());
+    setDateFilter(nextDateFilter);
+    setPartnerFilter(initialPartnerId);
+    setBrokerFilter(initialBrokerId);
+    setReceivedDateFilter(nextReceivedDateFilter);
+    setPage(initialPage);
+    setPageSize(initialPageSize);
+  }, [
+    initialBrokerId,
+    initialDatePreset,
+    initialPage,
+    initialPageSize,
+    initialPartnerId,
+    initialQuery,
+    initialReceivedDatePreset,
+    initialReceivedFrom,
+    initialReceivedTo,
+    initialSortBy,
+    initialTab,
+    initialVisitFrom,
+    initialVisitTo,
+    orderScope,
+  ]);
+
+  React.useEffect(() => {
+    for (const row of items) {
+      knownRowsRef.current.set(row.id, row);
+    }
+  }, [items]);
+
+  React.useEffect(() => {
+    if (orderScope !== 'regular') {
+      return;
+    }
+    onViewChange?.({
+      tab,
+      datePreset: dateFilter.preset,
+      query: debouncedQuery,
+      partnerId: partnerFilter,
+      brokerId: brokerFilter,
+      page,
+      visitFrom: dateFilter.start,
+      visitTo: dateFilter.end,
+      receivedDatePreset: receivedDateFilter.preset,
+      receivedFrom: receivedDateFilter.start,
+      receivedTo: receivedDateFilter.end,
+      sortBy,
+      pageSize,
+    });
+  }, [
+    brokerFilter,
+    dateFilter.end,
+    dateFilter.preset,
+    dateFilter.start,
+    debouncedQuery,
+    onViewChange,
+    orderScope,
+    page,
+    pageSize,
+    partnerFilter,
+    receivedDateFilter.end,
+    receivedDateFilter.preset,
+    receivedDateFilter.start,
+    sortBy,
+    tab,
+  ]);
 
   React.useEffect(() => {
     if (typeof window === 'undefined') {
@@ -388,18 +546,12 @@ export function OrdersPage({ onOpenOrder, onCreateOrder, onEditOrder, initialTab
   }, [columnWidths]);
 
   React.useEffect(() => {
+    if (lastFilterResetKeyRef.current === filterResetKey) {
+      return;
+    }
+    lastFilterResetKeyRef.current = filterResetKey;
     setPage(1);
-  }, [
-    tab,
-    sortBy,
-    query,
-    dateFilter.start,
-    dateFilter.end,
-    partnerFilter,
-    brokerFilter,
-    receivedDateFilter.start,
-    receivedDateFilter.end,
-  ]);
+  }, [filterResetKey]);
 
   const handleColumnResizeStart = React.useCallback((event, columnKey) => {
     event.preventDefault();
@@ -563,7 +715,27 @@ export function OrdersPage({ onOpenOrder, onCreateOrder, onEditOrder, initialTab
 
   const handleBulkDelete = async () => {
     if (selected.size === 0) return;
-    if (!window.confirm(`선택한 ${selected.size}건의 주문을 삭제하시겠습니까? 삭제된 주문은 목록에서 사라지지만 운영 기록(타임라인)은 보존됩니다.`)) {
+    const selectedRows = Array.from(selected)
+      .map((orderId) => knownRowsRef.current.get(orderId))
+      .filter(Boolean);
+    const recurringCount = selectedRows.filter((row) => Boolean(row.recurringContractId)).length;
+    const today = getAppTodayValue();
+    const pastVisitCount = selectedRows.filter((row) => (
+      row.visitDates.some((visitDate) => visitDate < today)
+    )).length;
+    const riskCounts = [
+      recurringCount > 0 ? `정기계약 회차 ${recurringCount}건` : '',
+      pastVisitCount > 0 ? `과거 방문 ${pastVisitCount}건` : '',
+    ].filter(Boolean);
+    let riskWarning = '';
+    if (recurringCount > 0 && pastVisitCount > 0) {
+      riskWarning = ` ${riskCounts.join('·')} 포함 — 삭제하면 정기청소 내역/협력사 정산 목록에서도 사라집니다.`;
+    } else if (recurringCount > 0) {
+      riskWarning = ` 정기계약 회차 ${recurringCount}건 포함 — 삭제하면 정기청소 내역에서 사라지고, 도급가가 있으면 협력사 정산 목록에서도 사라집니다.`;
+    } else if (pastVisitCount > 0) {
+      riskWarning = ` 과거 방문 ${pastVisitCount}건 포함 — 삭제하면 과거 작업 내역에서 사라집니다.`;
+    }
+    if (!window.confirm(`선택한 ${selected.size}건의 주문을 삭제하시겠습니까?${riskWarning} 삭제된 주문은 목록에서 사라지지만 운영 기록(타임라인)은 보존됩니다.`)) {
       return;
     }
 
@@ -734,12 +906,12 @@ export function OrdersPage({ onOpenOrder, onCreateOrder, onEditOrder, initialTab
         background: 'var(--bg)',
         display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap',
       }}>
-        <div style={{
+        <div className="orders-search" style={{
           display: 'flex', alignItems: 'center', gap: 8,
-          padding: '0 10px', height: 30,
+          padding: '0 10px', height: 40,
           background: 'var(--surface)',
           border: '1px solid var(--border)', borderRadius: 8,
-          minWidth: 240, color: 'var(--text-tertiary)', fontSize: 12,
+          minWidth: 380, color: 'var(--text-tertiary)', fontSize: 12,
           boxShadow: 'var(--shadow-xs)',
         }}>
           <Icon name="search" size={13}/>
@@ -748,6 +920,7 @@ export function OrdersPage({ onOpenOrder, onCreateOrder, onEditOrder, initialTab
             onChange={(event) => setQuery(event.target.value)}
             placeholder="고객/주소/연락처 검색"
             aria-label="주문 검색"
+            className="orders-search__input"
             style={{
               flex: 1,
               minWidth: 0,
@@ -755,7 +928,7 @@ export function OrdersPage({ onOpenOrder, onCreateOrder, onEditOrder, initialTab
               outline: 'none',
               background: 'transparent',
               color: 'var(--text)',
-              fontSize: 12,
+              fontSize: 14,
             }}
           />
         </div>
@@ -1228,7 +1401,12 @@ export function OrdersPage({ onOpenOrder, onCreateOrder, onEditOrder, initialTab
         totalItems={totalItems}
         page={page}
         pageSize={pageSize}
-        onPageChange={setPage}
+        onPageChange={(nextPage) => {
+          if (!orderPage && page > 1 && nextPage === 1) {
+            return;
+          }
+          setPage(nextPage);
+        }}
         onPageSizeChange={setPageSize}
         itemLabel={`건 표시 · ${formatDateFilterSummary(dateFilter)}`}
       />
@@ -1592,6 +1770,9 @@ function toOrderRow(order) {
     receivedRaw: order.received_date,
     received: formatDate(order.received_date),
     visit: formatVisitDates(order),
+    visitDates: Array.isArray(order.visit_dates)
+      ? order.visit_dates
+      : (order.scheduled_date ? [order.scheduled_date] : []),
     scheduledDate: order.scheduled_date,
     timeWindow: order.requested_time || '-',
     team: order.team_name || '미배정',
@@ -1675,7 +1856,14 @@ function createDateFilter(preset) {
   return { preset: 'all', start: '', end: '' };
 }
 
-function createInitialDateFilter(initialTab, initialDatePreset) {
+function createInitialDateFilter(initialTab, initialDatePreset, initialVisitFrom = '', initialVisitTo = '') {
+  if (initialVisitFrom || initialVisitTo) {
+    return {
+      preset: initialDatePreset || 'range',
+      start: initialVisitFrom,
+      end: initialVisitTo,
+    };
+  }
   if (initialDatePreset) {
     return createDateFilter(initialDatePreset);
   }

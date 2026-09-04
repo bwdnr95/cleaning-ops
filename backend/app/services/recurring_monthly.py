@@ -238,6 +238,42 @@ class RecurringMonthlyService:
             )
         ) or 0
 
+    def _should_show_existing_status(
+        self,
+        contract: RecurringContract,
+        status: RecurringMonthlyStatus,
+        first: date,
+        last: date,
+    ) -> bool:
+        has_recorded_history = (
+            bool(status.tax_invoice_issued)
+            or bool(status.balance_paid)
+            or bool(status.partner_payment_paid)
+            or status.retained_partner_id is not None
+            or status.retained_partner_payment_amount is not None
+        )
+        partner_terms = self.partner_billing.resolve(contract, status.billing_month)
+        has_fixed_monthly_obligation = (
+            (
+                contract.billing_mode == RecurringBillingMode.MONTHLY
+                and contract.total_amount is not None
+                and contract.total_amount > 0
+            )
+            or (
+                partner_terms.billing_mode == RecurringBillingMode.MONTHLY
+                and partner_terms.partner_payment_amount is not None
+                and partner_terms.partner_payment_amount > 0
+            )
+        )
+        if has_recorded_history or has_fixed_monthly_obligation:
+            return True
+        is_inactive = (
+            contract.deleted_at is not None
+            or contract.status != RecurringContractStatus.ACTIVE
+            or not self._active_in_month(contract, first, last)
+        )
+        return not is_inactive or self._billable_generated_count(contract, first, last) > 0
+
     def list_month(self, month: str) -> list[RecurringMonthlyRowRead]:
         first, last = _month_bounds(month)
         rows: list[RecurringMonthlyRowRead] = []
@@ -250,12 +286,18 @@ class RecurringMonthlyService:
             if contract_id in contracts:
                 continue
             contract = self.contracts.get(contract_id, include_deleted=True)
-            if contract is not None:
+            if contract is not None and self._should_show_existing_status(
+                contract,
+                status,
+                first,
+                last,
+            ):
                 rows.append(self._to_row(contract, month, status))
         for contract in contracts.values():
             status = statuses.get(contract.id)
             if status is not None:
-                rows.append(self._to_row(contract, month, status))
+                if self._should_show_existing_status(contract, status, first, last):
+                    rows.append(self._to_row(contract, month, status))
                 continue
             has_generated_slots = self._generated_slot_count(contract, first, last) > 0
             if (

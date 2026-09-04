@@ -771,6 +771,16 @@ body.orders-column-resizing {
 }
 
 @media (max-width: 768px) {
+  .orders-search {
+    flex: 1 0 100% !important;
+    width: 100% !important;
+    min-width: 0 !important;
+  }
+
+  .orders-search__input {
+    font-size: var(--mobile-input-font-size) !important;
+  }
+
   .order-form-layout {
     grid-template-columns: minmax(0, 1fr);
   }
