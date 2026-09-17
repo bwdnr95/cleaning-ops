@@ -8,7 +8,10 @@ import { useAuth } from '../store/authStore';
 import {
   ADMIN_PAGE_META,
   DEFAULT_ORDERS_VIEW,
+  type OrderReturnPage,
   type OrdersView,
+  type RecurringTab,
+  getDefaultOrdersView,
   normalizeAdminRoute,
   readAdminRouteFromLocation,
   replaceAdminHistory,
@@ -17,8 +20,10 @@ import {
   toOrderDetailRoute,
   toOrderDuplicateRoute,
   toOrderEditRoute,
+  toOrderReturnRoute,
   toOrdersView,
   toPageRoute,
+  toRecurringRoute,
   writeAdminHistory,
 } from './adminRouteState';
 import { ComingSoon, isCustomerLinkRoute, isPartnerLinkRoute, RouteState } from './AppRoutePrimitives';
@@ -51,9 +56,8 @@ export function App() {
     adminRouteRef.current = adminRoute;
   }, [adminRoute]);
   // 주문 상세의 '정기' 배지에서 계약으로 역링크할 때 전달할 계약 id(데모 affordance: 해시 라우트와 별개).
+  // 정기청소 상단 탭·주문 상세 출처(정기/일반)는 메모리 state가 아니라 라우트(recurringTab/returnPage)가 든다.
   const [openRecurringContractId, setOpenRecurringContractId] = React.useState<string | null>(null);
-  const [recurringInitialTab, setRecurringInitialTab] = React.useState<'contracts' | 'orders'>('contracts');
-  const [orderReturnPage, setOrderReturnPage] = React.useState<'orders' | 'recurring'>('orders');
   const consumeOpenRecurringContract = React.useCallback(() => setOpenRecurringContractId(null), []);
   const adminSession = auth.getSession('admin');
   const partnerSession = auth.getSession('partner');
@@ -115,13 +119,21 @@ export function App() {
   const detailOrderId = adminRoute.detailOrderId;
   const orderForm = adminRoute.orderForm;
   const ordersView = adminRoute.ordersView;
-  const openOrder = React.useCallback((orderId: string, returnPage: 'orders' | 'recurring' = 'orders') => {
-    setOrderReturnPage(returnPage);
-    navigateAdmin(toOrderDetailRoute(orderId, adminRouteRef.current.ordersView));
+  // 상세/폼의 '목록' 복귀처. 해시(`from=recurring`)에 실려 새로고침·뒤로가기에도 유지된다.
+  const returnPage = adminRoute.returnPage;
+  const openOrder = React.useCallback((orderId: string, from: OrderReturnPage = 'orders') => {
+    navigateAdmin(toOrderDetailRoute(orderId, adminRouteRef.current.ordersView, { returnPage: from }));
   }, [navigateAdmin]);
-  const editOrder = React.useCallback((orderId: string, returnPage: 'orders' | 'recurring' = 'orders') => {
-    setOrderReturnPage(returnPage);
-    navigateAdmin(toOrderEditRoute(orderId, adminRouteRef.current.ordersView));
+  const editOrder = React.useCallback((orderId: string, from: OrderReturnPage = 'orders') => {
+    navigateAdmin(toOrderEditRoute(orderId, adminRouteRef.current.ordersView, { returnPage: from }));
+  }, [navigateAdmin]);
+  // 정기청소 상단 탭 전환 — pushState(navigateAdmin)로 탭을 히스토리에 남기고, 정기 주문 탭은 기본 필터로 리셋한다.
+  // (navigateAdmin은 revision을 올려 페이지를 리마운트하므로 목록 상태 리셋도 함께 일어난다.)
+  const changeRecurringTab = React.useCallback((nextTab: RecurringTab) => {
+    if (adminRouteRef.current.page === 'recurring' && adminRouteRef.current.recurringTab === nextTab) {
+      return;
+    }
+    navigateAdmin(toRecurringRoute(nextTab, getDefaultOrdersView('recurring')));
   }, [navigateAdmin]);
 
   if (isStandaloneCustomerLink) {
@@ -144,12 +156,7 @@ export function App() {
             ) : adminSession.user?.role === 'admin' ? (
               <AdminShell
                 page={adminRoute.page}
-                onPageChange={(nextPage) => {
-                  if (nextPage === 'recurring') {
-                    setRecurringInitialTab('contracts');
-                  }
-                  navigateAdmin(toPageRoute(nextPage));
-                }}
+                onPageChange={(nextPage) => navigateAdmin(toPageRoute(nextPage))}
                 onCreateOrder={() => navigateAdmin(toOrderCreateRoute(
                   adminRoute.page,
                   adminRoute.page === 'orders' ? adminRouteRef.current.ordersView : DEFAULT_ORDERS_VIEW,
@@ -160,12 +167,14 @@ export function App() {
                 onLogout={() => void auth.logout('admin')}
               >
                 {({ page, setPage }) => {
+                  // 상세/폼 breadcrumb의 목록 라벨은 출처를 따른다(정기 주문 탭에서 열었으면 '정기청소').
+                  const listMeta = returnPage === 'recurring' ? ADMIN_PAGE_META.recurring : ADMIN_PAGE_META.orders;
                   if (orderForm) {
                     return (
                       <>
                         <Topbar
                           title={orderForm.duplicateFromOrderId ? '주문 복제' : orderForm.mode === 'edit' ? '주문 수정' : '신규 주문 등록'}
-                          breadcrumb={['운영', '주문관리', orderForm.duplicateFromOrderId ? '복제' : orderForm.mode === 'edit' ? '수정' : '신규']}
+                          breadcrumb={[...listMeta.breadcrumb, orderForm.duplicateFromOrderId ? '복제' : orderForm.mode === 'edit' ? '수정' : '신규']}
                         />
                         <OrderFormPage
                           mode={orderForm.mode}
@@ -173,13 +182,13 @@ export function App() {
                           duplicateFromOrderId={orderForm.duplicateFromOrderId || null}
                           onCancel={() => {
                             if (orderForm.mode === 'edit' && orderForm.orderId) {
-                              navigateAdmin(toOrderDetailRoute(orderForm.orderId, ordersView));
+                              navigateAdmin(toOrderDetailRoute(orderForm.orderId, ordersView, { returnPage }));
                               return;
                             }
-                            navigateAdmin(toPageRoute(page, ordersView));
+                            navigateAdmin(toOrderReturnRoute(returnPage, ordersView));
                           }}
                           onSaved={(order) => {
-                            navigateAdmin(toOrderDetailRoute(order.id, ordersView));
+                            navigateAdmin(toOrderDetailRoute(order.id, ordersView, { returnPage }));
                           }}
                         />
                       </>
@@ -191,25 +200,23 @@ export function App() {
                       <>
                         <Topbar
                           title="주문 상세"
-                          breadcrumb={['운영', '주문관리', '상세']}
+                          breadcrumb={[...listMeta.breadcrumb, '상세']}
                         />
                         <OrderDetailPage
                           orderId={detailOrderId}
-                          onBack={() => {
-                            if (orderReturnPage === 'recurring') {
-                              setRecurringInitialTab('orders');
-                              navigateAdmin(toPageRoute('recurring', ordersView));
-                              return;
-                            }
-                            navigateAdmin(toPageRoute('orders', ordersView));
-                          }}
-                          onEdit={() => navigateAdmin(toOrderEditRoute(detailOrderId, ordersView))}
-                          onDuplicate={() => navigateAdmin(toOrderDuplicateRoute(detailOrderId, ordersView))}
-                          onOpenOrder={(nextOrderId) => navigateAdmin(toOrderDetailRoute(nextOrderId, ordersView))}
+                          onBack={() => navigateAdmin(toOrderReturnRoute(returnPage, ordersView))}
+                          onEdit={() => navigateAdmin(toOrderEditRoute(detailOrderId, ordersView, { returnPage }))}
+                          // 복제 결과는 정기계약과 무관한 일반 주문이므로 출처가 정기 탭이어도 복귀처는 주문관리(기본 뷰).
+                          onDuplicate={() => navigateAdmin(
+                            returnPage === 'recurring'
+                              ? toOrderDuplicateRoute(detailOrderId)
+                              : toOrderDuplicateRoute(detailOrderId, ordersView, { returnPage }),
+                          )}
+                          onOpenOrder={(nextOrderId) => navigateAdmin(toOrderDetailRoute(nextOrderId, ordersView, { returnPage }))}
                           onOpenRecurringContract={(contractId) => {
+                            // 계약 탭(#recurring)으로 이동하면서 역링크 계약 id를 함께 넘긴다.
                             setOpenRecurringContractId(contractId);
-                            setRecurringInitialTab('contracts');
-                            setPage('recurring');
+                            navigateAdmin(toPageRoute('recurring'));
                           }}
                           onNav={(nextPage) => {
                             setPage(nextPage);
@@ -278,9 +285,25 @@ export function App() {
                       {page === 'partners' && <PartnersPage />}
                       {page === 'recurring' && (
                         <RecurringContractsPage
+                          key={`recurring-${adminNavigationRevision}`}
                           initialContractId={openRecurringContractId}
-                          initialTab={recurringInitialTab}
                           onInitialContractConsumed={consumeOpenRecurringContract}
+                          tab={adminRoute.recurringTab}
+                          onTabChange={changeRecurringTab}
+                          initialTab={ordersView.tab}
+                          initialDatePreset={ordersView.datePreset}
+                          initialQuery={ordersView.query}
+                          initialPartnerId={ordersView.partnerId}
+                          initialBrokerId={ordersView.brokerId}
+                          initialPage={ordersView.page}
+                          initialVisitFrom={ordersView.visitFrom}
+                          initialVisitTo={ordersView.visitTo}
+                          initialReceivedDatePreset={ordersView.receivedDatePreset}
+                          initialReceivedFrom={ordersView.receivedFrom}
+                          initialReceivedTo={ordersView.receivedTo}
+                          initialSortBy={ordersView.sortBy}
+                          initialPageSize={ordersView.pageSize}
+                          onViewChange={syncOrdersView}
                           onEditOrder={(orderId) => editOrder(orderId, 'recurring')}
                           onOpenOrder={(orderId) => openOrder(orderId, 'recurring')}
                         />

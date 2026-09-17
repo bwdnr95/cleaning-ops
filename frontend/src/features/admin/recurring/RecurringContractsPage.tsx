@@ -5,9 +5,22 @@ import { CONTRACT_STATUS_LABEL, CONTRACT_STATUS_TONE } from '../../../domain/rec
 import { RecurringContractDetail } from './RecurringContractDetail';
 import { RecurringContractForm } from './RecurringContractForm';
 import { RecurringMonthlyTracker } from './RecurringMonthlyTracker';
-import { RecurringOrdersList } from './RecurringOrdersList';
+import { RecurringOrdersList, type RecurringOrdersViewProps } from './RecurringOrdersList';
 
 type View = { mode: 'list' } | { mode: 'create' } | { mode: 'detail'; id: string };
+export type RecurringPageTab = 'contracts' | 'monthly' | 'orders';
+
+interface RecurringContractsPageProps extends RecurringOrdersViewProps {
+  // 주문 상세 '정기' 배지에서 역링크로 진입할 때 전달되는 계약 id.
+  readonly initialContractId?: string | null;
+  readonly onInitialContractConsumed?: () => void;
+  // 상단 탭(계약/월 트래커/정기 주문)은 라우트 제어형 — 값은 해시(#recurring?view=…)에서 오고,
+  // 변경은 onTabChange로 올려 브라우저 뒤로가기/새로고침에도 탭이 유지되게 한다.
+  readonly tab: RecurringPageTab;
+  readonly onTabChange: (tab: RecurringPageTab) => void;
+  readonly onOpenOrder?: (orderId: string) => void;
+  readonly onEditOrder?: (orderId: string) => void;
+}
 
 const cellStyle: React.CSSProperties = {
   padding: '7px 8px',
@@ -24,18 +37,13 @@ const headStyle: React.CSSProperties = {
 
 export function RecurringContractsPage({
   initialContractId = null,
-  initialTab = 'contracts',
   onInitialContractConsumed,
+  tab,
+  onTabChange,
   onOpenOrder,
   onEditOrder,
-}: {
-  // 주문 상세 '정기' 배지에서 역링크로 진입할 때 전달되는 계약 id.
-  initialContractId?: string | null;
-  initialTab?: 'contracts' | 'monthly' | 'orders';
-  onInitialContractConsumed?: () => void;
-  onOpenOrder?: (orderId: string) => void;
-  onEditOrder?: (orderId: string) => void;
-} = {}) {
+  ...ordersViewProps
+}: RecurringContractsPageProps) {
   // 역링크 진입은 마운트 시점에 바로 상세로 들어간다(목록 깜빡임 없이).
   const [view, setView] = React.useState<View>(
     initialContractId ? { mode: 'detail', id: initialContractId } : { mode: 'list' },
@@ -49,10 +57,18 @@ export function RecurringContractsPage({
       onInitialContractConsumed?.();
     }
   }, [initialContractId, onInitialContractConsumed]);
+  // 브라우저 뒤로/앞으로로 상단 탭만 바뀌면(popstate는 리마운트 없이 tab prop만 갱신) 계약 상세/등록 폼을
+  // 닫고 목록으로 돌아간다. 마운트 시점엔 실행하지 않는다(역링크 진입은 detail로 시작해야 하므로).
+  const prevTabRef = React.useRef(tab);
+  React.useEffect(() => {
+    if (prevTabRef.current === tab) {
+      return;
+    }
+    prevTabRef.current = tab;
+    setView({ mode: 'list' });
+  }, [tab]);
   const [contracts, setContracts] = React.useState<RecurringContractSummary[] | null>(null);
   const [error, setError] = React.useState<string | null>(null);
-  // 정기청소 영역 상단 탭: 계약 관리(기존) / 월 트래커(세금계산서·잔금).
-  const [tab, setTab] = React.useState<'contracts' | 'monthly' | 'orders'>(initialTab);
 
   const load = React.useCallback(async () => {
     setError(null);
@@ -84,14 +100,15 @@ export function RecurringContractsPage({
   return (
     <div data-testid="admin-recurring-page" style={{ flex: 1, minHeight: 0, overflow: 'auto', background: 'var(--bg)' }}>
       <div className="page-shell" style={{ padding: 20, display: 'flex', flexDirection: 'column', gap: 16, paddingBottom: 80 }}>
-        {/* 계약 관리 / 월 트래커 전환 탭 (목록 모드에서만 노출 — create/detail은 위에서 early return) */}
+        {/* 계약 관리 / 월 트래커 / 정기 주문 전환 탭 (목록 모드에서만 노출 — create/detail은 위에서 early return).
+            활성 탭은 라우트가 결정하므로 여기서는 onTabChange만 올린다. */}
         <div style={{ display: 'flex', gap: 4, borderBottom: '1px solid var(--border)' }}>
           <button
             type="button"
             className="btn btn--ghost btn--sm"
             data-testid="recurring-tab-contracts"
             style={{ fontWeight: tab === 'contracts' ? 700 : 400 }}
-            onClick={() => setTab('contracts')}
+            onClick={() => onTabChange('contracts')}
           >
             계약
           </button>
@@ -100,7 +117,7 @@ export function RecurringContractsPage({
             className="btn btn--ghost btn--sm"
             data-testid="recurring-tab-monthly"
             style={{ fontWeight: tab === 'monthly' ? 700 : 400 }}
-            onClick={() => setTab('monthly')}
+            onClick={() => onTabChange('monthly')}
           >
             월 트래커
           </button>
@@ -109,7 +126,7 @@ export function RecurringContractsPage({
             className="btn btn--ghost btn--sm"
             data-testid="recurring-tab-orders"
             style={{ fontWeight: tab === 'orders' ? 700 : 400 }}
-            onClick={() => setTab('orders')}
+            onClick={() => onTabChange('orders')}
           >
             정기 주문
           </button>
@@ -117,7 +134,7 @@ export function RecurringContractsPage({
 
         {tab === 'monthly' && <RecurringMonthlyTracker />}
         {tab === 'orders' && (
-          <RecurringOrdersList onEditOrder={onEditOrder} onOpenOrder={onOpenOrder} />
+          <RecurringOrdersList {...ordersViewProps} onEditOrder={onEditOrder} onOpenOrder={onOpenOrder} />
         )}
         {tab === 'contracts' && (
           <>

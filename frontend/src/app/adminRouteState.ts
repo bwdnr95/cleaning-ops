@@ -85,14 +85,62 @@ export const DEFAULT_ORDERS_VIEW: OrdersView = {
   pageSize: 50,
 };
 
-const ADMIN_PAGE_KEYS = Object.keys(ADMIN_PAGE_META);
+// 주문 목록 뷰의 스코프. 정기 주문 탭(recurring)은 과거 회차까지 한눈에 보는 게 기본이라
+// 방문일 프리셋 기본값만 '전체'로 다르고, 나머지 기본값·해시 파라미터 이름은 주문관리와 같다.
+export type OrdersViewScope = 'regular' | 'recurring';
 
-export const DEFAULT_ADMIN_ROUTE = {
+export const DEFAULT_RECURRING_ORDERS_VIEW: OrdersView = {
+  ...DEFAULT_ORDERS_VIEW,
+  datePreset: 'all',
+};
+
+// 정기청소 페이지 상단 탭. 해시에는 `view=` 키로 싣는다(`tab=`은 주문 상태 탭이 이미 쓰는 키).
+export type RecurringTab = 'contracts' | 'monthly' | 'orders';
+// 주문 상세/폼의 출처 — '목록'으로 돌아갈 곳. 해시에는 `from=` 키로 싣는다(기본 orders는 생략).
+export type OrderReturnPage = 'orders' | 'recurring';
+
+export interface AdminOrderFormRoute {
+  readonly mode: 'create' | 'edit';
+  readonly orderId: string | null;
+  readonly duplicateFromOrderId?: string | null;
+}
+
+export interface AdminRoute {
+  readonly page: string;
+  readonly detailOrderId: string | null;
+  readonly orderForm: AdminOrderFormRoute | null;
+  readonly ordersView: OrdersView;
+  readonly recurringTab: RecurringTab;
+  readonly returnPage: OrderReturnPage;
+}
+
+// normalizeAdminRoute 입력 — 부분/느슨한 객체를 받아 AdminRoute로 정규화한다.
+interface AdminRouteInput {
+  readonly page?: string | null;
+  readonly detailOrderId?: string | null;
+  readonly orderForm?: AdminOrderFormRoute | null;
+  readonly ordersView?: Partial<OrdersView> | null;
+  readonly recurringTab?: string | null;
+  readonly returnPage?: string | null;
+}
+
+const ADMIN_PAGE_KEYS = Object.keys(ADMIN_PAGE_META);
+const RECURRING_TABS: readonly string[] = ['contracts', 'monthly', 'orders'];
+const DEFAULT_RECURRING_TAB: RecurringTab = 'contracts';
+const DEFAULT_ORDER_RETURN_PAGE: OrderReturnPage = 'orders';
+
+export const DEFAULT_ADMIN_ROUTE: AdminRoute = {
   page: 'dashboard',
   detailOrderId: null,
   orderForm: null,
   ordersView: DEFAULT_ORDERS_VIEW,
+  recurringTab: DEFAULT_RECURRING_TAB,
+  returnPage: DEFAULT_ORDER_RETURN_PAGE,
 };
+
+export function getDefaultOrdersView(scope: OrdersViewScope = 'regular'): OrdersView {
+  return scope === 'recurring' ? DEFAULT_RECURRING_ORDERS_VIEW : DEFAULT_ORDERS_VIEW;
+}
 
 interface OrdersViewOptions {
   readonly ordersTab?: string | null;
@@ -110,11 +158,11 @@ interface OrdersViewOptions {
   readonly pageSize?: number | string | null;
 }
 
-export function toOrdersView(options: OrdersViewOptions = {}) {
+export function toOrdersView(options: OrdersViewOptions = {}, scope: OrdersViewScope = 'regular'): OrdersView {
   const tab = typeof options.ordersTab === 'string' ? options.ordersTab : DEFAULT_ORDERS_VIEW.tab;
   const datePreset = typeof options.datePreset === 'string'
     ? options.datePreset
-    : getDefaultOrdersDatePreset(tab);
+    : getDefaultOrdersDatePreset(tab, scope);
 
   return {
     tab,
@@ -133,52 +181,97 @@ export function toOrdersView(options: OrdersViewOptions = {}) {
   };
 }
 
-export function toPageRoute(page: string, ordersView = DEFAULT_ORDERS_VIEW) {
+interface OrderSubRouteOptions {
+  readonly returnPage?: OrderReturnPage;
+}
+
+export function toPageRoute(page: string, ordersView = DEFAULT_ORDERS_VIEW): AdminRoute {
   return {
     page,
     detailOrderId: null,
     orderForm: null,
     ordersView,
+    recurringTab: DEFAULT_RECURRING_TAB,
+    returnPage: DEFAULT_ORDER_RETURN_PAGE,
   };
 }
 
-export function toOrderCreateRoute(_returnPage = 'orders', ordersView = DEFAULT_ORDERS_VIEW) {
+// 정기청소 페이지 라우트. ordersView는 '정기 주문' 탭의 목록 뷰(기본값은 정기 스코프 기본값).
+export function toRecurringRoute(
+  recurringTab: RecurringTab = DEFAULT_RECURRING_TAB,
+  ordersView = DEFAULT_RECURRING_ORDERS_VIEW,
+): AdminRoute {
+  return {
+    ...toPageRoute('recurring', ordersView),
+    recurringTab,
+  };
+}
+
+// 주문 상세/폼의 '목록' 복귀 라우트 — 출처가 정기청소면 정기 주문 탭으로, 아니면 주문관리로.
+export function toOrderReturnRoute(returnPage: OrderReturnPage, ordersView: OrdersView): AdminRoute {
+  if (returnPage === 'recurring') {
+    return toRecurringRoute('orders', ordersView);
+  }
+  return toPageRoute('orders', ordersView);
+}
+
+export function toOrderCreateRoute(_returnPage = 'orders', ordersView = DEFAULT_ORDERS_VIEW): AdminRoute {
   return {
     page: 'orders',
     detailOrderId: null,
     orderForm: { mode: 'create', orderId: null },
     ordersView,
+    recurringTab: DEFAULT_RECURRING_TAB,
+    returnPage: DEFAULT_ORDER_RETURN_PAGE,
   };
 }
 
-export function toOrderDetailRoute(orderId: string, ordersView = DEFAULT_ORDERS_VIEW) {
+export function toOrderDetailRoute(
+  orderId: string,
+  ordersView = DEFAULT_ORDERS_VIEW,
+  { returnPage = DEFAULT_ORDER_RETURN_PAGE }: OrderSubRouteOptions = {},
+): AdminRoute {
   return {
     page: 'orders',
     detailOrderId: orderId,
     orderForm: null,
     ordersView,
+    recurringTab: DEFAULT_RECURRING_TAB,
+    returnPage,
   };
 }
 
-export function toOrderEditRoute(orderId: string, ordersView = DEFAULT_ORDERS_VIEW) {
+export function toOrderEditRoute(
+  orderId: string,
+  ordersView = DEFAULT_ORDERS_VIEW,
+  { returnPage = DEFAULT_ORDER_RETURN_PAGE }: OrderSubRouteOptions = {},
+): AdminRoute {
   return {
     page: 'orders',
     detailOrderId: orderId,
     orderForm: { mode: 'edit', orderId },
     ordersView,
+    recurringTab: DEFAULT_RECURRING_TAB,
+    returnPage,
   };
 }
 
-export function toOrderDuplicateRoute(orderId: string, ordersView = DEFAULT_ORDERS_VIEW) {
+export function toOrderDuplicateRoute(
+  orderId: string,
+  ordersView = DEFAULT_ORDERS_VIEW,
+  { returnPage = DEFAULT_ORDER_RETURN_PAGE }: OrderSubRouteOptions = {},
+): AdminRoute {
   return {
     page: 'orders',
     detailOrderId: null,
     orderForm: { mode: 'create', orderId: null, duplicateFromOrderId: orderId },
     ordersView,
+    recurringTab: DEFAULT_RECURRING_TAB,
+    returnPage,
   };
 }
 
-export function readAdminRouteFromLocation() {
+export function readAdminRouteFromLocation(): AdminRoute {
   if (typeof window === 'undefined') {
     return DEFAULT_ADMIN_ROUTE;
   }
@@ -192,6 +285,12 @@ export function readAdminRouteFromLocation() {
   const segments = pathPart.split('/').filter(Boolean).map((segment) => decodeURIComponent(segment));
   const params = new URLSearchParams(queryString);
   const page = ADMIN_PAGE_KEYS.includes(segments[0]) ? segments[0] : DEFAULT_ADMIN_ROUTE.page;
+  // 출처(from=)는 주문 상세/폼 하위 라우트에서만 읽는다 — 목록 해시에 수제로 붙은 from은 뷰 기본값 해석에 끼어들면 안 된다.
+  const isOrderSubRoute = page === 'orders' && Boolean(segments[1]);
+  const returnPage = isOrderSubRoute
+    ? normalizeOrderReturnPage(params.get('from'))
+    : DEFAULT_ORDER_RETURN_PAGE;
+  const recurringTab = normalizeRecurringTab(params.get('view'));
   const ordersView = toOrdersView({
     ordersTab: params.get('tab') || undefined,
     datePreset: params.get('date') || undefined,
@@ -206,7 +305,7 @@ export function readAdminRouteFromLocation() {
     receivedTo: params.get('received_to'),
     sortBy: params.get('sort'),
     pageSize: params.get('page_size'),
-  });
+  }, getOrdersViewScope(page, returnPage));
 
   if (page === 'orders' && segments[1] === 'new') {
     return normalizeAdminRoute(toOrderCreateRoute('orders', ordersView));
@@ -214,19 +313,33 @@ export function readAdminRouteFromLocation() {
   if (page === 'orders' && segments[1]) {
     const orderId = segments[1];
     if (segments[2] === 'edit') {
-      return normalizeAdminRoute(toOrderEditRoute(orderId, ordersView));
+      return normalizeAdminRoute(toOrderEditRoute(orderId, ordersView, { returnPage }));
     }
     if (segments[2] === 'duplicate') {
-      return normalizeAdminRoute(toOrderDuplicateRoute(orderId, ordersView));
+      return normalizeAdminRoute(toOrderDuplicateRoute(orderId, ordersView, { returnPage }));
     }
-    return normalizeAdminRoute(toOrderDetailRoute(orderId, ordersView));
+    return normalizeAdminRoute(toOrderDetailRoute(orderId, ordersView, { returnPage }));
+  }
+  if (page === 'recurring') {
+    // 정기 주문 탭일 때만 목록 뷰를 해시에서 복원한다(계약/월 트래커 탭은 목록 파라미터가 없다).
+    return normalizeAdminRoute(toRecurringRoute(
+      recurringTab,
+      recurringTab === 'orders' ? ordersView : DEFAULT_RECURRING_ORDERS_VIEW,
+    ));
   }
 
   return normalizeAdminRoute(toPageRoute(page, page === 'orders' ? ordersView : DEFAULT_ORDERS_VIEW));
 }
 
-export function normalizeAdminRoute(route) {
+export function normalizeAdminRoute(route: AdminRouteInput | null | undefined): AdminRoute {
   const page = ADMIN_PAGE_KEYS.includes(route?.page) ? route.page : DEFAULT_ADMIN_ROUTE.page;
+  const detailOrderId = route?.detailOrderId || null;
+  const orderForm = route?.orderForm || null;
+  // 출처(returnPage)는 주문 상세/폼 라우트에서만 의미가 있다. 목록·다른 페이지에선 기본값으로 접어
+  // 해시에 `from=`이 새지 않게 한다. 정기 탭도 정기청소 페이지 밖에선 기본값으로 접는다.
+  const isOrderSubRoute = page === 'orders' && Boolean(detailOrderId || orderForm);
+  const returnPage = isOrderSubRoute ? normalizeOrderReturnPage(route?.returnPage) : DEFAULT_ORDER_RETURN_PAGE;
+  const recurringTab = page === 'recurring' ? normalizeRecurringTab(route?.recurringTab) : DEFAULT_RECURRING_TAB;
   const ordersView = toOrdersView({
     ordersTab: route?.ordersView?.tab,
     datePreset: route?.ordersView?.datePreset,
@@ -241,20 +354,22 @@ export function normalizeAdminRoute(route) {
     receivedTo: route?.ordersView?.receivedTo,
     sortBy: route?.ordersView?.sortBy,
     pageSize: route?.ordersView?.pageSize,
-  });
+  }, getOrdersViewScope(page, returnPage));
   return {
     page,
-    detailOrderId: route?.detailOrderId || null,
-    orderForm: route?.orderForm || null,
+    detailOrderId,
+    orderForm,
     ordersView,
+    recurringTab,
+    returnPage,
   };
 }
 
-export function replaceAdminHistory(route) {
+export function replaceAdminHistory(route: AdminRouteInput) {
   writeAdminHistory(route, { replace: true });
 }
 
-export function writeAdminHistory(route, { replace = false } = {}) {
+export function writeAdminHistory(route: AdminRouteInput, { replace = false } = {}) {
   if (typeof window === 'undefined') {
     return;
   }
@@ -269,7 +384,11 @@ export function writeAdminHistory(route, { replace = false } = {}) {
   window.history[method]({ cleanOpsAdminRoute: true }, '', url);
 }
 
-export function getDefaultOrdersDatePreset(tab: string): string {
+export function getDefaultOrdersDatePreset(tab: string, scope: OrdersViewScope = 'regular'): string {
+  if (scope === 'recurring') {
+    // 정기 주문 탭은 대시보드 드릴다운 탭이 없으므로 상태 탭과 무관하게 '전체'가 기본.
+    return DEFAULT_RECURRING_ORDERS_VIEW.datePreset;
+  }
   if (tab === 'today') {
     return 'today';
   }
@@ -280,6 +399,19 @@ export function getDefaultOrdersDatePreset(tab: string): string {
     return tab.startsWith('monthly_') ? 'month' : 'all';
   }
   return DEFAULT_ORDERS_VIEW.datePreset;
+}
+
+// 정기청소 페이지 자체, 또는 정기 주문 탭에서 연 상세/폼(from=recurring)은 정기 스코프의 기본값을 쓴다.
+function getOrdersViewScope(page: string, returnPage: OrderReturnPage): OrdersViewScope {
+  return page === 'recurring' || returnPage === 'recurring' ? 'recurring' : 'regular';
+}
+
+function normalizeRecurringTab(value: string | null | undefined): RecurringTab {
+  return RECURRING_TABS.includes(value || '') ? (value as RecurringTab) : DEFAULT_RECURRING_TAB;
+}
+
+function normalizeOrderReturnPage(value: string | null | undefined): OrderReturnPage {
+  return value === 'recurring' ? 'recurring' : DEFAULT_ORDER_RETURN_PAGE;
 }
 
 function normalizeOrdersPage(value: number | string | null | undefined): number {
@@ -315,7 +447,7 @@ export function toAdminNavBadges(summary: DashboardSummary | null) {
   };
 }
 
-function adminRouteToHash(route) {
+function adminRouteToHash(route: AdminRouteInput) {
   const normalized = normalizeAdminRoute(route);
   let path = normalized.page;
   if (normalized.orderForm?.mode === 'create' && normalized.orderForm.duplicateFromOrderId) {
@@ -329,11 +461,17 @@ function adminRouteToHash(route) {
   }
 
   const params = new URLSearchParams();
-  if (path.startsWith('orders')) {
+  // 정기청소 페이지: 상단 탭은 `view=`(계약 탭은 생략), 목록 파라미터는 정기 주문 탭일 때만 싣는다.
+  const isRecurringOrdersTab = normalized.page === 'recurring' && normalized.recurringTab === 'orders';
+  if (normalized.page === 'recurring' && normalized.recurringTab !== DEFAULT_RECURRING_TAB) {
+    params.set('view', normalized.recurringTab);
+  }
+  if (path.startsWith('orders') || isRecurringOrdersTab) {
+    const scope = getOrdersViewScope(normalized.page, normalized.returnPage);
     if (normalized.ordersView.tab !== DEFAULT_ORDERS_VIEW.tab) {
       params.set('tab', normalized.ordersView.tab);
     }
-    if (normalized.ordersView.datePreset !== getDefaultOrdersDatePreset(normalized.ordersView.tab)) {
+    if (normalized.ordersView.datePreset !== getDefaultOrdersDatePreset(normalized.ordersView.tab, scope)) {
       params.set('date', normalized.ordersView.datePreset);
     }
     if (normalized.ordersView.query !== DEFAULT_ORDERS_VIEW.query) {
@@ -369,6 +507,10 @@ function adminRouteToHash(route) {
     if (normalized.ordersView.pageSize !== DEFAULT_ORDERS_VIEW.pageSize) {
       params.set('page_size', String(normalized.ordersView.pageSize));
     }
+  }
+  // 출처는 normalizeAdminRoute가 상세/폼 라우트에서만 남기므로 목록 해시엔 붙지 않는다.
+  if (normalized.returnPage !== DEFAULT_ORDER_RETURN_PAGE) {
+    params.set('from', normalized.returnPage);
   }
 
   const query = params.toString();

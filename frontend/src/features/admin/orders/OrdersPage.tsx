@@ -501,10 +501,8 @@ export function OrdersPage({
     }
   }, [items]);
 
+  // 정기 주문 탭(recurring 스코프)도 같은 콜백으로 뷰를 올려 해시 복원을 받는다(스코프별 기본값은 라우트 쪽 책임).
   React.useEffect(() => {
-    if (orderScope !== 'regular') {
-      return;
-    }
     onViewChange?.({
       tab,
       datePreset: dateFilter.preset,
@@ -527,7 +525,6 @@ export function OrdersPage({
     dateFilter.start,
     debouncedQuery,
     onViewChange,
-    orderScope,
     page,
     pageSize,
     partnerFilter,
