@@ -6,6 +6,7 @@ from sqlalchemy import select
 
 from app.core.time import business_today
 from app.db.seed import DEV_PARTNER_ID, DEV_SERVICE_ITEM_ID
+from app.domain.constants import OrderStatus
 from app.models.order import Order
 from app.models.order_group import OrderGroup
 from app.models.partner import Partner
@@ -301,3 +302,84 @@ def test_generation_rejects_archived_effective_partner(db_session) -> None:
     assert db_session.scalars(
         select(Order).where(Order.recurring_contract_id == contract.id)
     ).all() == []
+
+
+def test_calendar_excludes_recurring_contract_orders(
+    client,
+    seed_admin_token,
+) -> None:
+    """일정 캘린더에는 정기 회차 주문을 제외하고 일반 주문만 노출한다(도급사 요청).
+
+    정기 회차는 정기청소 > 정기 주문 탭에서 관리하므로, 달력은 주문관리 scope=regular와
+    같은 기준(recurring_contract_id IS NULL)으로 필터링되어야 한다.
+    """
+    today = business_today()
+    headers = _auth(seed_admin_token)
+
+    # 1) 정기계약 생성 → 이번 달 회차 주문이 자동 생성된다(오늘 요일 기준이라 오늘 방문 건이 최소 1건).
+    created = client.post(
+        "/api/admin/recurring/contracts",
+        json={
+            "label": "달력 제외 정기청소",
+            "customer_name": "달력 제외 고객",
+            "customer_phone": "01022223333",
+            "customer_address": "서울시 강남구 테스트로 7",
+            "recurrence_mode": "weekly",
+            "day_of_month": None,
+            "interval_weeks": 1,
+            "weekdays": [today.weekday()],
+            "start_date": date(today.year, today.month, 1).isoformat(),
+            "default_partner_id": DEV_PARTNER_ID,
+            "service_name": "사무실 정기청소",
+            "total_amount": 88000,
+        },
+        headers=headers,
+    )
+    assert created.status_code == 201, created.text
+    contract_id = created.json()["id"]
+
+    # 회차 주문이 실제로 생성되었는지 확인(테스트가 vacuous하지 않도록).
+    recurring_page = client.get(
+        "/api/admin/orders/page?scope=recurring&visit_preset=all&page_size=2000",
+        headers=headers,
+    )
+    assert recurring_page.status_code == 200, recurring_page.text
+    recurring_order_ids = {
+        order["id"]
+        for order in recurring_page.json()["items"]
+        if order["recurring_contract_id"] == contract_id
+    }
+    assert recurring_order_ids, "정기계약 생성 후 회차 주문이 1건 이상 생성되어야 한다"
+
+    # 2) 같은 달 방문일의 일반 주문을 새로 만들어 필터가 과도하지 않음을 증명한다.
+    regular_created = client.post(
+        "/api/admin/orders/groups",
+        headers=headers,
+        json={
+            "customer_name": "달력 노출 일반 고객",
+            "customer_phone": "010-1111-2222",
+            "customer_address": "서울시 강남구 일반로 1",
+            "lines": [
+                {
+                    "status": OrderStatus.SCHEDULE_CONFIRMED.value,
+                    "received_date": today.isoformat(),
+                    "scheduled_date": today.isoformat(),
+                    "service_name": "일반 입주청소",
+                },
+            ],
+        },
+    )
+    assert regular_created.status_code == 201, regular_created.text
+    regular_order_id = regular_created.json()["lines"][0]["id"]
+
+    # 3) 이번 달 달력: 정기 회차 주문은 하나도 없고, 일반 주문은 있어야 한다.
+    calendar = client.get(
+        f"/api/admin/calendar?year={today.year}&month={today.month}",
+        headers=headers,
+    )
+    assert calendar.status_code == 200, calendar.text
+    calendar_order_ids = {row["id"] for row in calendar.json()}
+    assert calendar_order_ids.isdisjoint(recurring_order_ids), (
+        f"달력에 정기 회차 주문이 노출됨: {calendar_order_ids & recurring_order_ids}"
+    )
+    assert regular_order_id in calendar_order_ids

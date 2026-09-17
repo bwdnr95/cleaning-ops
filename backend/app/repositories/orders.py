@@ -69,10 +69,12 @@ class OrderRepository(Repository[Order]):
         partner_id: str | None = None,
     ) -> list["OrderVisitOccurrence"]:
         # 달력에는 취소건을 기본 숨김(카운트 정의와 일치). 기록은 주문목록 '취소' 탭에서 확인.
+        # 정기 회차 주문은 정기청소 > 정기 주문 탭에서 관리하므로 달력에는 일반 주문만 노출(scope=regular와 동일 기준).
         stmt = (
             select(Order)
             .where(
                 Order.deleted_at.is_(None),
+                Order.recurring_contract_id.is_(None),
                 Order.status != OrderStatus.CANCELLED,
                 or_(
                     Order.scheduled_date.between(start_date, end_date),
