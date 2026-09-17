@@ -1,5 +1,7 @@
 import { expect, test } from '@playwright/test';
 
+import { getAppTodayDate } from '../src/domain/time';
+
 const backendPort = Number(process.env.E2E_BACKEND_PORT ?? 8003);
 const backendUrl = `http://127.0.0.1:${backendPort}`;
 
@@ -235,6 +237,59 @@ test('calendar more link opens the selected day order list', async ({ page, requ
 
   await page.getByTestId(`calendar-panel-order-${orders[3].id}`).click();
   await expect(page.getByTestId('admin-order-detail-page')).toBeVisible();
+});
+
+test('calendar day cell empty area click selects that day', async ({ page }) => {
+  await loginAsAdmin(page);
+  await page.getByTestId('admin-nav-calendar').click();
+  await expect(page.getByTestId('admin-calendar-page')).toBeVisible();
+
+  // 앱은 KST 기준 날짜(getAppTodayDate)를 쓰므로 머신 로컬 new Date() 대신 같은 기준으로 맞춘다.
+  const now = getAppTodayDate();
+  const monthPrefix = `${now.getFullYear()}.${String(now.getMonth() + 1).padStart(2, '0')}`;
+  const panel = page.getByTestId('calendar-day-panel');
+  // 기본 선택은 오늘 — 패널이 오늘을 표시하면 달력 로딩이 끝난 상태다.
+  await expect(panel).toContainText(`${monthPrefix}.${String(now.getDate()).padStart(2, '0')}`);
+
+  // 다른 스펙이 공유 DB에 어느 날짜로 주문을 남겼는지는 실행 순서에 따라 달라지므로, 고정 날짜 대신
+  // 오늘이 아니면서 일정 항목이 하나도 없는 첫 셀을 고른다(일정 버튼이 있으면 하단 여백이 가려질 수 있다).
+  const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+  let targetDay = 0;
+  for (let day = 1; day <= daysInMonth; day += 1) {
+    if (day === now.getDate()) {
+      continue;
+    }
+    const eventCount = await page.getByTestId(`calendar-day-${day}`).locator('.calendar-event-button').count();
+    if (eventCount === 0) {
+      targetDay = day;
+      break;
+    }
+  }
+  expect(targetDay).toBeGreaterThan(0);
+
+  const cell = page.getByTestId(`calendar-day-${targetDay}`);
+  const badge = page.getByTestId(`calendar-day-select-${targetDay}`);
+  await expect(badge).toHaveAttribute('aria-pressed', 'false');
+  const cellBox = await cell.boundingBox();
+  const badgeBox = await badge.boundingBox();
+  if (!cellBox || !badgeBox) {
+    throw new Error(`calendar-day-${targetDay} cell/badge bounding box unavailable`);
+  }
+
+  // 배지 버튼이 아니라 셀 하단 빈 여백을 눌러야 하므로 클릭 좌표가 배지 박스 아래임을 먼저 확인한다.
+  const clickX = cellBox.x + cellBox.width / 2;
+  const clickY = cellBox.y + cellBox.height - 4;
+  expect(badgeBox.y + badgeBox.height).toBeLessThan(clickY);
+  const hitTestId = await page.evaluate(
+    ([x, y]) => document.elementFromPoint(x, y)?.getAttribute('data-testid') ?? null,
+    [clickX, clickY],
+  );
+  expect(hitTestId).toBe(`calendar-day-${targetDay}`);
+
+  await page.mouse.click(clickX, clickY);
+
+  await expect(panel).toContainText(`${monthPrefix}.${String(targetDay).padStart(2, '0')}`);
+  await expect(badge).toHaveAttribute('aria-pressed', 'true');
 });
 
 test('admin can filter orders by visit date with the custom date picker', async ({ page, request }) => {

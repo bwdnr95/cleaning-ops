@@ -234,14 +234,17 @@ export function CalendarPage({ onOpenOrder, onCreateOrder }) {
                       const isToday = isCurrentRealMonth && cell.day === today.getDate();
                       const isSelected = cell.day === selectedDayNumber;
                       return (
+                        // 셀 전체(빈 여백 포함)는 마우스 보조 타깃이고, 접근성 기본 타깃은 아래 날짜 배지 버튼이다.
+                        // 비선택 배경은 CSS(.calendar-day-cell)에 두어 hover 힌트가 보이게 하고, 선택 배경만 인라인으로 덮는다.
                         <div
                           key={index}
                           className="calendar-day-cell"
                           data-testid={`calendar-day-${cell.day}`}
+                          onClick={() => selectDay(cell.day)}
                           style={{
                             minHeight: 0,
                             padding: 6,
-                            background: isSelected ? 'var(--brand-bg)' : 'var(--surface)',
+                            background: isSelected ? 'var(--brand-bg)' : undefined,
                             borderRight: index % 7 < 6 ? '1px solid var(--divider)' : 'none',
                             borderBottom: '1px solid var(--divider)',
                             boxShadow: isSelected ? 'inset 0 0 0 1px var(--brand)' : 'none',
@@ -249,6 +252,7 @@ export function CalendarPage({ onOpenOrder, onCreateOrder }) {
                             flexDirection: 'column',
                             gap: 2,
                             overflow: 'hidden',
+                            cursor: 'pointer',
                           }}
                         >
                           <button
@@ -257,7 +261,11 @@ export function CalendarPage({ onOpenOrder, onCreateOrder }) {
                             data-testid={`calendar-day-select-${cell.day}`}
                             aria-label={`${year}-${String(month).padStart(2, '0')}-${String(cell.day).padStart(2, '0')} 일정 보기`}
                             aria-pressed={isSelected}
-                            onClick={() => selectDay(cell.day)}
+                            onClick={(event) => {
+                              // 셀 onClick과 이중 호출 방지(결과는 같지만 명시적으로 차단)
+                              event.stopPropagation();
+                              selectDay(cell.day);
+                            }}
                             style={{
                               display: 'flex',
                               width: '100%',

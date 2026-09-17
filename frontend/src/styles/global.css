@@ -700,6 +700,15 @@ body.orders-column-resizing {
   outline-offset: -3px;
 }
 
+/* 날짜 셀 전체가 클릭 타깃 — 비선택 기본 배경은 여기, 선택 배경(--brand-bg)은 인라인 style이 덮는다. */
+.calendar-day-cell {
+  background: var(--surface);
+}
+
+.calendar-day-cell:hover {
+  background: var(--bg-subtle);
+}
+
 .multi-date-picker__selection {
   margin-top: var(--space-2);
   color: var(--text-tertiary);
