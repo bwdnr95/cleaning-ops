@@ -401,6 +401,18 @@ class OrderPageService:
             if candidate and keyword in str(candidate).lower():
                 return True
 
+        # 운영자가 남긴 자유텍스트(상품상세·요청사항·결제메모·증빙메모)도 검색한다.
+        # 여러 줄 입력은 공백을 하나로 접어 줄바꿈을 넘는 문구도 찾을 수 있게 한다.
+        normalized_keyword = " ".join(keyword.split())
+        for text in (
+            order.service_detail,
+            order.special_request,
+            order.payment_memo,
+            order.evidence_memo,
+        ):
+            if text and normalized_keyword in " ".join(text.split()).lower():
+                return True
+
         keyword_digits = digits_only(keyword)
         if keyword_digits and keyword_digits in digits_only(format_phone(customer_phone)):
             return True

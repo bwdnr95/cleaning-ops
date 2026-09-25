@@ -470,6 +470,47 @@ def test_search_matches_address_detail() -> None:
     assert "ord-detail-addr" in ids
 
 
+def test_search_matches_detail_request_and_memos() -> None:
+    """검색이 상품상세·요청사항·결제메모·증빙메모 텍스트도 매칭한다(대소문자·줄바꿈 무시)."""
+    memo_fields = {
+        "ord-memo-detail": {"service_detail": "베란다 곰팡이 제거 포함"},
+        "ord-memo-request": {"special_request": "반려견 있음\n초인종 누르지 말 것"},
+        "ord-memo-payment": {"payment_memo": "10/3 계좌이체 확인 ABC"},
+        "ord-memo-evidence": {"evidence_memo": "세금계산서 발행 완료 사업자 123-45"},
+    }
+
+    def seed(db: Session) -> None:
+        for order_id in memo_fields:
+            _add_order(
+                db,
+                order_id=order_id,
+                status=OrderStatus.SCHEDULED.value,
+                scheduled_date=business_today(),
+                received_date=business_today(),
+                customer_name="메모검색검증고객",
+            )
+        db.flush()
+        for order_id, fields in memo_fields.items():
+            order = db.get(Order, order_id)
+            for field, value in fields.items():
+                setattr(order, field, value)
+
+    client = make_test_client(seed)
+    headers = _auth(client)
+
+    def search(q: str) -> set[str]:
+        body = _get_page(client, headers, visit_preset="all", q=q, page=1, page_size=50)
+        return {item["id"] for item in body["items"]}
+
+    assert search("곰팡이") == {"ord-memo-detail"}
+    # 여러 줄 요청사항은 줄바꿈을 공백처럼 취급해 이어서 검색된다.
+    assert search("있음 초인종") == {"ord-memo-request"}
+    assert search("계좌이체 확인 abc") == {"ord-memo-payment"}
+    assert search("세금계산서 발행") == {"ord-memo-evidence"}
+    # 기존 검색(고객명)은 그대로 동작한다.
+    assert search("메모검색검증고객") == set(memo_fields)
+
+
 def test_search_by_phone_digits() -> None:
     client = _make_client()
     headers = _auth(client)

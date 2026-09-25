@@ -915,7 +915,7 @@ export function OrdersPage({
           <input
             value={query}
             onChange={(event) => setQuery(event.target.value)}
-            placeholder="고객/주소/연락처 검색"
+            placeholder="고객/주소/연락처/메모 검색"
             aria-label="주문 검색"
             className="orders-search__input"
             style={{
